@@ -1,0 +1,7 @@
+{"type":"hello","version":1,"pid":4242}
+{"type":"permissions","accessibility":true,"microphone":"granted"}
+{"type":"permissions","accessibility":false,"microphone":"undetermined"}
+{"type":"focus","app_bundle_id":"com.apple.TextEdit","app_name":"TextEdit","secure":false,"editable":true}
+{"type":"text_state","app_bundle_id":"com.apple.Notes","secure":false,"before_caret":"Hello wor","selection_len":0,"caret":{"x":120.5,"y":340.25,"width":1.5,"height":18.0}}
+{"type":"text_state","app_bundle_id":"com.apple.Safari","secure":true,"before_caret":"","selection_len":0,"caret":null}
+{"type":"error","message":"focused element has no text"}

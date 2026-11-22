@@ -1,0 +1,481 @@
+//! Wire protocol between the Rust core and the Swift helper (`bob-native`).
+//!
+//! Transport framing is newline-delimited JSON (one object per line, UTF-8). Every object has a
+//! `type` field. Unknown `type` values decode to the `Unknown` variant so a newer peer can never
+//! crash an older one (requirement NB-3). Byte chunking never affects decoding (NB-4).
+//!
+//! The Swift mirror lives in `native/bob-native/Sources/BobNativeCore/Protocol.swift`; both sides are
+//! tested against the shared fixtures in `native/bob-native/Tests/Fixtures/`.
+//!
+//! PRIVACY: events can carry text typed by the user (`TextState::before_caret`). They must never be
+//! logged (NB-8). `Debug` for those payloads is redacted below.
+
+use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// Bumped on every incompatible schema change. Both sides refuse to talk on a mismatch (NB-2).
+pub const PROTOCOL_VERSION: u32 = 1;
+
+/// Longest accepted line in bytes. Longer lines are dropped, not buffered without bound.
+pub const MAX_LINE_BYTES: usize = 1 << 20;
+
+/// A rectangle in screen points, **top-left origin** (Accessibility coordinates).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Microphone permission as reported by macOS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MicStatus {
+    Granted,
+    Denied,
+    Undetermined,
+}
+
+/// Messages sent by the Swift helper to the core.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NativeEvent {
+    Hello {
+        version: u32,
+        pid: u32,
+    },
+    Permissions {
+        accessibility: bool,
+        microphone: MicStatus,
+    },
+    Focus {
+        app_bundle_id: String,
+        app_name: String,
+        secure: bool,
+        editable: bool,
+    },
+    TextState {
+        app_bundle_id: String,
+        secure: bool,
+        before_caret: String,
+        selection_len: u32,
+        caret: Option<Rect>,
+    },
+    Error {
+        message: String,
+    },
+    /// Any `type` this build does not know.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Messages sent by the core to the Swift helper.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CoreCommand {
+    HelloAck {
+        version: u32,
+    },
+    Reject {
+        reason: String,
+    },
+    ShowChip {
+        text: String,
+        anchor: Rect,
+    },
+    HideChip,
+    RequestPermissions,
+    Quit,
+    /// Any `type` this build does not know.
+    #[serde(other)]
+    Unknown,
+}
+
+// Manual Debug so typed text can never leak through `{:?}` logging.
+impl fmt::Debug for NativeEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NativeEvent::Hello { version, pid } => f
+                .debug_struct("Hello")
+                .field("version", version)
+                .field("pid", pid)
+                .finish(),
+            NativeEvent::Permissions {
+                accessibility,
+                microphone,
+            } => f
+                .debug_struct("Permissions")
+                .field("accessibility", accessibility)
+                .field("microphone", microphone)
+                .finish(),
+            NativeEvent::Focus {
+                app_bundle_id,
+                secure,
+                editable,
+                ..
+            } => f
+                .debug_struct("Focus")
+                .field("app_bundle_id", app_bundle_id)
+                .field("secure", secure)
+                .field("editable", editable)
+                .finish(),
+            NativeEvent::TextState {
+                app_bundle_id,
+                secure,
+                before_caret,
+                selection_len,
+                caret,
+            } => f
+                .debug_struct("TextState")
+                .field("app_bundle_id", app_bundle_id)
+                .field("secure", secure)
+                .field("before_caret_chars", &before_caret.chars().count())
+                .field("selection_len", selection_len)
+                .field("has_caret", &caret.is_some())
+                .finish(),
+            NativeEvent::Error { .. } => f.debug_struct("Error").finish_non_exhaustive(),
+            NativeEvent::Unknown => f.write_str("Unknown"),
+        }
+    }
+}
+
+/// One decoded frame from the byte stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Frame {
+    /// A complete, non-empty line (without the trailing newline).
+    Line(String),
+    /// A line exceeded [`MAX_LINE_BYTES`] and was discarded up to the next newline.
+    TooLong,
+    /// A line was not valid UTF-8 and was discarded.
+    InvalidUtf8,
+}
+
+/// Incremental newline-delimited frame decoder. Feed it arbitrary byte chunks.
+#[derive(Debug, Default)]
+pub struct LineDecoder {
+    buf: Vec<u8>,
+    discarding: bool,
+}
+
+impl LineDecoder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Consume `chunk` and return every frame completed by it, in order.
+    pub fn push(&mut self, chunk: &[u8]) -> Vec<Frame> {
+        let mut out = Vec::new();
+        for &b in chunk {
+            if b == b'\n' {
+                if self.discarding {
+                    self.discarding = false;
+                    self.buf.clear();
+                } else if !self.buf.is_empty() {
+                    let bytes = std::mem::take(&mut self.buf);
+                    match String::from_utf8(bytes) {
+                        Ok(s) => {
+                            let s = s.trim_end_matches('\r').to_string();
+                            if !s.is_empty() {
+                                out.push(Frame::Line(s));
+                            }
+                        }
+                        Err(_) => out.push(Frame::InvalidUtf8),
+                    }
+                }
+            } else if !self.discarding {
+                self.buf.push(b);
+                if self.buf.len() > MAX_LINE_BYTES {
+                    self.buf.clear();
+                    self.discarding = true;
+                    out.push(Frame::TooLong);
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Encode a message as one JSON line, including the trailing newline.
+pub fn encode_line<T: Serialize>(msg: &T) -> String {
+    // Serializing these plain data types cannot fail.
+    let mut s = serde_json::to_string(msg).expect("protocol messages are always serializable");
+    s.push('\n');
+    s
+}
+
+/// Decode a helper event from one line.
+pub fn parse_event(line: &str) -> Result<NativeEvent, serde_json::Error> {
+    serde_json::from_str(line)
+}
+
+/// Decode a core command from one line.
+pub fn parse_command(line: &str) -> Result<CoreCommand, serde_json::Error> {
+    serde_json::from_str(line)
+}
+
+/// Check a helper's announced protocol version. `Err` carries the reason sent in `Reject`.
+pub fn check_version(helper_version: u32) -> Result<(), String> {
+    if helper_version == PROTOCOL_VERSION {
+        Ok(())
+    } else {
+        Err(format!(
+            "protocol version mismatch: core {PROTOCOL_VERSION}, helper {helper_version}"
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    const EVENT_FIXTURES: &str =
+        include_str!("../../native/bob-native/Tests/Fixtures/native_events.jsonl");
+    const COMMAND_FIXTURES: &str =
+        include_str!("../../native/bob-native/Tests/Fixtures/core_commands.jsonl");
+
+    fn fixture_lines(s: &str) -> Vec<&str> {
+        s.lines().filter(|l| !l.trim().is_empty()).collect()
+    }
+
+    // ---- shared fixtures (the Swift tests read the same files) ----
+
+    #[test]
+    fn every_event_fixture_decodes_and_reencodes_to_the_same_json() {
+        let lines = fixture_lines(EVENT_FIXTURES);
+        assert!(lines.len() >= 6);
+        for line in lines {
+            let ev = parse_event(line).unwrap_or_else(|e| panic!("{line}: {e}"));
+            assert_ne!(
+                ev,
+                NativeEvent::Unknown,
+                "fixture decoded as Unknown: {line}"
+            );
+            let back: serde_json::Value =
+                serde_json::from_str(encode_line(&ev).trim_end()).unwrap();
+            let orig: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(back, orig, "round trip changed {line}");
+        }
+    }
+
+    #[test]
+    fn every_command_fixture_decodes_and_reencodes_to_the_same_json() {
+        for line in fixture_lines(COMMAND_FIXTURES) {
+            let cmd = parse_command(line).unwrap_or_else(|e| panic!("{line}: {e}"));
+            assert_ne!(
+                cmd,
+                CoreCommand::Unknown,
+                "fixture decoded as Unknown: {line}"
+            );
+            let back: serde_json::Value =
+                serde_json::from_str(encode_line(&cmd).trim_end()).unwrap();
+            let orig: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(back, orig, "round trip changed {line}");
+        }
+    }
+
+    // ---- unit tests ----
+
+    #[test]
+    fn unknown_type_is_tolerated_not_fatal() {
+        assert_eq!(
+            parse_event(r#"{"type":"from_the_future","x":1}"#).unwrap(),
+            NativeEvent::Unknown
+        );
+        assert_eq!(
+            parse_command(r#"{"type":"from_the_future"}"#).unwrap(),
+            CoreCommand::Unknown
+        );
+    }
+
+    #[test]
+    fn missing_type_is_an_error_not_a_panic() {
+        assert!(parse_event(r#"{"version":1}"#).is_err());
+        assert!(parse_event("not json").is_err());
+    }
+
+    #[test]
+    fn debug_output_never_contains_typed_text() {
+        let ev = NativeEvent::TextState {
+            app_bundle_id: "com.example".into(),
+            secure: false,
+            before_caret: "my secret sentence".into(),
+            selection_len: 0,
+            caret: None,
+        };
+        let shown = format!("{ev:?}");
+        assert!(!shown.contains("secret"), "{shown}");
+        assert!(shown.contains("before_caret_chars"));
+        let err = format!(
+            "{:?}",
+            NativeEvent::Error {
+                message: "private path".into()
+            }
+        );
+        assert!(!err.contains("private"));
+    }
+
+    #[test]
+    fn decoder_handles_split_and_joined_chunks() {
+        let mut d = LineDecoder::new();
+        assert!(d.push(b"{\"type\":\"qu").is_empty());
+        assert_eq!(
+            d.push(b"it\"}\n{\"type\":\"hide_chip\"}\n"),
+            vec![
+                Frame::Line("{\"type\":\"quit\"}".into()),
+                Frame::Line("{\"type\":\"hide_chip\"}".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn decoder_skips_blank_lines_and_trims_crlf() {
+        let mut d = LineDecoder::new();
+        assert_eq!(d.push(b"\n\r\nabc\r\n"), vec![Frame::Line("abc".into())]);
+    }
+
+    #[test]
+    fn decoder_drops_oversized_lines_and_recovers() {
+        let mut d = LineDecoder::new();
+        let big = vec![b'a'; MAX_LINE_BYTES + 10];
+        let mut frames = d.push(&big);
+        frames.extend(d.push(b"tail-of-big-line\nok\n"));
+        assert_eq!(frames, vec![Frame::TooLong, Frame::Line("ok".into())]);
+    }
+
+    #[test]
+    fn decoder_reports_invalid_utf8_and_continues() {
+        let mut d = LineDecoder::new();
+        let frames = d.push(&[0xff, 0xfe, b'\n', b'o', b'k', b'\n']);
+        assert_eq!(frames, vec![Frame::InvalidUtf8, Frame::Line("ok".into())]);
+    }
+
+    #[test]
+    fn version_check_accepts_only_the_current_version() {
+        assert!(check_version(PROTOCOL_VERSION).is_ok());
+        let reason = check_version(PROTOCOL_VERSION + 1).unwrap_err();
+        assert!(reason.contains("mismatch"));
+    }
+
+    // ---- property tests (requirements NB-3, NB-4) ----
+
+    fn arb_rect() -> impl Strategy<Value = Rect> {
+        (-1e6f64..1e6, -1e6f64..1e6, 0f64..1e4, 0f64..1e4).prop_map(|(x, y, width, height)| Rect {
+            x,
+            y,
+            width,
+            height,
+        })
+    }
+
+    fn arb_event() -> impl Strategy<Value = NativeEvent> {
+        prop_oneof![
+            (any::<u32>(), any::<u32>())
+                .prop_map(|(version, pid)| NativeEvent::Hello { version, pid }),
+            (
+                any::<bool>(),
+                prop_oneof![
+                    Just(MicStatus::Granted),
+                    Just(MicStatus::Denied),
+                    Just(MicStatus::Undetermined)
+                ]
+            )
+                .prop_map(|(accessibility, microphone)| NativeEvent::Permissions {
+                    accessibility,
+                    microphone
+                }),
+            (".{0,30}", ".{0,30}", any::<bool>(), any::<bool>()).prop_map(
+                |(app_bundle_id, app_name, secure, editable)| NativeEvent::Focus {
+                    app_bundle_id,
+                    app_name,
+                    secure,
+                    editable
+                }
+            ),
+            (
+                ".{0,30}",
+                any::<bool>(),
+                "(?s).{0,200}",
+                any::<u32>(),
+                proptest::option::of(arb_rect())
+            )
+                .prop_map(
+                    |(app_bundle_id, secure, before_caret, selection_len, caret)| {
+                        NativeEvent::TextState {
+                            app_bundle_id,
+                            secure,
+                            before_caret,
+                            selection_len,
+                            caret,
+                        }
+                    }
+                ),
+            "(?s).{0,60}".prop_map(|message| NativeEvent::Error { message }),
+        ]
+    }
+
+    /// Split `bytes` at the given fractional cut points (sorted, deduped).
+    fn split_at_fractions(bytes: &[u8], cuts: &[f64]) -> Vec<Vec<u8>> {
+        let mut idx: Vec<usize> = cuts
+            .iter()
+            .map(|c| ((bytes.len() as f64) * c) as usize)
+            .collect();
+        idx.push(0);
+        idx.push(bytes.len());
+        idx.sort_unstable();
+        idx.dedup();
+        idx.windows(2).map(|w| bytes[w[0]..w[1]].to_vec()).collect()
+    }
+
+    proptest! {
+        /// NB-4 / P1: for any messages and any chunking, decoded events equal the originals.
+        #[test]
+        fn decoding_is_independent_of_chunking(
+            events in proptest::collection::vec(arb_event(), 0..8),
+            cuts in proptest::collection::vec(0f64..1.0, 0..12),
+        ) {
+            let stream: String = events.iter().map(encode_line).collect();
+            let mut decoder = LineDecoder::new();
+            let mut decoded = Vec::new();
+            for chunk in split_at_fractions(stream.as_bytes(), &cuts) {
+                for frame in decoder.push(&chunk) {
+                    match frame {
+                        Frame::Line(l) => decoded.push(parse_event(&l).unwrap()),
+                        other => prop_assert!(false, "unexpected frame {:?}", other),
+                    }
+                }
+            }
+            prop_assert_eq!(decoded, events);
+        }
+
+        /// NB-3 / P2: arbitrary bytes never panic the decoder or the parsers.
+        #[test]
+        fn arbitrary_bytes_never_panic(bytes in proptest::collection::vec(any::<u8>(), 0..2048)) {
+            let mut decoder = LineDecoder::new();
+            for frame in decoder.push(&bytes) {
+                if let Frame::Line(l) = frame {
+                    let _ = parse_event(&l);
+                    let _ = parse_command(&l);
+                }
+            }
+        }
+
+        /// NB-3: any object with an unrecognized `type` decodes to Unknown.
+        #[test]
+        fn unknown_types_decode_to_unknown(t in "[a-z_]{1,20}") {
+            let known = ["hello","permissions","focus","text_state","error",
+                         "hello_ack","reject","show_chip","hide_chip","request_permissions","quit"];
+            prop_assume!(!known.contains(&t.as_str()));
+            let line = format!(r#"{{"type":"{t}","payload":[1,2,3]}}"#);
+            prop_assert_eq!(parse_event(&line).unwrap(), NativeEvent::Unknown);
+            prop_assert_eq!(parse_command(&line).unwrap(), CoreCommand::Unknown);
+        }
+
+        /// NB-2 / P3: only the exact current version passes the handshake.
+        #[test]
+        fn only_current_version_is_accepted(v in any::<u32>()) {
+            prop_assert_eq!(check_version(v).is_ok(), v == PROTOCOL_VERSION);
+        }
+    }
+}

@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5556499e77e2dfd390b88cdd6dad1108654e8c38bf1a06adf93bd8cabae5dd6b # shrinks to events = [TextState { app_bundle_id: "", secure: false, before_caret_chars: 0, selection_len: 0, has_caret: true }], cuts = []
