@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { GhostMark } from "./components/GhostMark";
+import { PermissionsCard } from "./components/PermissionsCard";
 import { BROWSER_APP_INFO, getAppInfo, type AppInfo } from "./lib/appInfo";
 
 /** The three capabilities, in priority order (see .kiro/steering/product.md). */
@@ -46,6 +47,8 @@ export default function App() {
           </article>
         ))}
       </section>
+
+      <PermissionsCard />
 
       <footer className="mt-10 text-xs" style={{ color: "var(--text-muted)" }}>
         v{info.version} · {info.platform}/{info.arch}
