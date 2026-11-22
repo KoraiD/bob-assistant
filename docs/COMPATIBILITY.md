@@ -35,10 +35,10 @@ make chip-demo     # show a ghost chip at the caret in whatever app you type in 
 
 | App | Caret rect | Text read | AX notifications | Secure field quiet | Tab capture | Insert (Unicode keys) | Notes |
 |---|---|---|---|---|---|---|---|
-| iTerm2 (not a target app) | yes, `range_at_caret` | yes (whole buffer, capped to 2000 chars) | focus, value, selection | n/a | - | - | zero-length range returns a 34 pt line box on an empty prompt, so the chip started oversized and shrank once text was typed. Fixed by preferring the previous glyph box (2026-11-22); re-test |
+| iTerm2 (not a target app) | yes, `range_at_caret` | yes (whole buffer, capped to 2000 chars) | focus, value, selection | n/a | - | - | zero-length range returns a 34 pt line box on an empty prompt, so the chip started oversized and shrank once text was typed. Glyph box now used when a character precedes the caret; on an empty terminal line there is none, so the line box is still used (terminals are not a Ghost Text target) |
 | Kiro (Electron, chat input) | **yes, `text_marker`** (none with `AXBoundsForRange`) | yes | value, selection | n/a | - | - | chip sits at the caret at the right size (owner screenshot, 2026-11-22) |
-| VS Code (Electron) | **yes, `text_marker`** | yes | focus, value, selection | n/a | - | - | `frame_found: false`: no AXPosition/AXSize on the element, so the rect is used without frame validation. Placement to confirm |
-| Slack (Electron) | **yes, `text_marker`** | yes | focus, value, selection | n/a | - | - | empty field: collapsed range returns a wide box (x 1214 used as the right edge was wrong; one typed char gave x 556). Fixed: left edge for collapsed ranges, glyph box when a character exists (2026-11-22); re-test |
+| VS Code (Electron) | **yes, `text_marker`** | yes | focus, value, selection | n/a | - | - | chip at the caret, correct size (owner screenshot, editor line 11). `frame_found: false`, so the rect is used without frame validation |
+| Slack (Electron) | **yes, `text_marker`** | yes | focus, value, selection | n/a | - | - | empty field: collapsed range returns a wide box (x 1214 used as the right edge was wrong; one typed char gave x 556). Fixed: left edge for collapsed ranges, glyph box when a character exists; owner confirmed placement (2026-11-22) |
 | TextEdit | - | - | - | n/a | - | - | |
 | Notes | - | - | - | n/a | - | - | |
 | Mail (compose) | - | - | - | n/a | - | - | |
@@ -46,6 +46,11 @@ make chip-demo     # show a ghost chip at the caret in whatever app you type in 
 | Chrome (textarea) | - | - | - | - | - | - | |
 | VS Code | - | - | - | n/a | - | - | |
 | Slack | - | - | - | n/a | - | - | |
+
+## Capturing screenshots and video of the chip
+Taking a screenshot activates the system capture UI, which BOB used to treat as an app switch (the chip vanished). The helper
+now ignores `com.apple.screencaptureui` and `com.apple.screenshot.launcher` activations (`TransientApps`). Re-test with
+Cmd+Shift+4. A delayed capture also works: `screencapture -T 5 ~/Desktop/chip.png`, then click into the app within 5 s.
 
 ## Open spike questions
 1. **TCC attribution of the nested helper.** Run `make probe` from Terminal (grant goes to Terminal). Then run the packaged

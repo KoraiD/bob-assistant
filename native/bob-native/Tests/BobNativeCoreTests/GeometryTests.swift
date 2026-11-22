@@ -260,3 +260,18 @@ struct OrientationMemoryTests {
         #expect(m.resolve(.rejected, app: "x", source: "y") == nil)
     }
 }
+
+@Suite("TransientApps")
+struct TransientAppsTests {
+    @Test func screenshotToolsDoNotCountAsAppSwitches() {
+        #expect(TransientApps.ignores("com.apple.screencaptureui"))
+        #expect(TransientApps.ignores("com.apple.screenshot.launcher"))
+    }
+
+    @Test func realAppsStillCount() {
+        for id in ["com.apple.Notes", "com.tinyspeck.slackmacgap", "com.apple.QuickTimePlayerX", "", "com.apple.screencaptureuiX"] {
+            #expect(!TransientApps.ignores(id))
+        }
+        #expect(!TransientApps.ignores(nil))
+    }
+}

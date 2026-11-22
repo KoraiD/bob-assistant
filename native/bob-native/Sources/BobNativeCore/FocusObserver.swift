@@ -1,6 +1,21 @@
 import AppKit
 import ApplicationServices
 
+/// System overlays that briefly become frontmost without being a real app switch. Activating them must
+/// not hide the chip or move observation away from the app the user is typing in (otherwise taking a
+/// screenshot, or recording the demo video, makes the suggestion disappear).
+public enum TransientApps {
+    public static let bundleIds: Set<String> = [
+        "com.apple.screencaptureui",      // Cmd+Shift+4 / Cmd+Shift+5 capture UI
+        "com.apple.screenshot.launcher",  // Screenshot.app
+    ]
+
+    public static func ignores(_ bundleId: String?) -> Bool {
+        guard let bundleId else { return false }
+        return bundleIds.contains(bundleId)
+    }
+}
+
 /// Observes the frontmost app's focused text element with `AXObserver` (no polling, requirement NB-7).
 /// Must be created and used on the main thread; callbacks arrive on the main run loop.
 public final class FocusObserver {
@@ -26,7 +41,8 @@ public final class FocusObserver {
         workspaceToken = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] note in
-            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  !TransientApps.ignores(app.bundleIdentifier) else { return }
             self?.attach(pid: app.processIdentifier, reason: .appActivated)
         }
         if let front = NSWorkspace.shared.frontmostApplication {
