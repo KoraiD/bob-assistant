@@ -113,13 +113,17 @@ public final class HelperRuntime {
             selectionLen: snap.selectionLen ?? 0, caret: snap.caret))
     }
 
+    /// Explain which app needs the permission, open the right Settings pane and exit.
+    private func failUntrusted() -> Never {
+        print(Permissions.accessibilityHelp(termProgram: ProcessInfo.processInfo.environment["TERM_PROGRAM"]))
+        NSWorkspace.shared.open(Permissions.settingsURL(for: .accessibility))
+        exit(1)
+    }
+
     // MARK: chip demo
 
     private func startChipDemo() {
-        guard Permissions.accessibilityTrusted(prompt: true) else {
-            print("Accessibility permission is required. Grant it to the app running this command, then run again.")
-            exit(1)
-        }
+        guard Permissions.accessibilityTrusted(prompt: true) else { failUntrusted() }
         print("chip demo: click into a text field in any app and type. Press Ctrl+C to stop.")
         observer.onSnapshot = { [weak self] snap, _ in
             guard let self else { return }
@@ -138,10 +142,7 @@ public final class HelperRuntime {
     private func startProbe(seconds: Double) {
         let trusted = Permissions.accessibilityTrusted(prompt: true)
         print(#"{"probe":"start","accessibility_trusted":\#(trusted),"seconds":\#(seconds)}"#)
-        guard trusted else {
-            print("Accessibility is not granted to the app running this command. Grant it in System Settings, then run again.")
-            exit(1)
-        }
+        guard trusted else { failUntrusted() }
         print("Click into a text field in the app to test, then type for \(Int(seconds)) seconds. No typed text is printed.")
         let started = Date()
         var lastPrint = Date.distantPast

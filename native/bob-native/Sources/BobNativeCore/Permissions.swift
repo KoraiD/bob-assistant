@@ -43,4 +43,33 @@ public enum Permissions {
     }
 
     public enum Pane { case accessibility, microphone }
+
+    /// Friendly name of the app hosting this terminal, from `$TERM_PROGRAM`. macOS attributes a
+    /// command-line tool's Accessibility trust to that host app, not to the tool itself.
+    public static func hostAppName(termProgram: String?) -> String {
+        switch termProgram {
+        case "iTerm.app": return "iTerm"
+        case "Apple_Terminal": return "Terminal"
+        case "kiro": return "Kiro"
+        case "vscode": return "Visual Studio Code (or Kiro)"
+        case "WarpTerminal": return "Warp"
+        case "ghostty": return "Ghostty"
+        case "WezTerm": return "WezTerm"
+        case "Alacritty": return "Alacritty"
+        case "Hyper": return "Hyper"
+        default: return "the app that hosts this terminal"
+        }
+    }
+
+    /// Step-by-step help printed when a standalone mode (`--probe`, `--chip-demo`) is not trusted.
+    public static func accessibilityHelp(termProgram: String?) -> String {
+        let app = hostAppName(termProgram: termProgram)
+        return """
+        Accessibility is not granted to \(app).
+        macOS gives command-line tools the permission of the app that runs them, so grant it to \(app), not to bob-native:
+          1. System Settings > Privacy & Security > Accessibility (opening it now)
+          2. Click "+", pick \(app) from /Applications, and switch it ON (if it is already listed, remove it with "-" and add it again)
+          3. Quit \(app) completely (Cmd+Q) and open it again, then re-run the command
+        """
+    }
 }

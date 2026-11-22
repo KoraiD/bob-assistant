@@ -105,3 +105,20 @@ struct TextWindowTests {
         }
     }
 }
+
+@Suite("Permissions help text")
+struct PermissionsHelpTests {
+    @Test func namesTheHostAppForCommonTerminals() {
+        #expect(Permissions.hostAppName(termProgram: "iTerm.app") == "iTerm")
+        #expect(Permissions.hostAppName(termProgram: "Apple_Terminal") == "Terminal")
+        #expect(Permissions.hostAppName(termProgram: "kiro") == "Kiro")
+        #expect(Permissions.hostAppName(termProgram: nil).contains("hosts this terminal"))
+    }
+
+    @Test func helpTellsTheUserToGrantTheHostNotTheTool() {
+        let text = Permissions.accessibilityHelp(termProgram: "iTerm.app")
+        #expect(text.contains("iTerm"))
+        #expect(text.contains("not to bob-native"))
+        #expect(text.contains("Quit iTerm completely"))
+    }
+}
