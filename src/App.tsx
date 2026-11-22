@@ -10,6 +10,12 @@ export const CAPABILITIES = [
   { id: "dictation", title: "Voice Dictation", blurb: "Hold a key, speak, release. Clean text appears at the caret.", status: "Coming soon" },
 ] as const;
 
+/** Footer text: "BOB 0.1.0 · macos aarch64", or a plain preview label outside the app. */
+export function formatBuild(info: AppInfo): string {
+  if (info.platform === "browser") return "Browser preview";
+  return `BOB ${info.version} · ${info.platform} ${info.arch}`;
+}
+
 export default function App() {
   const [info, setInfo] = useState<AppInfo>(BROWSER_APP_INFO);
 
@@ -51,7 +57,7 @@ export default function App() {
       <PermissionsCard />
 
       <footer className="mt-10 text-xs" style={{ color: "var(--text-muted)" }}>
-        v{info.version} · {info.platform}/{info.arch}
+        {formatBuild(info)}
       </footer>
     </main>
   );

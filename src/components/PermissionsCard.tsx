@@ -69,6 +69,7 @@ export function PermissionsCard() {
   };
 
   const allGood = accessibilityState(status) === "ok" && microphoneState(status) === "ok";
+  const offline = !status.connected;
 
   return (
     <section aria-label="Permissions" className="soft-card panel-in mt-6 p-5">
@@ -80,7 +81,12 @@ export function PermissionsCard() {
         <Row name="Accessibility" why="Read the caret position and insert text in other apps." state={accessibilityState(status)} />
         <Row name="Microphone" why="Voice dictation." state={microphoneState(status)} />
       </ul>
-      {!allGood && (
+      {offline && (
+        <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }} data-testid="helper-offline">
+          BOB's helper is not running yet. Open BOB from the menu bar app to check permissions.
+        </p>
+      )}
+      {!offline && !allGood && (
         <button
           type="button"
           onClick={ask}

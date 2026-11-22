@@ -78,9 +78,16 @@ describe("PermissionsCard", () => {
     expect(invoke).toHaveBeenCalledWith("request_permissions");
   });
 
-  it("shows a readable error when the helper is not running", async () => {
+  it("explains the offline helper instead of offering a button that cannot work", async () => {
+    invoke.mockResolvedValue(DISCONNECTED);
+    render(<PermissionsCard />);
+    expect(await screen.findByTestId("helper-offline")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /grant permissions/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a readable error when the request fails", async () => {
     invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "native_status") return DISCONNECTED;
+      if (cmd === "native_status") return { connected: true, accessibility: false, microphone: "denied" };
       throw new Error("native helper is not connected");
     });
     render(<PermissionsCard />);
