@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Swift: build on save",
+      "trigger": "PostFileSave",
+      "description": "Catches Swift compile errors immediately after a native-helper file changes.",
+      "matcher": "\\.swift$",
+      "action": {
+        "type": "command",
+        "command": "cd native/bob-native && swift build 2>&1 | tail -25",
+        "timeout": 240
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "End of turn: Kiroween rule check",
+      "trigger": "Stop",
+      "description": "Fast guard at the end of every agent turn. A benchmark smoke test is added here in Task 5.",
+      "action": {
+        "type": "command",
+        "command": "bash scripts/check-kiro.sh",
+        "timeout": 60
+      }
+    }
+  ]
+}

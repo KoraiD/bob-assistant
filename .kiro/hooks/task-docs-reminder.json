@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "After a task: sync docs, specs and journal",
+      "trigger": "PostTaskExec",
+      "description": "Keeps docs, specs and the Kiro write-up journal in sync with code as each spec task finishes.",
+      "action": {
+        "type": "agent",
+        "prompt": "A spec task just completed. Before moving on: (1) make sure the matching checkbox in the spec's tasks.md is updated; (2) update docs/ARCHITECTURE.md, docs/PRIVACY.md, docs/PERFORMANCE.md or docs/COMPATIBILITY.md if behavior changed; (3) add a short entry to docs/kiro-journal.md (what worked, what did not, IDE vs CLI notes); (4) confirm tests were added or updated (unit, property-based where pure logic exists) and that docs/SUBMISSION.md still reflects the Kiroween rules."
+      }
+    }
+  ]
+}

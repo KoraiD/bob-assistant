@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Rust: format on save",
+      "trigger": "PostFileSave",
+      "description": "Keeps Rust sources formatted so diffs stay small and CI fmt checks pass.",
+      "matcher": "\\.rs$",
+      "action": {
+        "type": "command",
+        "command": "cargo fmt --manifest-path src-tauri/Cargo.toml",
+        "timeout": 60
+      }
+    }
+  ]
+}

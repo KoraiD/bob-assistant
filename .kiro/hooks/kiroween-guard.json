@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Kiroween guard: .kiro must never be ignored",
+      "trigger": "PostFileSave",
+      "description": "Re-checks the Kiroween submission rules (.kiro committed, never gitignored, MIT license, no secrets) when relevant files change.",
+      "matcher": "(\\.gitignore$|^\\.kiro/|/\\.kiro/|LICENSE$)",
+      "action": {
+        "type": "command",
+        "command": "bash scripts/check-kiro.sh",
+        "timeout": 60
+      }
+    }
+  ]
+}
