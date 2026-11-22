@@ -29,8 +29,8 @@ supervision), the Accessibility caret observer and the permissions UI. Ghost Tex
 ## Quickstart (from source)
 
 ```bash
-git clone <this repo>
-cd <repo>
+git clone https://github.com/KoraiD/bob-assistant.git
+cd bob-assistant
 make setup        # installs JS dependencies
 make dev          # runs the app (Tauri + Vite)
 make test         # Rust, Swift and UI tests

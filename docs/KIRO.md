@@ -33,8 +33,8 @@ measure, research, change one thing, re-measure).
 
 ## MCP
 Planned: `fetch` server for documentation lookups during the build, and a custom `bob-bench` server exposing
-benchmark results to Kiro (stretch). The workspace file `.kiro/settings/mcp.json` must be created by the owner
-(writes to that folder are blocked for the agent). Suggested content:
+benchmark results to Kiro (stretch). The workspace file `.kiro/settings/mcp.json` was created by the owner because the
+agent's permission rules block writes to that folder (a deliberate safeguard). Content:
 
 ```json
 {

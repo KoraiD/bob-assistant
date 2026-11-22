@@ -28,9 +28,10 @@ Rule section numbers below refer to the Official Rules. Re-read the Rules tab be
 ## Required deliverables
 - [ ] Public GitHub repo (GitHub only) with visible license in About
   - [x] MIT `LICENSE` at the root
-  - [ ] Repo created under the owner's personal GitHub account, pushed, public
+  - [x] Repo created under the owner's personal GitHub account, pushed, public: https://github.com/KoraiD/bob-assistant
+  - [ ] License visible in the About section (check on the repo page)
 - [x] `/.kiro` at the root, never ignored (specs, steering, hooks, agents)
-  - [ ] `.kiro/settings/mcp.json` (the agent is blocked from writing it; owner adds it, see `docs/KIRO.md`)
+  - [x] `.kiro/settings/mcp.json` (added by the owner: the agent is blocked from writing that folder)
 - [ ] URL to the functional app: a GitHub Release with the `.dmg`, plus build-from-source instructions
 - [ ] Text description of features and functionality
 - [ ] Demo video: **under 3 minutes**, public on YouTube, shows the project running on the build device, no third-party trademarks or copyrighted material
@@ -55,10 +56,9 @@ Each entrant may receive a one-time allotment of **4,000 Kiro credits**. Request
 - [ ] Owner submits the credit request form (earlier is better).
 
 ## Open questions for the owner
-1. **GitHub repo:** create an empty public repo under your personal GitHub account (suggested name `bob-assistant`) and authenticate git for it (this Mac has no Git credential helper and no SSH keys). Tell me the URL and I will add the remote and push.
-2. **Ownership:** the rules require the submission to be solely owned by the Entrant with no other person or entity having any right. Please confirm that neither your full-time employer nor your university has any claim on this project, and decide whether you enter as an individual or as your company (an Organization is an eligible Entrant). The student bonus requires an individual student.
-3. **Model licenses:** Qwen2.5-1.5B is the default Ghost candidate. I could not verify the license of Qwen2.5-3B (some sizes use a non-Apache license). Models are downloaded by the user at first run and never redistributed in the repo, but the license must still allow the use. Verified before it ships (Task 3).
-4. **Signing:** release builds may be signed and notarized with the owner's company Developer ID. Notarization needs App Store Connect API credentials supplied through environment variables; they must never be committed.
+1. **Ownership:** the rules require the submission to be solely owned by the Entrant with no other person or entity having any right. Please confirm that neither your full-time employer nor your university has any claim on this project, and decide whether you enter as an individual or as your company (an Organization is an eligible Entrant). The student bonus requires an individual student.
+2. **Model licenses:** Qwen2.5-1.5B is the default Ghost candidate. I could not verify the license of Qwen2.5-3B (some sizes use a non-Apache license). Models are downloaded by the user at first run and never redistributed in the repo, but the license must still allow the use. Verified before it ships (Task 3).
+3. **Signing:** release builds may be signed and notarized with the owner's company Developer ID. Notarization needs App Store Connect API credentials supplied through environment variables; they must never be committed.
 
 ## Repo hygiene before submitting
 - [ ] `make check` passes
