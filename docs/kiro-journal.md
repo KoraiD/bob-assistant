@@ -15,3 +15,17 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
   the Tauri configs omit `$schema` (it is optional).
 - **Tooling surprise:** Vitest 2 pulled a nested Vite and broke `vite.config.ts` typing; fixed by moving to Vitest 3.
 - **Tests at this point:** Rust 4 (incl. 2 property tests), Swift 2, Vitest 3.
+
+## 2026-11-22: Task 2, native bridge
+- **Spec first paid off:** the EARS IDs (NB-1..NB-9) made the test list obvious; each test names the requirement it covers.
+- **Property-based testing caught a real bug on the first run.** The chunking property
+  (`decoding_is_independent_of_chunking`) failed on a caret rectangle: `serde_json` parses ~18% of coordinate-range
+  floats one ULP off by default. Shrinking reduced it to a single `TextState` with a caret. Fix: the `float_roundtrip`
+  feature. An example-based test with hand-picked round numbers would have passed. This is the strongest PBT story so far.
+- **Shared fixtures** (`Tests/Fixtures/*.jsonl`) keep the Rust and Swift protocol implementations from drifting: both suites
+  decode and re-encode the same files. Swift Testing has no PBT library, so the chunking property is a seeded randomized test.
+- **Cross-language end-to-end test:** the Rust integration test launches the real Swift binary and checks hello, permissions,
+  commands, quit and exit-on-EOF.
+- **Friction:** `.kiro/settings/mcp.json` is still blocked for the agent by a permission rule (retried at the owner's request;
+  same result). The owner has to create it. Also hit a macOS 15-only API (`String(validating:as:)`) with a macOS 14 target.
+- **Tests now:** Rust 29 unit/property + 2 end-to-end, Swift 31, Vitest 9.

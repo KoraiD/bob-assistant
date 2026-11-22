@@ -5,6 +5,10 @@ All notable changes to BOB. Format follows [Keep a Changelog](https://keepachang
 ## [Unreleased]
 
 ### Added
+- Native bridge: JSON-lines protocol (Rust + Swift, shared fixtures), Unix-socket server with version handshake, helper supervisor with backoff.
+- Swift helper: Accessibility focus/text/caret observer, native chip panel, permission checks, `--probe` and `--chip-demo` modes.
+- Permissions card in the UI and permission status in the tray menu.
+- `make native|probe|chip-demo|sign-dev`; `scripts/sign-dev.sh` (identity from the environment, never committed).
 - Project foundation: Tauri 2 shell with tray icon, hide-on-close, `app_info` IPC command.
 - Haunted design tokens (dark default, optional daylight), ghost mark, capability cards.
 - Swift helper package `bob-native` (library + executable + tests).

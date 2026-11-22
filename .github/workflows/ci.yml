@@ -44,6 +44,9 @@ jobs:
           workspaces: src-tauri
       - run: npm ci
       - run: npm run build # tauri-build needs ../dist
+      - name: Build the Swift helper (used by the end-to-end handshake test)
+        run: swift build
+        working-directory: native/bob-native
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml

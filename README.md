@@ -18,8 +18,8 @@ BOB is a privacy-first macOS assistant. It adds three capabilities to every app,
 
 ## Status
 
-Task 1 (foundation) is complete: app shell with tray icon, haunted theme tokens, Swift helper package, Kiro
-workspace, CI and guards. Progress is tracked in [docs/SUBMISSION.md](docs/SUBMISSION.md) and in each spec's `tasks.md`.
+Tasks 1 and 2 are in place: app shell and tray, haunted theme, the Rust <-> Swift native bridge (protocol, handshake,
+supervision), the Accessibility caret observer and the permissions UI. Ghost Text itself is next. Progress is tracked in [docs/SUBMISSION.md](docs/SUBMISSION.md) and in each spec's `tasks.md`.
 
 ## Requirements
 

@@ -3,7 +3,7 @@
 CARGO_MANIFEST := src-tauri/Cargo.toml
 NATIVE_DIR := native/bob-native
 
-.PHONY: help setup dev build test test-rust test-swift test-ui lint fmt check-kiro check clean
+.PHONY: help setup dev build native probe chip-demo sign-dev test test-rust test-swift test-ui lint fmt check-kiro check clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[35m%-12s\033[0m %s\n", $$1, $$2}'
@@ -17,7 +17,19 @@ dev: ## Run the app in development mode (Tauri + Vite)
 build: ## Build the release app bundle
 	npm run tauri build
 
-test: test-rust test-swift test-ui ## Run every test suite
+native: ## Build the Swift helper (debug)
+	cd $(NATIVE_DIR) && swift build
+
+probe: native ## Compatibility spike: observe the focused field for 20s (see docs/COMPATIBILITY.md)
+	$(NATIVE_DIR)/.build/debug/bob-native --probe 20
+
+chip-demo: native ## Show a ghost chip at the caret in any app (needs Accessibility)
+	$(NATIVE_DIR)/.build/debug/bob-native --chip-demo
+
+sign-dev: native ## Sign the dev helper with $$BOB_SIGN_IDENTITY so macOS keeps its permission grants
+	bash scripts/sign-dev.sh
+
+test: native test-rust test-swift test-ui ## Run every test suite
 
 test-rust: ## Rust unit + property tests
 	cargo test --manifest-path $(CARGO_MANIFEST)
