@@ -107,22 +107,27 @@ public enum AXReader {
         return rect(fromCG: cg)
     }
 
-    /// Bounds of the caret via text markers. Returns the raw rect plus which variant produced it.
+    /// Bounds of the caret via text markers, composed like the range API (glyph box first).
     static func textMarkerCaret(_ element: AXUIElement) -> (Rect, CaretSource)? {
         let selected = attribute(element, kAXSelectedTextMarkerRangeAttribute)
         guard isTextMarkerRange(selected), let selected else { return nil }
         let range = selected as! AXTextMarkerRange  // type id checked above
 
-        if let r = markerBounds(element, range), CaretRectResolver.isPlausible(r) {
-            return (Rect(x: r.x + r.width, y: r.y, width: 0, height: r.height), .textMarker)
+        let collapsed = markerBounds(element, range)
+        var previousBox: Rect?
+        var previousIsNewline = false
+        let caretMarker = AXTextMarkerRangeCopyEndMarker(range)
+        if let previous = parameterized(element, kAXPreviousTextMarkerForTextMarkerParameterizedAttribute, caretMarker),
+           CFGetTypeID(previous) == AXTextMarkerGetTypeID() {
+            let prevRange = AXTextMarkerRangeCreate(kCFAllocatorDefault, previous as! AXTextMarker, caretMarker)
+            let text = parameterized(element, kAXStringForTextMarkerRangeParameterizedAttribute, prevRange) as? String
+            previousIsNewline = text == "\n" || text == "\r"
+            // An empty string means there is no previous character inside this field.
+            if let text, !text.isEmpty { previousBox = markerBounds(element, prevRange) }
         }
-        // A collapsed range often has no size: measure the character before the caret instead.
-        let caretMarker = AXTextMarkerRangeCopyStartMarker(range)
-        guard let previous = parameterized(element, kAXPreviousTextMarkerForTextMarkerParameterizedAttribute, caretMarker),
-              CFGetTypeID(previous) == AXTextMarkerGetTypeID() else { return nil }
-        let prevRange = AXTextMarkerRangeCreate(kCFAllocatorDefault, previous as! AXTextMarker, caretMarker)
-        guard let r = markerBounds(element, prevRange), CaretRectResolver.isPlausible(r) else { return nil }
-        return (Rect(x: r.x + r.width, y: r.y, width: 0, height: r.height), .textMarkerPreviousChar)
+        guard let (rect, pick) = CaretRectResolver.compose(atCaret: collapsed, previousChar: previousBox, nextChar: nil,
+                                                           previousIsNewline: previousIsNewline) else { return nil }
+        return (rect, pick == .previousChar ? .textMarkerPreviousChar : .textMarker)
     }
 
     // MARK: snapshot
@@ -146,18 +151,18 @@ public enum AXReader {
 
     /// Resolve the caret: native range bounds first, then text markers. Every candidate is validated
     /// against the element frame (and flipped if needed) so a wrong rect is never used (GT-4).
-    static func caret(_ element: AXUIElement, selection: CFRange, frame: Rect?, app: String) -> (Rect, CaretSource)? {
+    static func caret(_ element: AXUIElement, selection: CFRange, value: String?, frame: Rect?,
+                      app: String) -> (Rect, CaretSource)? {
         let loc = selection.location
-        let candidates: [(Rect?, CaretSource)] = [
-            (bounds(element, for: CFRange(location: loc, length: 0)).map { Rect(x: $0.x, y: $0.y, width: 0, height: $0.height) },
-             .rangeAtCaret),
-            (loc > 0 ? bounds(element, for: CFRange(location: loc - 1, length: 1)).map {
-                Rect(x: $0.x + $0.width, y: $0.y, width: 0, height: $0.height) } : nil, .rangePreviousChar),
-            (bounds(element, for: CFRange(location: loc, length: 1)).map { Rect(x: $0.x, y: $0.y, width: 0, height: $0.height) },
-             .rangeNextChar),
-        ]
-        for (raw, source) in candidates {
-            if let raw, let r = accept(raw, frame: frame, app: app, source: source) { return (r, source) }
+        let units = value.map { Array($0.utf16) }
+        let prevIsNewline = units.map { loc > 0 && loc <= $0.count && ($0[loc - 1] == 0x0A || $0[loc - 1] == 0x0D) } ?? false
+        if let (raw, pick) = CaretRectResolver.compose(
+            atCaret: bounds(element, for: CFRange(location: loc, length: 0)),
+            previousChar: loc > 0 ? bounds(element, for: CFRange(location: loc - 1, length: 1)) : nil,
+            nextChar: bounds(element, for: CFRange(location: loc, length: 1)),
+            previousIsNewline: prevIsNewline) {
+            let source: CaretSource = pick == .previousChar ? .rangePreviousChar : pick == .atCaret ? .rangeAtCaret : .rangeNextChar
+            if let r = accept(raw, frame: frame, app: app, source: source) { return (r, source) }
         }
         if let (raw, source) = textMarkerCaret(element), let r = accept(raw, frame: frame, app: app, source: source) {
             return (r, source)
@@ -189,7 +194,8 @@ public enum AXReader {
                 snap.valueLength = value.utf16.count
                 snap.beforeCaret = TextWindow.beforeCaret(value: value, caretUTF16: selection.location)
             }
-            if let (rect, source) = caret(element, selection: selection, frame: snap.elementFrame, app: bundle) {
+            let value = string(element, kAXValueAttribute)
+            if let (rect, source) = caret(element, selection: selection, value: value, frame: snap.elementFrame, app: bundle) {
                 snap.caret = rect
                 snap.caretSource = source
             }

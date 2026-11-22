@@ -32,17 +32,43 @@ struct CoordinateConverterTests {
 
 @Suite("CaretRectResolver")
 struct CaretRectResolverTests {
-    let good = Rect(x: 100, y: 200, width: 0, height: 18)
+    let glyph = Rect(x: 90, y: 200, width: 8, height: 18)
 
-    @Test func prefersTheZeroLengthRangeAtTheCaret() {
-        let r = CaretRectResolver.resolve(atCaret: good, previousChar: Rect(x: 1, y: 2, width: 3, height: 4), nextChar: nil)
-        #expect(r == Rect(x: 100, y: 200, width: 0, height: 18))
+    @Test func nativeTextViewsAgreeAndUseTheGlyphBox() {
+        // TextEdit-like: zero-length caret box and previous glyph agree.
+        let r = CaretRectResolver.compose(atCaret: Rect(x: 98, y: 200, width: 0, height: 18), previousChar: glyph, nextChar: nil)
+        #expect(r?.0 == Rect(x: 98, y: 200, width: 0, height: 18))
+        #expect(r?.1 == .previousChar)
     }
 
-    @Test func fallsBackToTheRightEdgeOfThePreviousCharacter() {
-        let prev = Rect(x: 90, y: 200, width: 8, height: 18)
-        #expect(CaretRectResolver.resolve(atCaret: Rect(x: 0, y: 0, width: 0, height: 0), previousChar: prev, nextChar: nil)
-                == Rect(x: 98, y: 200, width: 0, height: 18))
+    @Test func aTallLineBoxDoesNotInflateTheChip() {
+        // iTerm-like: the zero-length query returns a 34 pt box; the glyph is 17 pt and on the same line.
+        let lineBox = Rect(x: 98, y: 190, width: 0, height: 34)
+        let g = Rect(x: 90, y: 199, width: 8, height: 17)
+        #expect(CaretRectResolver.compose(atCaret: lineBox, previousChar: g, nextChar: nil)?.0
+                == Rect(x: 98, y: 199, width: 0, height: 17))
+    }
+
+    @Test func anEmptyFieldUsesTheLeftEdgeOfAWideBox() {
+        // Slack-like: empty field, collapsed range returns the placeholder box (wide); no previous glyph.
+        let placeholder = Rect(x: 556, y: 935, width: 658, height: 22)
+        #expect(CaretRectResolver.compose(atCaret: placeholder, previousChar: nil, nextChar: nil)?.0
+                == Rect(x: 556, y: 935, width: 0, height: 22))
+    }
+
+    @Test func aSoftWrappedCaretStaysOnItsOwnLine() {
+        // Caret at the start of a wrapped line: the previous glyph ends the line above.
+        let caretBox = Rect(x: 20, y: 222, width: 0, height: 18)
+        let r = CaretRectResolver.compose(atCaret: caretBox, previousChar: Rect(x: 400, y: 200, width: 6, height: 18), nextChar: nil)
+        #expect(r?.0 == caretBox)
+        #expect(r?.1 == .atCaret)
+    }
+
+    @Test func aNewlineBeforeTheCaretIsIgnored() {
+        let caretBox = Rect(x: 20, y: 222, width: 0, height: 18)
+        let r = CaretRectResolver.compose(atCaret: caretBox, previousChar: Rect(x: 400, y: 200, width: 6, height: 18),
+                                          nextChar: nil, previousIsNewline: true)
+        #expect(r?.1 == .atCaret)
     }
 
     @Test func fallsBackToTheLeftEdgeOfTheNextCharacter() {
@@ -60,6 +86,26 @@ struct CaretRectResolverTests {
         for j in junk { #expect(!CaretRectResolver.isPlausible(j)) }
         #expect(CaretRectResolver.resolve(atCaret: junk[0], previousChar: junk[1], nextChar: junk[2]) == nil)
         #expect(CaretRectResolver.resolve(atCaret: nil, previousChar: nil, nextChar: nil) == nil)
+    }
+
+    /// Randomized property: the chip is never taller than the tightest plausible box and always has zero width.
+    @Test func composedCaretIsZeroWidthAndNeverTallerThanTheTightestBox() {
+        var rng = SeededGenerator(seed: 2026)
+        func maybe(_ r: Rect) -> Rect? { Bool.random(using: &rng) ? r : nil }
+        for _ in 0..<1000 {
+            let y = Double.random(in: 0...1000, using: &rng)
+            let at = maybe(Rect(x: Double.random(in: 0...1500, using: &rng), y: y,
+                                width: Double.random(in: 0...700, using: &rng), height: Double.random(in: 10...60, using: &rng)))
+            let prev = maybe(Rect(x: Double.random(in: 0...1500, using: &rng), y: y + Double.random(in: -30...30, using: &rng),
+                                  width: Double.random(in: 1...20, using: &rng), height: Double.random(in: 10...40, using: &rng)))
+            guard let (r, _) = CaretRectResolver.compose(atCaret: at, previousChar: prev, nextChar: nil) else {
+                #expect(at == nil && prev == nil); continue
+            }
+            #expect(r.width == 0)
+            let tightest = [at, prev].compactMap { $0?.height }.min()!
+            #expect(r.height <= max(tightest, [at, prev].compactMap { $0?.height }.max()!))
+            if let a = at, prev == nil { #expect(r.x == a.x) }  // left edge of a collapsed box
+        }
     }
 }
 

@@ -35,8 +35,10 @@ make chip-demo     # show a ghost chip at the caret in whatever app you type in 
 
 | App | Caret rect | Text read | AX notifications | Secure field quiet | Tab capture | Insert (Unicode keys) | Notes |
 |---|---|---|---|---|---|---|---|
-| iTerm2 (not a target app) | yes (2/2 samples, before the text-marker change) | yes (whole buffer, capped to 2000 chars) | focus, value, selection | n/a | - | - | chip shown; AX caret height 34 pt covers more than one row, so the chip overlaps the line above (2026-11-22) |
-| Kiro (Electron, chat input) | **no** with `AXBoundsForRange` (0/6 samples) | yes | value, selection | n/a | - | - | chip hidden as designed (GT-4). Text-marker fallback added; re-test (2026-11-22) |
+| iTerm2 (not a target app) | yes, `range_at_caret` | yes (whole buffer, capped to 2000 chars) | focus, value, selection | n/a | - | - | zero-length range returns a 34 pt line box on an empty prompt, so the chip started oversized and shrank once text was typed. Fixed by preferring the previous glyph box (2026-11-22); re-test |
+| Kiro (Electron, chat input) | **yes, `text_marker`** (none with `AXBoundsForRange`) | yes | value, selection | n/a | - | - | chip sits at the caret at the right size (owner screenshot, 2026-11-22) |
+| VS Code (Electron) | **yes, `text_marker`** | yes | focus, value, selection | n/a | - | - | `frame_found: false`: no AXPosition/AXSize on the element, so the rect is used without frame validation. Placement to confirm |
+| Slack (Electron) | **yes, `text_marker`** | yes | focus, value, selection | n/a | - | - | empty field: collapsed range returns a wide box (x 1214 used as the right edge was wrong; one typed char gave x 556). Fixed: left edge for collapsed ranges, glyph box when a character exists (2026-11-22); re-test |
 | TextEdit | - | - | - | n/a | - | - | |
 | Notes | - | - | - | n/a | - | - | |
 | Mail (compose) | - | - | - | n/a | - | - | |
@@ -72,8 +74,10 @@ make chip-demo     # show a ghost chip at the caret in whatever app you type in 
   CursorBounds package). BOB does **not** do that for Ghost Text: a suggestion at the wrong spot is worse than none (GT-4).
 
 ## Implemented behavior the matrix validates
-- Caret resolution order: zero-length range at the caret, then the right edge of the previous character, then the left edge of
-  the next character, then text markers (selected range, then the character before the caret). The probe reports which one
+- Caret composition (`CaretRectResolver.compose`): the glyph box of the character before the caret wins when it is on the
+  caret's line (tight height, exact x). Otherwise the **left edge** of the zero-length range is used (some apps return a whole
+  line or placeholder box there), then the next character. Line breaks and soft-wrapped lines are detected so the chip never
+  jumps to the line above. The same composition runs for the range API and for text markers. The probe reports which one
   worked as `caret_source`, and the summary counts them in `caret_sources`. All-zero, non-finite or implausibly sized rects are rejected, so the chip is hidden instead of misplaced (GT-4).
 - Secure text fields (`AXSecureTextField`) are never read (GT-3).
 - Chromium/Electron apps get `AXManualAccessibility` set when they become frontmost.

@@ -29,22 +29,48 @@ public enum CaretRectResolver {
         return true
     }
 
+    public enum Pick: Equatable, Sendable { case previousChar, atCaret, nextChar }
+
+    /// Compose the caret rect from up to three Accessibility answers.
+    ///
+    /// Observed on real apps (docs/COMPATIBILITY.md): for a zero-length range some apps return the whole line
+    /// box (iTerm: 34 pt tall on an empty prompt) or a wide box (Slack, empty field: the placeholder). The
+    /// glyph box of the character before the caret is tight, so it wins whenever it sits on the caret's line.
+    ///
     /// - Parameters:
-    ///   - atCaret: bounds of the zero-length range at the caret.
+    ///   - atCaret: bounds of the zero-length range at the caret (may be a line or field box).
     ///   - previousChar: bounds of the character before the caret.
     ///   - nextChar: bounds of the character after the caret.
-    /// - Returns: a zero-width rect at the caret position, or nil when nothing is plausible.
-    public static func resolve(atCaret: Rect?, previousChar: Rect?, nextChar: Rect?) -> Rect? {
-        if let a = atCaret, isPlausible(a) {
-            return Rect(x: a.x, y: a.y, width: 0, height: a.height)
+    ///   - previousIsNewline: the character before the caret is a line break, so its box is on the line above.
+    /// - Returns: a zero-width rect at the caret and which input produced it, or nil when nothing is plausible.
+    public static func compose(atCaret: Rect?, previousChar: Rect?, nextChar: Rect?,
+                               previousIsNewline: Bool = false) -> (Rect, Pick)? {
+        let at = atCaret.flatMap { isPlausible($0) ? $0 : nil }
+        let prev = previousIsNewline ? nil : previousChar.flatMap { isPlausible($0) ? $0 : nil }
+        if let p = prev {
+            // A caret box on another visual line (soft wrap) means the previous glyph is not on our line.
+            let onSameLine = at.map { a in
+                let mid = p.y + p.height / 2
+                return mid >= a.y - 1 && mid <= a.y + a.height + 1
+            } ?? true
+            if onSameLine {
+                return (Rect(x: p.x + p.width, y: p.y, width: 0, height: p.height), .previousChar)
+            }
         }
-        if let p = previousChar, isPlausible(p) {
-            return Rect(x: p.x + p.width, y: p.y, width: 0, height: p.height)
+        if let a = at {
+            // Left edge: for a collapsed range that is the caret, even when the app returns a wider box.
+            let h = prev.map { min($0.height, a.height) } ?? a.height
+            return (Rect(x: a.x, y: a.y + a.height - h, width: 0, height: h), .atCaret)
         }
         if let n = nextChar, isPlausible(n) {
-            return Rect(x: n.x, y: n.y, width: 0, height: n.height)
+            return (Rect(x: n.x, y: n.y, width: 0, height: n.height), .nextChar)
         }
         return nil
+    }
+
+    /// Back-compatible wrapper returning only the rect.
+    public static func resolve(atCaret: Rect?, previousChar: Rect?, nextChar: Rect?) -> Rect? {
+        compose(atCaret: atCaret, previousChar: previousChar, nextChar: nextChar)?.0
     }
 }
 
