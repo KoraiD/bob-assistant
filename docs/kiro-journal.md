@@ -29,3 +29,16 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
 - **Friction:** `.kiro/settings/mcp.json` is still blocked for the agent by a permission rule (retried at the owner's request;
   same result). The owner has to create it. Also hit a macOS 15-only API (`String(validating:as:)`) with a macOS 14 target.
 - **Tests now:** Rust 29 unit/property + 2 end-to-end, Swift 31, Vitest 9.
+
+## 2026-11-22: Task 2 spike, first real-hardware results
+- **Permission model surprise:** the owner granted Accessibility to `bob-native` and it had no effect. A command-line tool runs
+  with the trust of the terminal app hosting it. The helper now names that app (from `TERM_PROGRAM`) and opens the pane.
+  Recorded in the `macos-native` steering so later sessions do not repeat the mistake.
+- **Probe data drove the next change:** iTerm returned caret bounds, the Kiro (Electron) chat input returned text but no caret.
+  Research (Chromium source, Electron issue #34755, SDK headers) pointed to the text-marker API and to a coordinate-flip risk.
+- **Randomized test found a design gap before any user did:** the first version of the orientation check assumed only one
+  orientation could fit the field. The seeded randomized test generated tall fields near the screen middle where both fit.
+  The fix makes ambiguity explicit and resolves it from earlier evidence per app.
+- **Visual review without new permissions:** headless Chrome screenshots of the Vite build (`make screenshot`). The first
+  capture looked faded only because it was taken mid fade-in; re-capturing after animations settled showed the real render.
+- **Tests now:** Rust 29 + 2 end-to-end, Swift 42, Vitest 12.

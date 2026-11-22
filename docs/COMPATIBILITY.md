@@ -35,6 +35,8 @@ make chip-demo     # show a ghost chip at the caret in whatever app you type in 
 
 | App | Caret rect | Text read | AX notifications | Secure field quiet | Tab capture | Insert (Unicode keys) | Notes |
 |---|---|---|---|---|---|---|---|
+| iTerm2 (not a target app) | yes (2/2 samples, before the text-marker change) | yes (whole buffer, capped to 2000 chars) | focus, value, selection | n/a | - | - | chip shown; AX caret height 34 pt covers more than one row, so the chip overlaps the line above (2026-11-22) |
+| Kiro (Electron, chat input) | **no** with `AXBoundsForRange` (0/6 samples) | yes | value, selection | n/a | - | - | chip hidden as designed (GT-4). Text-marker fallback added; re-test (2026-11-22) |
 | TextEdit | - | - | - | n/a | - | - | |
 | Notes | - | - | - | n/a | - | - | |
 | Mail (compose) | - | - | - | n/a | - | - | |
@@ -54,8 +56,24 @@ make chip-demo     # show a ghost chip at the caret in whatever app you type in 
 4. **Which apps return usable `kAXBoundsForRangeParameterizedAttribute` values?** The matrix above answers this; the helper
    already tries three ranges (zero-length at the caret, previous character, next character) and refuses implausible rects.
 
+## Research: caret bounds in Chromium / Electron (2026-11-22)
+- Symptom: `AXBoundsForRange` fails or returns a bogus origin in Electron apps (seen in our probe for Kiro; same report in
+  [electron/electron#34755](https://github.com/electron/electron/issues/34755), where every query returned x 0 and y equal to
+  the screen height).
+- Chromium implements the WebKit-style **text marker** API instead: `AXSelectedTextMarkerRange`, `AXBoundsForTextMarkerRange`,
+  `AXPreviousTextMarkerForTextMarker` and more (`ui/accessibility/platform/browser_accessibility_cocoa.mm` in the Chromium source).
+  The constants are public in the macOS SDK (`HIServices/AXWebConstants.h`), and so are `AXTextMarkerRangeCopyStartMarker` and
+  `AXTextMarkerRangeCreate` (`AXUIElement.h`).
+- Chromium converts the bounds with `gfx::ScreenRectToNSRect`, which yields AppKit (bottom-left) coordinates. Whether the value
+  reaches us flipped depends on the system bridge, so the helper does not assume: every candidate rect is checked against the
+  element's own frame (`AXPosition` + `AXSize`) and the orientation that lies inside the field wins. When both fit (a tall field
+  around the middle of the screen) the last unambiguous result for that app decides (`OrientationMemory`).
+- Other tools fall back to the text field frame or the mouse position when the caret is unknown (for example the MIT-licensed
+  CursorBounds package). BOB does **not** do that for Ghost Text: a suggestion at the wrong spot is worse than none (GT-4).
+
 ## Implemented behavior the matrix validates
 - Caret resolution order: zero-length range at the caret, then the right edge of the previous character, then the left edge of
-  the next character. All-zero, non-finite or implausibly sized rects are rejected, so the chip is hidden instead of misplaced (GT-4).
+  the next character, then text markers (selected range, then the character before the caret). The probe reports which one
+  worked as `caret_source`, and the summary counts them in `caret_sources`. All-zero, non-finite or implausibly sized rects are rejected, so the chip is hidden instead of misplaced (GT-4).
 - Secure text fields (`AXSecureTextField`) are never read (GT-3).
 - Chromium/Electron apps get `AXManualAccessibility` set when they become frontmost.
