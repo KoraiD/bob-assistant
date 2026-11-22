@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { GhostMark } from "./components/GhostMark";
+import { BrainPanel } from "./components/BrainPanel";
 import { PermissionsCard } from "./components/PermissionsCard";
 import { BROWSER_APP_INFO, getAppInfo, type AppInfo } from "./lib/appInfo";
 
@@ -16,8 +17,15 @@ export function formatBuild(info: AppInfo): string {
   return `BOB ${info.version} · ${info.platform} ${info.arch}`;
 }
 
+type Tab = "overview" | "brains";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "brains", label: "Brains" },
+];
+
 export default function App() {
   const [info, setInfo] = useState<AppInfo>(BROWSER_APP_INFO);
+  const [tab, setTab] = useState<Tab>("overview");
 
   useEffect(() => {
     let alive = true;
@@ -37,6 +45,30 @@ export default function App() {
         </div>
       </header>
 
+      <nav aria-label="Sections" className="mb-6 flex gap-2" role="tablist">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => setTab(t.id)}
+            className="rounded-full px-4 py-1.5 text-sm font-medium"
+            style={
+              tab === t.id
+                ? { background: "var(--accent)", color: "var(--accent-fg)" }
+                : { background: "var(--surface)", color: "var(--text-muted)", border: "1px solid var(--border)" }
+            }
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === "brains" ? (
+        <BrainPanel />
+      ) : (
+        <>
       <section aria-label="Capabilities" className="grid gap-4 md:grid-cols-3">
         {CAPABILITIES.map((c) => (
           <article key={c.id} className="soft-card panel-in p-5" data-testid={`capability-${c.id}`}>
@@ -55,6 +87,8 @@ export default function App() {
       </section>
 
       <PermissionsCard />
+        </>
+      )}
 
       <footer className="mt-10 text-xs" style={{ color: "var(--text-muted)" }}>
         {formatBuild(info)}

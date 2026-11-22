@@ -1,0 +1,57 @@
+import { brainsForRole, draftToConfig, formatBytes, isCloudUrl, percent, slugify, uniqueId, validateDraft, type BrainView, type Draft } from "./brains";
+
+const brain = (id: string, ghost: boolean, chat: boolean): BrainView => ({
+  id, name: id, kind: "ollama", endpoint: "http://127.0.0.1:11434", model: null,
+  capabilities: { ghost, chat }, has_api_key: false, is_cloud: false,
+});
+
+describe("brains helpers", () => {
+  it("formats sizes and percentages safely", () => {
+    expect(formatBytes(1_117_320_736)).toBe("1.1 GB");
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(-1)).toBe("?");
+    expect(percent(50, 200)).toBe(25);
+    expect(percent(5, 0)).toBe(0);
+    expect(percent(300, 200)).toBe(100);
+  });
+
+  it("only offers capable brains for each role", () => {
+    const all = [brain("g", true, false), brain("c", false, true), brain("both", true, true)];
+    expect(brainsForRole(all, "ghost").map((b) => b.id)).toEqual(["g", "both"]);
+    expect(brainsForRole(all, "selection").map((b) => b.id)).toEqual(["c", "both"]);
+  });
+
+  it("derives unique, valid ids from names", () => {
+    expect(slugify("  My Ollama!! ")).toBe("my-ollama");
+    expect(slugify("!!!")).toBe("brain");
+    expect(uniqueId("a", ["a", "a-2"])).toBe("a-3");
+    for (const name of ["Ünïcödé brain", "x".repeat(200), "a b/c\\\\d", ""]) {
+      expect(slugify(name)).toMatch(/^[a-z0-9-]{1,48}$/);
+    }
+  });
+
+  it("labels endpoints like the Rust side (loopback = local)", () => {
+    expect(isCloudUrl("http://127.0.0.1:11434")).toBe(false);
+    expect(isCloudUrl("http://localhost:1234")).toBe(false);
+    expect(isCloudUrl("http://[::1]:80")).toBe(false);
+    expect(isCloudUrl("https://api.openai.com")).toBe(true);
+    expect(isCloudUrl("http://192.168.1.5:11434")).toBe(true);
+    expect(isCloudUrl("http://localhost.evil.com")).toBe(true);
+    expect(isCloudUrl("garbage")).toBe(true);
+  });
+
+  it("validates drafts with readable messages", () => {
+    const ok: Draft = { name: "Ollama", kind: "ollama", endpoint: "http://127.0.0.1:11434", model: "", apiKey: "" };
+    expect(validateDraft(ok)).toEqual([]);
+    expect(validateDraft({ ...ok, name: " " })).toContain("Give the brain a name.");
+    expect(validateDraft({ ...ok, endpoint: "ftp://x" })).toContain("The endpoint must start with http:// or https://.");
+    expect(validateDraft({ ...ok, endpoint: "nope" })).toContain("The endpoint is not a valid URL.");
+    expect(validateDraft({ ...ok, kind: "open_ai_compatible", endpoint: "https://api.openai.com" })).toContain("Cloud endpoints need an API key.");
+  });
+
+  it("builds configs with conservative capabilities for cloud APIs", () => {
+    const c = draftToConfig({ name: "Cloud", kind: "open_ai_compatible", endpoint: " https://api.x.com ", model: " gpt ", apiKey: "k" }, ["cloud"]);
+    expect(c).toMatchObject({ id: "cloud-2", endpoint: "https://api.x.com", model: "gpt", capabilities: { ghost: false, chat: true } });
+    expect(JSON.stringify(c)).not.toContain('"k"');
+  });
+});

@@ -1,9 +1,12 @@
 //! BOB core. Orchestrates engines, brains, settings and the UI.
 //!
-//! Current scope: app metadata, tray (with permission status), and the bridge to the Swift helper.
-//! Later tasks add the Brain router and the Ghost/Selection/Dictation engines.
+//! Current scope: app metadata, tray (with permission status), the bridge to the Swift helper and the
+//! Brain layer (registry, providers, built-in llama-server sidecar). Later tasks add the
+//! Ghost/Selection/Dictation engines.
 
 pub mod app_info;
+pub mod brain;
+pub mod commands;
 pub mod native_ipc;
 pub mod protocol;
 pub mod supervisor;
@@ -151,16 +154,71 @@ fn start_native_bridge(
     app.manage(HelperGuard(Mutex::new(guard)));
 }
 
+/// Route SIGTERM (logout, shutdown, `kill`) and SIGINT (Ctrl+C in a terminal) through the normal quit
+/// path, so `RunEvent::Exit` runs and the model server is stopped instead of orphaned.
+fn quit_on_signals(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        use tokio::signal::unix::{signal, SignalKind};
+        let (Ok(mut term), Ok(mut int)) = (
+            signal(SignalKind::terminate()),
+            signal(SignalKind::interrupt()),
+        ) else {
+            log::warn!("cannot install signal handlers");
+            return;
+        };
+        tokio::select! {
+            _ = term.recv() => log::info!("SIGTERM received, quitting"),
+            _ = int.recv() => log::info!("SIGINT received, quitting"),
+        }
+        app.exit(0);
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Logs go to stderr. Default: info for BOB, warn for dependencies; override with RUST_LOG.
+    // Privacy: log metadata only (sizes, timings, states), never typed text, prompts or keys.
+    let _ = env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("warn,bob_lib=info"),
+    )
+    .try_init();
     tauri::Builder::default()
         .manage(Bridge::new())
         .invoke_handler(tauri::generate_handler![
             app_info,
             native_status,
-            request_permissions
+            request_permissions,
+            commands::brain_snapshot,
+            commands::brain_upsert,
+            commands::brain_remove,
+            commands::brain_set_role,
+            commands::brain_test,
+            commands::brain_try,
+            commands::models_list,
+            commands::model_download,
+            commands::model_cancel,
+            commands::builtin_start,
+            commands::builtin_stop,
         ])
         .setup(|app| {
+            // Brain service: registry in the config dir, models in the data dir, the sidecar's key and
+            // PID files in the per-user 0700 runtime dir next to the helper socket.
+            let config_dir = app.path().app_config_dir()?;
+            let data_dir = app.path().app_data_dir()?;
+            let runtime_dir = native_ipc::default_socket_path()
+                .parent()
+                .map(|p| p.join("llama"))
+                .unwrap_or_else(|| std::env::temp_dir().join("bob-llama"));
+            let brains: commands::Brains = std::sync::Arc::new(brain::service::BrainService::new(
+                config_dir,
+                data_dir,
+                runtime_dir,
+                Box::new(brain::secrets::KeychainStore),
+            ));
+            app.manage(brains.clone());
+            commands::autostart_builtin(app.handle().clone(), brains);
+            quit_on_signals(app.handle().clone());
+
             let (ax, mic) = setup_tray(app)?;
             let bridge = app.state::<Bridge>().inner().clone();
             start_native_bridge(app, bridge, ax, mic);
@@ -173,13 +231,65 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running BOB");
+        .build(tauri::generate_context!())
+        .expect("error while building BOB")
+        .run(|app, event| {
+            // Stop the built-in model server before the process exits (it would otherwise keep a model
+            // in memory). A crash is covered by the PID file check at the next start.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(brains) = app.try_state::<commands::Brains>() {
+                    let brains = brains.inner().clone();
+                    tauri::async_runtime::block_on(brains.stop_builtin());
+                }
+            }
+        });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every IPC command the UI calls must be registered in `generate_handler!` (a missing one fails
+    /// only at runtime, silently). Regression guard for a real slip during Task 3.
+    #[test]
+    fn every_command_the_ui_invokes_is_registered() {
+        let lib = include_str!("lib.rs");
+        let start = lib.find("generate_handler![").expect("handler list");
+        let handlers = &lib[start..start + lib[start..].find(']').expect("end of handler list")];
+        let ui = [
+            include_str!("../../src/lib/appInfo.ts"),
+            include_str!("../../src/lib/nativeStatus.ts"),
+            include_str!("../../src/lib/brains.ts"),
+        ];
+        let mut checked = 0;
+        for src in ui {
+            for part in src.split("invoke").skip(1) {
+                // Only real calls: `invoke("name"` or `invoke<Type>("name"` (the generic is followed
+                // directly by the argument list).
+                let call = match part.strip_prefix('<') {
+                    Some(g) => match g.find('>') {
+                        Some(i) => &g[i + 1..],
+                        None => continue,
+                    },
+                    None => part,
+                };
+                let Some(rest) = call.strip_prefix("(\"") else {
+                    continue;
+                };
+                let name = &rest[..rest.find('"').expect("closing quote")];
+                assert!(
+                    handlers.contains(&format!("{name},"))
+                        || handlers.contains(&format!("::{name},")),
+                    "UI invokes `{name}` but it is not registered in generate_handler!"
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked >= 13,
+            "expected to check all UI commands, found {checked}"
+        );
+    }
 
     #[test]
     fn tray_labels_reflect_connection_and_permissions() {
