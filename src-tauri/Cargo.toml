@@ -5,7 +5,7 @@ description = "BOB (Bring Your Own Brain): a privacy-first macOS assistant power
 authors = ["BOB contributors"]
 license = "MIT"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.85"
 
 [lib]
 name = "bob_lib"
@@ -20,9 +20,21 @@ serde = { version = "1", features = ["derive"] }
 # float_roundtrip: exact f64 round trips (default parsing can be 1 ULP off; found by a property test).
 serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time", "sync", "process", "io-util", "net", "fs", "signal"] }
+futures-util = "0.3.34"
+thiserror = "2.0.21"
+sha2 = "0.10.9"
+hex = "0.4.3"
+url = "2.5.9"
+keyring = { version = "3.6.3", features = ["apple-native"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["stream", "json", "rustls"] }
+bytes = "1.12.2"
+rand = "0.9"
+env_logger = { version = "0.11.12", default-features = false, features = ["auto-color", "humantime"] }
 
 [dev-dependencies]
 proptest = "1"
+tokio = { version = "1.53.3", features = ["test-util"] }
 
 [profile.release]
 lto = "thin"
