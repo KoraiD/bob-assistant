@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Least-privilege capability for the BOB main window. Sidecar/shell permissions are added in Task 3, scoped to exact binaries.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

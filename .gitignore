@@ -1,0 +1,42 @@
+# IMPORTANT (Kiroween rules): never ignore `.kiro/` or any of its sub-folders.
+# Ignoring it can disqualify the submission. A CI check enforces this.
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+coverage/
+
+# Rust
+src-tauri/target/
+src-tauri/gen/
+**/*.rs.bk
+
+# Swift
+native/bob-native/.build/
+native/bob-native/.swiftpm/
+*.xcodeproj/xcuserdata/
+
+# Sidecar binaries and models are fetched/built by scripts, never committed
+src-tauri/binaries/
+models/
+*.gguf
+*.bin
+
+# Secrets and local config
+.env
+.env.*
+*.p12
+*.pem
+*.key
+*.mobileprovision
+
+# Build output and local logs
+release/
+*.log
+bench-results/local/

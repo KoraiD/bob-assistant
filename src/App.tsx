@@ -1,0 +1,55 @@
+import { useEffect, useState } from "react";
+import { GhostMark } from "./components/GhostMark";
+import { BROWSER_APP_INFO, getAppInfo, type AppInfo } from "./lib/appInfo";
+
+/** The three capabilities, in priority order (see .kiro/steering/product.md). */
+export const CAPABILITIES = [
+  { id: "ghost", title: "Ghost Text", blurb: "Inline next-word predictions at your caret, in any app.", status: "Coming soon" },
+  { id: "selection", title: "Selection Actions", blurb: "Highlight text, press a hotkey, rewrite it in place.", status: "Coming soon" },
+  { id: "dictation", title: "Voice Dictation", blurb: "Hold a key, speak, release. Clean text appears at the caret.", status: "Coming soon" },
+] as const;
+
+export default function App() {
+  const [info, setInfo] = useState<AppInfo>(BROWSER_APP_INFO);
+
+  useEffect(() => {
+    let alive = true;
+    getAppInfo().then((i) => alive && setInfo(i));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <main className="min-h-screen p-8" style={{ background: "var(--bg)" }}>
+      <header className="panel-in mb-8 flex items-center gap-4">
+        <GhostMark size={72} float />
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight">BOB</h1>
+          <p style={{ color: "var(--text-muted)" }}>Bring Your Own Brain. A friendly ghost for every app.</p>
+        </div>
+      </header>
+
+      <section aria-label="Capabilities" className="grid gap-4 md:grid-cols-3">
+        {CAPABILITIES.map((c) => (
+          <article key={c.id} className="soft-card panel-in p-5" data-testid={`capability-${c.id}`}>
+            <h2 className="mb-1 text-lg font-medium">{c.title}</h2>
+            <p className="mb-3 text-sm" style={{ color: "var(--text-muted)" }}>
+              {c.blurb}
+            </p>
+            <span
+              className="rounded-full px-3 py-1 text-xs"
+              style={{ background: "var(--accent-2-soft)", color: "var(--accent-2)" }}
+            >
+              {c.status}
+            </span>
+          </article>
+        ))}
+      </section>
+
+      <footer className="mt-10 text-xs" style={{ color: "var(--text-muted)" }}>
+        v{info.version} · {info.platform}/{info.arch}
+      </footer>
+    </main>
+  );
+}
