@@ -3,6 +3,10 @@ import PackageDescription
 
 // bob-native: the macOS integration helper (Accessibility, event tap, overlays, mic).
 // Logic lives in the BobNativeCore library so it is unit-testable; the executable is a thin shell.
+//
+// Swift language mode 5 is used on purpose: the Accessibility (C) and AppKit APIs rely on global
+// C callbacks and main-thread conventions that Swift 6 strict concurrency cannot yet express without
+// pervasive unsafe annotations. Pure logic stays Sendable-clean.
 let package = Package(
     name: "bob-native",
     platforms: [.macOS(.v14)],
@@ -14,5 +18,6 @@ let package = Package(
         .target(name: "BobNativeCore"),
         .executableTarget(name: "bob-native", dependencies: ["BobNativeCore"]),
         .testTarget(name: "BobNativeCoreTests", dependencies: ["BobNativeCore"]),
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )
