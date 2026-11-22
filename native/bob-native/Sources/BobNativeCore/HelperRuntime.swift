@@ -129,7 +129,8 @@ public final class HelperRuntime {
             guard let self else { return }
             if snap.secure || !snap.editable { self.chip.hide(); return }
             if let caret = snap.caret {
-                self.chip.show(text: "BOB is watching", caretAX: caret)
+                let via = snap.caretSource.map { " (\($0.rawValue))" } ?? ""
+                self.chip.show(text: "BOB is watching\(via)", caretAX: caret)
             } else {
                 self.chip.hide()
             }
@@ -147,10 +148,12 @@ public final class HelperRuntime {
         let started = Date()
         var lastPrint = Date.distantPast
         var samples = 0, withCaret = 0, secureSeen = 0
+        var sources = [String: Int]()
         var apps = Set<String>()
         observer.onSnapshot = { snap, reason in
             samples += 1
             if snap.caret != nil { withCaret += 1 }
+            if let source = snap.caretSource { sources[source.rawValue, default: 0] += 1 }
             if snap.secure { secureSeen += 1 }
             apps.insert(snap.appBundleId)
             guard Date().timeIntervalSince(lastPrint) > 0.25 else { return }
@@ -166,6 +169,8 @@ public final class HelperRuntime {
                 "value_len": snap.valueLength ?? NSNull(),
                 "before_caret_len": snap.beforeCaret?.count ?? NSNull(),
                 "caret_found": snap.caret != nil,
+                "caret_source": snap.caretSource?.rawValue ?? NSNull(),
+                "frame_found": snap.elementFrame != nil,
             ]
             if let c = snap.caret { row["caret"] = ["x": c.x, "y": c.y, "w": c.width, "h": c.height] }
             if let data = try? JSONSerialization.data(withJSONObject: row, options: [.sortedKeys]),
@@ -175,7 +180,7 @@ public final class HelperRuntime {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [observer] in
             let summary: [String: Any] = [
                 "probe": "summary", "samples": samples, "samples_with_caret": withCaret,
-                "secure_fields_seen": secureSeen, "apps": apps.sorted(),
+                "secure_fields_seen": secureSeen, "apps": apps.sorted(), "caret_sources": sources,
                 "ax_notifications": observer.notificationCounts,
             ]
             if let data = try? JSONSerialization.data(withJSONObject: summary, options: [.sortedKeys]),

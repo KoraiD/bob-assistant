@@ -1,6 +1,20 @@
 import AppKit
 import ApplicationServices
 
+/// Which Accessibility technique produced the caret rect. Reported by `--probe` so the compatibility
+/// matrix records how each app is supported.
+public enum CaretSource: String, Sendable {
+    /// `AXBoundsForRange` on the zero-length range at the caret (native AppKit text views).
+    case rangeAtCaret = "range_at_caret"
+    /// `AXBoundsForRange` on the character before / after the caret.
+    case rangePreviousChar = "range_prev_char"
+    case rangeNextChar = "range_next_char"
+    /// `AXBoundsForTextMarkerRange` on `AXSelectedTextMarkerRange` (Chromium, Electron, WebKit).
+    case textMarker = "text_marker"
+    /// Text-marker bounds of the character before the caret (when the collapsed range has no size).
+    case textMarkerPreviousChar = "text_marker_prev_char"
+}
+
 /// What the helper learned about the focused UI element. Contains typed text, so it is never logged.
 public struct AXSnapshot {
     public var appBundleId: String
@@ -14,6 +28,9 @@ public struct AXSnapshot {
     public var selectionLen: Int?
     /// Caret rect in **AX coordinates** (top-left origin) or nil when no plausible bounds exist.
     public var caret: Rect?
+    public var caretSource: CaretSource?
+    /// The focused element's frame in AX coordinates, used to validate caret rects.
+    public var elementFrame: Rect?
 }
 
 /// Thin wrappers around the Accessibility C API. No force unwraps on AX values (macos-native steering).
@@ -28,37 +45,124 @@ public enum AXReader {
         return (value as! AXUIElement)  // type id checked above
     }
 
-    static func string(_ element: AXUIElement, _ attribute: String) -> String? {
+    static func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
-        return value as? String
+        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
+        return value
     }
 
-    static func range(_ element: AXUIElement, _ attribute: String) -> CFRange? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
-              let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
-        var range = CFRange()
-        guard AXValueGetValue(value as! AXValue, .cfRange, &range) else { return nil }
-        return range
+    static func parameterized(_ element: AXUIElement, _ name: String, _ parameter: CFTypeRef) -> CFTypeRef? {
+        var out: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element, name as CFString, parameter, &out) == .success
+        else { return nil }
+        return out
     }
 
-    /// `kAXBoundsForRangeParameterizedAttribute` for `range`, in AX screen coordinates.
+    static func string(_ element: AXUIElement, _ name: String) -> String? {
+        attribute(element, name) as? String
+    }
+
+    static func axValue<T: BitwiseCopyable>(_ value: CFTypeRef?, _ type: AXValueType, _ initial: T) -> T? {
+        guard let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        var out = initial
+        guard AXValueGetValue(value as! AXValue, type, &out) else { return nil }  // type id checked above
+        return out
+    }
+
+    static func range(_ element: AXUIElement, _ name: String) -> CFRange? {
+        axValue(attribute(element, name), .cfRange, CFRange())
+    }
+
+    static func rect(fromCG r: CGRect) -> Rect {
+        Rect(x: r.origin.x, y: r.origin.y, width: r.size.width, height: r.size.height)
+    }
+
+    /// `kAXBoundsForRangeParameterizedAttribute` for `range`, as returned by the app.
     static func bounds(_ element: AXUIElement, for range: CFRange) -> Rect? {
         var r = range
-        guard let param = AXValueCreate(.cfRange, &r) else { return nil }
-        var out: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(
-            element, kAXBoundsForRangeParameterizedAttribute as CFString, param, &out) == .success,
-            let out, CFGetTypeID(out) == AXValueGetTypeID() else { return nil }
-        var rect = CGRect.zero
-        guard AXValueGetValue(out as! AXValue, .cgRect, &rect) else { return nil }
-        return Rect(x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height)
+        guard let param = AXValueCreate(.cfRange, &r),
+              let cg = axValue(parameterized(element, kAXBoundsForRangeParameterizedAttribute, param), .cgRect, CGRect.zero)
+        else { return nil }
+        return rect(fromCG: cg)
     }
+
+    /// The element's frame (AXPosition + AXSize), in AX coordinates.
+    static func frame(_ element: AXUIElement) -> Rect? {
+        guard let origin = axValue(attribute(element, kAXPositionAttribute), .cgPoint, CGPoint.zero),
+              let size = axValue(attribute(element, kAXSizeAttribute), .cgSize, CGSize.zero),
+              size.width > 0, size.height > 0 else { return nil }
+        return Rect(x: origin.x, y: origin.y, width: size.width, height: size.height)
+    }
+
+    // MARK: text markers (Chromium / Electron / WebKit)
+
+    static func isTextMarkerRange(_ v: CFTypeRef?) -> Bool {
+        guard let v else { return false }
+        return CFGetTypeID(v) == AXTextMarkerRangeGetTypeID()
+    }
+
+    static func markerBounds(_ element: AXUIElement, _ range: CFTypeRef) -> Rect? {
+        guard let cg = axValue(parameterized(element, kAXBoundsForTextMarkerRangeParameterizedAttribute, range),
+                               .cgRect, CGRect.zero) else { return nil }
+        return rect(fromCG: cg)
+    }
+
+    /// Bounds of the caret via text markers. Returns the raw rect plus which variant produced it.
+    static func textMarkerCaret(_ element: AXUIElement) -> (Rect, CaretSource)? {
+        let selected = attribute(element, kAXSelectedTextMarkerRangeAttribute)
+        guard isTextMarkerRange(selected), let selected else { return nil }
+        let range = selected as! AXTextMarkerRange  // type id checked above
+
+        if let r = markerBounds(element, range), CaretRectResolver.isPlausible(r) {
+            return (Rect(x: r.x + r.width, y: r.y, width: 0, height: r.height), .textMarker)
+        }
+        // A collapsed range often has no size: measure the character before the caret instead.
+        let caretMarker = AXTextMarkerRangeCopyStartMarker(range)
+        guard let previous = parameterized(element, kAXPreviousTextMarkerForTextMarkerParameterizedAttribute, caretMarker),
+              CFGetTypeID(previous) == AXTextMarkerGetTypeID() else { return nil }
+        let prevRange = AXTextMarkerRangeCreate(kCFAllocatorDefault, previous as! AXTextMarker, caretMarker)
+        guard let r = markerBounds(element, prevRange), CaretRectResolver.isPlausible(r) else { return nil }
+        return (Rect(x: r.x + r.width, y: r.y, width: 0, height: r.height), .textMarkerPreviousChar)
+    }
+
+    // MARK: snapshot
 
     public static func pid(of element: AXUIElement) -> pid_t? {
         var pid: pid_t = 0
         return AXUIElementGetPid(element, &pid) == .success ? pid : nil
+    }
+
+    static var primaryScreenHeight: Double {
+        Double(NSScreen.screens.first?.frame.height ?? 0)
+    }
+
+    /// Orientation evidence per app (main thread only, like every AX call in this helper).
+    nonisolated(unsafe) static var orientation = OrientationMemory()
+
+    static func accept(_ raw: Rect, frame: Rect?, app: String, source: CaretSource) -> Rect? {
+        let verdict = CaretOrientation.classify(raw, elementFrame: frame, primaryScreenHeight: primaryScreenHeight)
+        return orientation.resolve(verdict, app: app, source: source.rawValue)
+    }
+
+    /// Resolve the caret: native range bounds first, then text markers. Every candidate is validated
+    /// against the element frame (and flipped if needed) so a wrong rect is never used (GT-4).
+    static func caret(_ element: AXUIElement, selection: CFRange, frame: Rect?, app: String) -> (Rect, CaretSource)? {
+        let loc = selection.location
+        let candidates: [(Rect?, CaretSource)] = [
+            (bounds(element, for: CFRange(location: loc, length: 0)).map { Rect(x: $0.x, y: $0.y, width: 0, height: $0.height) },
+             .rangeAtCaret),
+            (loc > 0 ? bounds(element, for: CFRange(location: loc - 1, length: 1)).map {
+                Rect(x: $0.x + $0.width, y: $0.y, width: 0, height: $0.height) } : nil, .rangePreviousChar),
+            (bounds(element, for: CFRange(location: loc, length: 1)).map { Rect(x: $0.x, y: $0.y, width: 0, height: $0.height) },
+             .rangeNextChar),
+        ]
+        for (raw, source) in candidates {
+            if let raw, let r = accept(raw, frame: frame, app: app, source: source) { return (r, source) }
+        }
+        if let (raw, source) = textMarkerCaret(element), let r = accept(raw, frame: frame, app: app, source: source) {
+            return (r, source)
+        }
+        return nil
     }
 
     /// Build a snapshot. For secure fields the text is never read (requirement GT-3).
@@ -75,20 +179,24 @@ public enum AXReader {
         let editable = role.map { editableRoles.contains($0) } ?? false
         var snap = AXSnapshot(appBundleId: bundle, appName: name, role: role, subrole: subrole,
                               secure: secure, editable: editable, valueLength: nil, beforeCaret: nil,
-                              selectionLen: nil, caret: nil)
+                              selectionLen: nil, caret: nil, caretSource: nil, elementFrame: nil)
         guard !secure, editable else { return snap }
 
+        snap.elementFrame = frame(element)
         if let selection = range(element, kAXSelectedTextRangeAttribute) {
             snap.selectionLen = max(selection.length, 0)
             if let value = string(element, kAXValueAttribute) {
                 snap.valueLength = value.utf16.count
                 snap.beforeCaret = TextWindow.beforeCaret(value: value, caretUTF16: selection.location)
             }
-            let loc = selection.location
-            let atCaret = bounds(element, for: CFRange(location: loc, length: 0))
-            let previous = loc > 0 ? bounds(element, for: CFRange(location: loc - 1, length: 1)) : nil
-            let next = bounds(element, for: CFRange(location: loc, length: 1))
-            snap.caret = CaretRectResolver.resolve(atCaret: atCaret, previousChar: previous, nextChar: next)
+            if let (rect, source) = caret(element, selection: selection, frame: snap.elementFrame, app: bundle) {
+                snap.caret = rect
+                snap.caretSource = source
+            }
+        } else if let (rect, source) = textMarkerCaret(element),
+                  let r = accept(rect, frame: snap.elementFrame, app: bundle, source: source) {
+            snap.caret = r
+            snap.caretSource = source
         }
         return snap
     }

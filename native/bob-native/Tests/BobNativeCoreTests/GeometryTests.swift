@@ -122,3 +122,95 @@ struct PermissionsHelpTests {
         #expect(text.contains("Quit iTerm completely"))
     }
 }
+
+@Suite("CaretOrientation")
+struct CaretOrientationTests {
+    let screenH = 1000.0
+    let field = Rect(x: 100, y: 200, width: 400, height: 60)  // AX coordinates
+
+    @Test func keepsARectThatAlreadyLiesInsideTheField() {
+        let caret = Rect(x: 150, y: 210, width: 0, height: 18)
+        #expect(CaretOrientation.classify(caret, elementFrame: field, primaryScreenHeight: screenH) == .asIs(caret))
+    }
+
+    @Test func flipsARectReportedInAppKitCoordinates() {
+        let truth = Rect(x: 150, y: 210, width: 0, height: 18)
+        let appKit = CoordinateConverter.appKitRect(fromAX: truth, primaryScreenHeight: screenH)  // y = 772
+        #expect(CaretOrientation.classify(appKit, elementFrame: field, primaryScreenHeight: screenH) == .flipped(truth))
+    }
+
+    @Test func rejectsARectOutsideTheFieldInBothOrientations() {
+        // The Electron bug report (electron/electron#34755): origin (0, screen height) for every query.
+        let bogus = Rect(x: 0, y: 982, width: 0, height: 18)
+        #expect(CaretOrientation.classify(bogus, elementFrame: field, primaryScreenHeight: screenH) == .rejected)
+    }
+
+    @Test func reportsAmbiguityForTallFieldsAroundTheMiddleOfTheScreen() {
+        let tall = Rect(x: 0, y: 100, width: 800, height: 800)
+        let caret = Rect(x: 10, y: 300, width: 0, height: 18)
+        guard case .ambiguous = CaretOrientation.classify(caret, elementFrame: tall, primaryScreenHeight: screenH) else {
+            Issue.record("expected ambiguous"); return
+        }
+    }
+
+    @Test func trustsAPlausibleRectWhenTheFrameIsUnknown() {
+        let caret = Rect(x: 5, y: 5, width: 0, height: 18)
+        #expect(CaretOrientation.classify(caret, elementFrame: nil, primaryScreenHeight: screenH) == .asIs(caret))
+        #expect(CaretOrientation.classify(Rect(x: 0, y: 0, width: 0, height: 0), elementFrame: nil,
+                                          primaryScreenHeight: screenH) == .rejected)
+    }
+
+    /// Randomized property: a caret inside the field is always returned unchanged when given as-is,
+    /// and a flipped one is either corrected or reported as ambiguous (never silently rejected).
+    @Test func caretsInsideTheFieldAreNeverLost() {
+        var rng = SeededGenerator(seed: 42)
+        for _ in 0..<1000 {
+            let h = Double.random(in: 700...2000, using: &rng)
+            let f = Rect(x: Double.random(in: 0...1000, using: &rng), y: Double.random(in: 0...(h - 300), using: &rng),
+                         width: Double.random(in: 50...600, using: &rng), height: Double.random(in: 30...250, using: &rng))
+            let ch = Double.random(in: 10...min(28, f.height), using: &rng)
+            let truth = Rect(x: f.x + Double.random(in: 0...f.width, using: &rng),
+                             y: f.y + Double.random(in: 0...(f.height - ch), using: &rng), width: 0, height: ch)
+            switch CaretOrientation.classify(truth, elementFrame: f, primaryScreenHeight: h) {
+            case let .asIs(r): #expect(r == truth)
+            case let .ambiguous(asIs, _): #expect(asIs == truth)
+            default: Issue.record("lost a caret given as-is")
+            }
+            let appKit = CoordinateConverter.appKitRect(fromAX: truth, primaryScreenHeight: h)
+            switch CaretOrientation.classify(appKit, elementFrame: f, primaryScreenHeight: h) {
+            case let .flipped(r): #expect(abs(r.y - truth.y) < 1e-9)
+            case let .ambiguous(_, flipped): #expect(abs(flipped.y - truth.y) < 1e-9)
+            case .asIs(let r): #expect(abs(r.y - truth.y) < 1e-9)  // only when the flip is the identity
+            case .rejected: Issue.record("lost a flipped caret")
+            }
+        }
+    }
+}
+
+@Suite("OrientationMemory")
+struct OrientationMemoryTests {
+    let a = Rect(x: 1, y: 10, width: 0, height: 18)
+    let b = Rect(x: 1, y: 900, width: 0, height: 18)
+
+    @Test func defaultsToTheAXConventionWithoutEvidence() {
+        var m = OrientationMemory()
+        #expect(m.resolve(.ambiguous(asIs: a, flipped: b), app: "x", source: "text_marker") == a)
+    }
+
+    @Test func learnsFlippingPerAppAndSource() {
+        var m = OrientationMemory()
+        _ = m.resolve(.flipped(b), app: "chrome", source: "text_marker")
+        #expect(m.resolve(.ambiguous(asIs: a, flipped: b), app: "chrome", source: "text_marker") == b)
+        // Other apps and other sources are unaffected.
+        #expect(m.resolve(.ambiguous(asIs: a, flipped: b), app: "notes", source: "text_marker") == a)
+        #expect(m.resolve(.ambiguous(asIs: a, flipped: b), app: "chrome", source: "range_at_caret") == a)
+        // New unambiguous evidence overrides old evidence.
+        _ = m.resolve(.asIs(a), app: "chrome", source: "text_marker")
+        #expect(m.resolve(.ambiguous(asIs: a, flipped: b), app: "chrome", source: "text_marker") == a)
+    }
+
+    @Test func rejectedCandidatesYieldNothing() {
+        var m = OrientationMemory()
+        #expect(m.resolve(.rejected, app: "x", source: "y") == nil)
+    }
+}

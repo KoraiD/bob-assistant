@@ -48,6 +48,73 @@ public enum CaretRectResolver {
     }
 }
 
+/// Validates a candidate caret rect against the focused element's frame and fixes its orientation.
+///
+/// Native AppKit text views return `AXBoundsForRange` in AX coordinates (top-left origin). Chromium's
+/// `AXBoundsForTextMarkerRange` builds the rect with `gfx::ScreenRectToNSRect`, i.e. AppKit coordinates
+/// (bottom-left origin), so depending on how the system bridges it the value may arrive vertically flipped.
+/// Rather than hard-coding per app, accept whichever orientation lies inside the element's frame.
+public enum CaretOrientation {
+    /// Slack around the element frame, in points (caret rects can touch or slightly exceed the frame).
+    public static let tolerance: Double = 8
+
+    public enum Verdict: Equatable, Sendable {
+        case asIs(Rect)
+        case flipped(Rect)
+        /// Both orientations lie inside the element (a tall field around the middle of the screen).
+        case ambiguous(asIs: Rect, flipped: Rect)
+        case rejected
+    }
+
+    static func contains(_ frame: Rect, _ r: Rect, tolerance t: Double) -> Bool {
+        r.x >= frame.x - t && r.x <= frame.x + frame.width + t &&
+            r.y >= frame.y - t && r.y + r.height <= frame.y + frame.height + t
+    }
+
+    /// Classify `candidate` (as returned by the app) against `elementFrame` (AX coordinates).
+    public static func classify(_ candidate: Rect, elementFrame: Rect?, primaryScreenHeight: Double) -> Verdict {
+        guard CaretRectResolver.isPlausible(candidate) else { return .rejected }
+        guard let frame = elementFrame, frame.width > 0, frame.height > 0 else { return .asIs(candidate) }
+        let flipped = CoordinateConverter.axRect(fromAppKit: candidate, primaryScreenHeight: primaryScreenHeight)
+        let directFits = contains(frame, candidate, tolerance: tolerance)
+        let flippedFits = contains(frame, flipped, tolerance: tolerance)
+        switch (directFits, flippedFits) {
+        case (true, true) where flipped == candidate: return .asIs(candidate)
+        case (true, true): return .ambiguous(asIs: candidate, flipped: flipped)
+        case (true, false): return .asIs(candidate)
+        case (false, true): return .flipped(flipped)
+        case (false, false): return .rejected
+        }
+    }
+}
+
+/// Remembers, per app and caret source, which orientation unambiguous samples used, and applies it to
+/// ambiguous ones. Without any evidence the AX convention (as returned) is assumed.
+public struct OrientationMemory: Sendable {
+    private var flippedByKey: [String: Bool] = [:]
+
+    public init() {}
+
+    static func key(_ app: String, _ source: String) -> String { app + "|" + source }
+
+    /// Resolve a verdict to a rect, learning from it. Returns nil when the candidate was rejected.
+    public mutating func resolve(_ verdict: CaretOrientation.Verdict, app: String, source: String) -> Rect? {
+        let k = Self.key(app, source)
+        switch verdict {
+        case let .asIs(r):
+            flippedByKey[k] = false
+            return r
+        case let .flipped(r):
+            flippedByKey[k] = true
+            return r
+        case let .ambiguous(asIs, flipped):
+            return flippedByKey[k] == true ? flipped : asIs
+        case .rejected:
+            return nil
+        }
+    }
+}
+
 /// Extracts the text before the caret to send to the core.
 public enum TextWindow {
     public static let defaultMaxChars = 2000
