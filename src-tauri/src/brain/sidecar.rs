@@ -543,12 +543,18 @@ mod tests {
 
     /// A fake llama-server (python3 one-liner) that serves /health and records every launch, so restart
     /// and stop behavior are tested without a real model.
-    fn fake_server(dir: &Path, die_after_secs: Option<u32>) -> PathBuf {
+    ///
+    /// `crash_after_ready`: exit 0.5 s after the first successful `/health`. Tying the crash to readiness
+    /// (not to launch time) keeps the test valid on slow CI runners, where Python start-up alone can exceed
+    /// a fixed timer (seen on GitHub Actions: every attempt died before becoming healthy).
+    fn fake_server(dir: &Path, crash_after_ready: bool) -> PathBuf {
         let launches = dir.join("launches");
         let script = dir.join("fake-llama-server");
-        let die = die_after_secs
-            .map(|s| format!("threading.Timer({s}, lambda: os._exit(1)).start()"))
-            .unwrap_or_default();
+        let die = if crash_after_ready {
+            "CRASH = True"
+        } else {
+            "CRASH = False"
+        };
         std::fs::write(
             &script,
             format!(
@@ -563,7 +569,11 @@ open("{launches}", "a").write("x\n")
 class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
+        global CRASH
         self.send_response(200 if self.path == "/health" else 404); self.end_headers(); self.wfile.write(b'{{"status":"ok"}}')
+        if CRASH and self.path == "/health":
+            CRASH = False
+            threading.Timer(0.5, lambda: os._exit(1)).start()
     def do_POST(self):
         ok = self.headers.get("Authorization") == "Bearer " + key
         self.send_response(200 if ok else 401); self.end_headers(); self.wfile.write(b"{{}}")
@@ -601,7 +611,7 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
         std::fs::create_dir_all(&dir).unwrap();
         let model = dir.join("m.gguf");
         std::fs::write(&model, b"x").unwrap();
-        let bin = fake_server(&dir, None);
+        let bin = fake_server(&dir, false);
         let mut s = Sidecar::start(
             cfg(bin, model, dir.join("rt")),
             Duration::from_secs(10),
@@ -675,7 +685,7 @@ http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
         std::fs::create_dir_all(&dir).unwrap();
         let model = dir.join("m.gguf");
         std::fs::write(&model, b"x").unwrap();
-        let bin = fake_server(&dir, Some(1));
+        let bin = fake_server(&dir, true);
         let fast = Backoff {
             base: Duration::from_millis(50),
             max: Duration::from_millis(200),
