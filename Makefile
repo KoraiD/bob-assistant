@@ -3,7 +3,7 @@
 CARGO_MANIFEST := src-tauri/Cargo.toml
 NATIVE_DIR := native/bob-native
 
-.PHONY: help setup dev build native probe chip-demo sign-dev test test-rust test-swift test-ui lint fmt check-kiro check clean
+.PHONY: help setup dev build native probe chip-demo sign-dev test test-rust test-swift test-ui screenshot lint fmt check-kiro check clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[35m%-12s\033[0m %s\n", $$1, $$2}'
@@ -39,6 +39,9 @@ test-swift: ## Swift package tests
 
 test-ui: ## Frontend tests
 	npm test
+
+screenshot: ## Capture the UI with headless Chrome into bench-results/local/ (visual review)
+	bash scripts/screenshot.sh
 
 lint: ## Clippy (deny warnings) + TypeScript typecheck
 	cargo clippy --manifest-path $(CARGO_MANIFEST) --all-targets -- -D warnings

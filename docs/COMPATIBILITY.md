@@ -15,8 +15,11 @@ make probe         # observe the focused field for 20 s, print one JSON line per
 make chip-demo     # show a ghost chip at the caret in whatever app you type in (Ctrl+C to stop)
 ```
 
-1. **Grant Accessibility** to the app that runs the command (Terminal, iTerm or your editor): System Settings >
-   Privacy & Security > Accessibility. The first run triggers the prompt.
+1. **Grant Accessibility to the terminal app, not to `bob-native`.** macOS attributes a command-line tool's
+   Accessibility trust to the app that hosts the terminal (iTerm, Terminal, or Kiro if you use its integrated terminal).
+   System Settings > Privacy & Security > Accessibility > "+" > pick that app > switch it on. If it is already listed but
+   the probe still says "not granted", remove it with "-" and add it again. Then **quit the terminal app completely
+   (Cmd+Q) and reopen it**: trust is read when the app starts. The probe prints which app it detected and opens the pane.
 2. For each app in the table: run `make probe`, click into a **text field of that app within a few seconds**, type a few
    words, move the caret with the arrow keys, then read the summary line.
 3. Fill the row:
