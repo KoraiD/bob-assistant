@@ -27,7 +27,15 @@ Budgets are **targets** until a measurement below says otherwise. Reference floo
 Source: https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
 
 ## Measurements
-_None yet. Task 5 adds the harness and the first results table (model, quant, hardware, p50/p95, settings)._
+First real numbers come from the ignored end-to-end test (`real_llama_server_streams_a_ghost_completion`), not from
+the replay harness (Task 5). Two prompts only, so these are smoke numbers, not p50/p95.
 
-| Date | Change | Hardware | Model | Metric | Before | After | Notes |
-|---|---|---|---|---|---|---|---|
+| Date | Change | Hardware | Model | Metric | Result | Notes |
+|---|---|---|---|---|---|---|
+| 2026-11-22 | baseline | Apple M4 Max, macOS 27.2 (dev machine, faster than the M3 floor) | Qwen2.5-1.5B-Instruct Q4_K_M, llama-server b12633, `-ngl 99`, flash-attn auto, ctx 4096, 1 slot | request sent to first token, warm server | 94 ms and 143 ms | via `/completion`, `cache_prompt`, `id_slot 0`, `n_predict 12`. Not yet measured on an M3 |
+
+### Quality notes from the same run
+- "The quick brown fox jumps over the" -> " lazy dog." (good).
+- "Thanks for your email. I will get back to you" -> " as soon as possible. A. 正确 B." The instruct model drifts into
+  exam-style text after the sentence ends. Chip polishing must stop at the sentence boundary and drop script switches
+  (Task 4), and Task 5 compares a base model.

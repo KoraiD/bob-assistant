@@ -18,8 +18,9 @@ BOB is a privacy-first macOS assistant. It adds three capabilities to every app,
 
 ## Status
 
-Tasks 1 and 2 are in place: app shell and tray, haunted theme, the Rust <-> Swift native bridge (protocol, handshake,
-supervision), the Accessibility caret observer and the permissions UI. Ghost Text itself is next. Progress is tracked in [docs/SUBMISSION.md](docs/SUBMISSION.md) and in each spec's `tasks.md`.
+Tasks 1 to 3 are in place: app shell and tray, haunted theme, the Rust <-> Swift native bridge (protocol, handshake,
+supervision), the Accessibility caret observer, the permissions UI and the Brain layer (any local or cloud model).
+Ghost Text itself is next. Progress is tracked in [docs/SUBMISSION.md](docs/SUBMISSION.md) and in each spec's `tasks.md`.
 
 ## Requirements
 
@@ -37,8 +38,15 @@ make test         # Rust, Swift and UI tests
 make check        # everything CI runs
 ```
 
-`make help` lists all tasks. Sidecar models and binaries are fetched or built by scripts (added in later tasks);
-they are never committed.
+`make help` lists all tasks.
+
+### Local model (BOB's own brain)
+```bash
+make sidecars     # downloads the pinned llama.cpp server (SHA-256 verified) into src-tauri/binaries/llama
+make dev          # then open Brains > "BOB's own brain" > Download, then Use
+```
+The default model is Qwen2.5-1.5B-Instruct (Q4_K_M, 1.1 GB, Apache-2.0). You can also add Ollama, LM Studio or any
+OpenAI-compatible endpoint in the Brains tab. Models and binaries are never committed.
 
 ### Permissions (added as features land)
 BOB asks for **Accessibility** (read the caret, insert text) and **Microphone** (dictation). It never asks for
@@ -62,4 +70,4 @@ See `.kiro/steering/structure.md`.
 
 ## License
 
-[MIT](LICENSE). Third-party components and their licenses are listed in `THIRD_PARTY_NOTICES.md` (added with the sidecars).
+[MIT](LICENSE). Third-party components and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

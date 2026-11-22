@@ -57,7 +57,7 @@ Each entrant may receive a one-time allotment of **4,000 Kiro credits**. Request
 
 ## Open questions for the owner
 1. **Ownership:** the rules require the submission to be solely owned by the Entrant with no other person or entity having any right. Please confirm that neither your full-time employer nor your university has any claim on this project, and decide whether you enter as an individual or as your company (an Organization is an eligible Entrant). The student bonus requires an individual student.
-2. **Model licenses:** Qwen2.5-1.5B is the default Ghost candidate. I could not verify the license of Qwen2.5-3B (some sizes use a non-Apache license). Models are downloaded by the user at first run and never redistributed in the repo, but the license must still allow the use. Verified before it ships (Task 3).
+2. ~~Model licenses~~ resolved in Task 3: every catalog model is Apache-2.0 (Qwen2.5-1.5B-Instruct, Qwen3-4B-Instruct-2507, Qwen3-1.7B-Base); Qwen2.5-3B was dropped (non-Apache). Listed in `THIRD_PARTY_NOTICES.md`.
 3. **Signing:** release builds may be signed and notarized with the owner's company Developer ID. Notarization needs App Store Connect API credentials supplied through environment variables; they must never be committed.
 
 ## Repo hygiene before submitting

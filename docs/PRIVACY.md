@@ -26,6 +26,15 @@ feature that changes the answer.
 | Transcripts, typed text, selections | never logged | no |
 | API keys | macOS Keychain | yes |
 
+## Brains
+- Every brain shows "on this Mac", "local" (loopback endpoint) or "cloud: text leaves your Mac". Unparseable endpoints
+  count as cloud. Cloud brains are never used for Ghost Text unless a connection test proves they support it and you
+  pick them.
+- The built-in model server listens on `127.0.0.1` only, needs a random per-launch key (stored in a 0600 file in a
+  0700 per-user directory, never on the command line) and has its web UI disabled. It is stopped when BOB quits; a
+  leftover from a crash is stopped at the next launch.
+- Model files are downloaded from Hugging Face only when you press Download, and are verified with SHA-256.
+
 ## Redaction
 Before a prompt leaves the machine, credential-like tokens are dropped or replaced (`sk-`, `AKIA`, `ghp_`, JWTs,
 PEM blocks, long opaque or hex tokens). Behavior is property-tested.

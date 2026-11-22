@@ -42,3 +42,16 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
 - **Visual review without new permissions:** headless Chrome screenshots of the Vite build (`make screenshot`). The first
   capture looked faded only because it was taken mid fade-in; re-capturing after animations settled showed the real render.
 - **Tests now:** Rust 29 + 2 end-to-end, Swift 42, Vitest 12.
+
+## 2026-11-22: Task 3, Brain layer
+- **Spec to code:** BR-1..BR-11 mapped one-to-one to modules and tests; the correctness properties P1 (SSE chunking),
+  P2 (cancellation), P3 (only verified downloads installed) and P4 (backoff) became property or integration tests.
+- **Research before choosing:** model licenses checked through the Hugging Face API (Qwen2.5-3B is not Apache-2.0, so it
+  was dropped), GGUF SHA-256 from the HF tree API, llama-server flags from `--help` of the pinned build. A unit test now
+  keeps every catalog entry Apache-2.0.
+- **Real-hardware check found three bugs that unit tests could not:** (1) a scripted edit to `lib.rs` silently failed
+  after `cargo fmt` reformatted the code, so the commands were never registered; a new test compares every
+  `invoke("...")` in the UI with the handler list. (2) No logger was installed, so warnings vanished. (3) SIGTERM left
+  `llama-server` running with ~1 GB of RAM. All three are fixed and verified on the running app.
+- **Guard hook paid off:** the Kiroween secret scan flagged a fake `sk-...` test key; the test now builds it at runtime.
+- **Tests now:** Rust 88 + 2 end-to-end (+2 ignored: real Keychain, real model), Swift 48, Vitest 22.
