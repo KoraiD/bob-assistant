@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isTauri } from "../lib/appInfo";
+import { useTauriEvent } from "../lib/useTauriEvent";
 import {
   PROVIDERS,
   ROLES,
@@ -7,7 +8,6 @@ import {
   brainsForRole,
   draftToConfig,
   formatBytes,
-  on,
   percent,
   sidecarLabel,
   validateDraft,
@@ -57,17 +57,13 @@ function ModelCatalog({ models, snapshot, refresh }: { models: ModelInfo[]; snap
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
 
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    on<ProgressEvent>("model-progress", (p) => {
-      setProgress((prev) => ({ ...prev, [p.id]: p }));
-      if (p.done) {
-        if (p.error) setError(p.error);
-        refresh();
-      }
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
-  }, [refresh]);
+  useTauriEvent<ProgressEvent>("model-progress", (p) => {
+    setProgress((prev) => ({ ...prev, [p.id]: p }));
+    if (p.done) {
+      if (p.error) setError(p.error);
+      refresh();
+    }
+  });
 
   const start = async (id: string) => {
     setError(null);
@@ -341,15 +337,11 @@ function TryIt({ snapshot }: { snapshot: Snapshot }) {
   const [meta, setMeta] = useState<string | null>(null);
   const current = useRef<number | null>(null);
 
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    on<TokenEvent>("brain-token", (t) => {
-      if (t.request_id !== current.current) return;
-      if (t.text) setOutput((o) => o + t.text);
-      if (t.done) setMeta(t.error ? `Error: ${t.error}` : `First token in ${t.first_token_ms ?? "?"} ms`);
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
-  }, []);
+  useTauriEvent<TokenEvent>("brain-token", (t) => {
+    if (t.request_id !== current.current) return;
+    if (t.text) setOutput((o) => o + t.text);
+    if (t.done) setMeta(t.error ? `Error: ${t.error}` : `First token in ${t.first_token_ms ?? "?"} ms`);
+  });
 
   const run = async () => {
     setOutput("");
@@ -411,12 +403,9 @@ export function BrainPanel() {
   }, []);
 
   useEffect(() => {
-    if (!isTauri()) return;
-    void refresh();
-    let unlisten: (() => void) | undefined;
-    on("brains-changed", () => void refresh()).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    if (isTauri()) void refresh();
   }, [refresh]);
+  useTauriEvent("brains-changed", () => void refresh());
 
   // While the built-in brain wakes up, poll so the badge updates.
   useEffect(() => {
