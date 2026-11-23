@@ -172,3 +172,8 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
   problems: switching panels lost unsaved profile edits, and hiding the Dock icon reopened the window at every login.
 - **Research before Task 11:** reviews and feature-request boards of Cotypist, Superwhisper, VoiceInk, Wispr Flow
   and rewrite tools, summarized with links in docs/RESEARCH.md. The owner chooses from the proposals.
+- **A deadlock the smoke test caught, not the unit tests:** BOB ignored SIGTERM after the Settings work. A stack
+  sample of the frozen process pointed straight at `general_get`, waiting on a mutex it already held. Two `lock()`
+  calls in one struct literal keep the first guard alive until the end of the statement. The fix locks once, a
+  regression test runs the view on a thread with a 2 s timeout, and a scan found no other statement locking the same
+  mutex twice.

@@ -257,18 +257,21 @@ fn login_item() -> LoginItem {
     }
 }
 
-#[tauri::command]
-pub fn general_get(general: State<'_, General>, pause: State<'_, Arc<Pause>>) -> GeneralView {
+/// The Settings view. Locks the settings once: a second `lock()` in the same expression would deadlock,
+/// because the first guard lives until the end of the statement (this froze the app once).
+pub fn general_view(general: &General, pause: &Pause, login_item: LoginItem) -> GeneralView {
+    let s = general.settings.lock().expect("general").clone();
     GeneralView {
-        show_in_dock: general.settings.lock().expect("general").show_in_dock,
-        open_window_at_launch: general
-            .settings
-            .lock()
-            .expect("general")
-            .open_window_at_launch,
-        login_item: login_item(),
+        show_in_dock: s.show_in_dock,
+        open_window_at_launch: s.open_window_at_launch,
+        login_item,
         pause: pause.view(),
     }
+}
+
+#[tauri::command]
+pub fn general_get(general: State<'_, General>, pause: State<'_, Arc<Pause>>) -> GeneralView {
+    general_view(&general, &pause, login_item())
 }
 
 #[tauri::command]
@@ -328,4 +331,31 @@ pub fn pause_start(app: AppHandle, how: String) -> Result<PauseView, String> {
 #[tauri::command]
 pub fn pause_resume(app: AppHandle) -> PauseView {
     set_pause(&app, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: `general_get` deadlocked on the main thread (double lock in one expression).
+    #[test]
+    fn the_settings_view_returns_promptly() {
+        let general = General {
+            path: std::env::temp_dir().join("bob-general-test.json"),
+            settings: Mutex::new(AppSettings {
+                show_in_dock: false,
+                open_window_at_launch: true,
+            }),
+        };
+        let pause = Pause::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let v = general_view(&general, &pause, LoginItem::Disabled);
+            let _ = tx.send((v.show_in_dock, v.open_window_at_launch, v.pause.paused));
+        });
+        let got = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("general_view deadlocked");
+        assert_eq!(got, (false, true, false));
+    }
 }

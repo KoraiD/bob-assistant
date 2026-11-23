@@ -14,6 +14,7 @@ All notable changes to BOB. Format follows [Keep a Changelog](https://keepachang
 - `make audit` and a CI job for RustSec and npm advisories; docs/SECURITY.md.
 
 ### Fixed
+- The window froze when the Settings view loaded (a mutex locked twice in one statement); found with a stack sample, fixed and covered by a test.
 - Two BOB instances could run at once (two helpers, two model servers, a contested socket); now one per user.
 - API keys could be sent over plain http to a server outside this Mac; now refused, with a clear message in the form.
 - Cloud brains ignored the system proxy; only local brains bypass it now.
