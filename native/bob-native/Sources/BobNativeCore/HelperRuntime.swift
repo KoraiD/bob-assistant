@@ -16,6 +16,7 @@ public final class HelperRuntime {
     private let mode: HelperMode
     private let observer = FocusObserver()
     private let chip = ChipPanel()
+    private let keyTap = KeyTap()
     private var client: SocketClient?
     private var lastAccessibility = false
     private var permissionTimer: Timer?
@@ -70,6 +71,11 @@ public final class HelperRuntime {
             chip.show(text: text, caretAX: anchor)
         case .hideChip:
             chip.hide()
+        case let .insertText(text):
+            TextInserter.insert(text)
+        case let .captureKeys(active):
+            keyTap.isCapturing = active
+            if !active { chip.hide() }
         case .requestPermissions:
             _ = Permissions.accessibilityTrusted(prompt: true)
             Permissions.requestMicrophoneIfPossible { [weak self] _ in
@@ -100,6 +106,10 @@ public final class HelperRuntime {
     private func startObserving() {
         observer.onSnapshot = { [weak self] snap, reason in self?.forward(snap, reason) }
         observer.start()
+        keyTap.onKey = { [weak self] key in try? self?.client?.send(NativeEvent.key(key)) }
+        if !keyTap.install() {
+            FileHandle.standardError.write(Data("bob-native: key tap unavailable (Accessibility not granted yet)\n".utf8))
+        }
     }
 
     private func forward(_ snap: AXSnapshot, _ reason: FocusObserver.Reason) {

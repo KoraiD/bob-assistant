@@ -27,6 +27,13 @@ public enum MicStatus: String, Codable, Equatable, Sendable {
     case undetermined
 }
 
+/// Keys the helper captures while the core asks for it.
+public enum Key: String, Codable, Equatable, Sendable {
+    case tab
+    case shiftTab = "shift_tab"
+    case escape
+}
+
 /// Messages sent by this helper to the core.
 public enum NativeEvent: Equatable, Sendable {
     case hello(version: Int, pid: Int)
@@ -34,6 +41,7 @@ public enum NativeEvent: Equatable, Sendable {
     case focus(appBundleId: String, appName: String, secure: Bool, editable: Bool)
     case textState(appBundleId: String, secure: Bool, beforeCaret: String, selectionLen: Int, caret: Rect?)
     case error(message: String)
+    case key(Key)
     /// Any `type` this build does not know (decode only).
     case unknown
 }
@@ -44,6 +52,8 @@ public enum CoreCommand: Equatable, Sendable {
     case reject(reason: String)
     case showChip(text: String, anchor: Rect)
     case hideChip
+    case insertText(text: String)
+    case captureKeys(active: Bool)
     case requestPermissions
     case quit
     /// Any `type` this build does not know (decode only).
@@ -82,6 +92,8 @@ extension NativeEvent: Codable {
                               caret: try c.decodeIfPresent(Rect.self, forKey: Keys("caret")))
         case "error":
             self = .error(message: try c.decode(String.self, forKey: Keys("message")))
+        case "key":
+            self = .key(try c.decode(Key.self, forKey: Keys("key")))
         default:
             self = .unknown
         }
@@ -114,6 +126,9 @@ extension NativeEvent: Codable {
         case let .error(message):
             try c.encode("error", forKey: Keys("type"))
             try c.encode(message, forKey: Keys("message"))
+        case let .key(key):
+            try c.encode("key", forKey: Keys("type"))
+            try c.encode(key, forKey: Keys("key"))
         case .unknown:
             try c.encode("unknown", forKey: Keys("type"))
         }
@@ -133,6 +148,8 @@ extension CoreCommand: Codable {
             self = .showChip(text: try c.decode(String.self, forKey: Keys("text")),
                              anchor: try c.decode(Rect.self, forKey: Keys("anchor")))
         case "hide_chip": self = .hideChip
+        case "insert_text": self = .insertText(text: try c.decode(String.self, forKey: Keys("text")))
+        case "capture_keys": self = .captureKeys(active: try c.decode(Bool.self, forKey: Keys("active")))
         case "request_permissions": self = .requestPermissions
         case "quit": self = .quit
         default: self = .unknown
@@ -153,6 +170,12 @@ extension CoreCommand: Codable {
             try c.encode(text, forKey: Keys("text"))
             try c.encode(anchor, forKey: Keys("anchor"))
         case .hideChip: try c.encode("hide_chip", forKey: Keys("type"))
+        case let .insertText(text):
+            try c.encode("insert_text", forKey: Keys("type"))
+            try c.encode(text, forKey: Keys("text"))
+        case let .captureKeys(active):
+            try c.encode("capture_keys", forKey: Keys("type"))
+            try c.encode(active, forKey: Keys("active"))
         case .requestPermissions: try c.encode("request_permissions", forKey: Keys("type"))
         case .quit: try c.encode("quit", forKey: Keys("type"))
         case .unknown: try c.encode("unknown", forKey: Keys("type"))
