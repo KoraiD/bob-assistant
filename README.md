@@ -9,7 +9,7 @@ BOB is a privacy-first macOS assistant. It adds three capabilities to every app,
 
 | Capability | What it does | Status |
 |---|---|---|
-| **Ghost Text** | Inline next-word predictions at your caret. `Tab` accepts a word, `Shift+Tab` accepts all, `Esc` dismisses. | Planned (Task 4) |
+| **Ghost Text** | Inline next-word predictions at your caret. `Tab` accepts a word, `Shift+Tab` accepts all, `Esc` dismisses. | v1 (keystroke to chip p50 104 ms on M4 Max) |
 | **Voice Dictation** | Hold a key, speak, release. Clean text lands at the caret. Fully offline with local Whisper. | Planned (Task 8) |
 | **Selection Actions** | Highlight text, press a hotkey, rephrase / fix / summarize / translate in place. | Planned (Task 7) |
 
@@ -18,9 +18,9 @@ BOB is a privacy-first macOS assistant. It adds three capabilities to every app,
 
 ## Status
 
-Tasks 1 to 3 are in place: app shell and tray, haunted theme, the Rust <-> Swift native bridge (protocol, handshake,
-supervision), the Accessibility caret observer, the permissions UI and the Brain layer (any local or cloud model).
-Ghost Text itself is next. Progress is tracked in [docs/SUBMISSION.md](docs/SUBMISSION.md) and in each spec's `tasks.md`.
+Tasks 1 to 4 are in place: app shell and tray, haunted theme, the Rust <-> Swift native bridge (protocol, handshake,
+supervision), the Accessibility caret observer, the permissions UI, the Brain layer (any local or cloud model)
+and Ghost Text v1. Progress is tracked in [docs/SUBMISSION.md](docs/SUBMISSION.md) and in each spec's `tasks.md`.
 
 ## Requirements
 

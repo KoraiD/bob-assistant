@@ -52,3 +52,14 @@ Malformed AX data: treat as "no suggestion", never panic.
 ## Testing strategy
 Unit + property tests for the pure core; mock-brain integration tests for the engine; Swift tests for the
 protocol and chip geometry; manual compatibility matrix (`docs/COMPATIBILITY.md`); replay benchmark (Task 5).
+
+## Implementation notes (Task 4, 2026-11-23)
+- Polishing rules were derived from real model output, not guessed: the default instruct model finishes the sentence,
+  then drifts ("A. 正确 B.", "Which of the following options"). So a chip ends at the first sentence boundary, is capped
+  at 6 words / 48 characters, cuts at a script switch, collapses repeated words and refuses meta/quiz starts.
+- The engine stops reading the stream as soon as the chip is complete (`is_final`), which ends generation early.
+- Typing-through keeps the chip's original anchor text and displays only the remainder; Tab inserts one word and the
+  resulting text event advances the chip, so insertion and typing share one code path.
+- A helper `hello` resets the engine (a restarted helper has no chip and no key capture).
+- Measured end to end with the real model (M4 Max): keystroke to first chip p50 104 ms, p95 114 ms (10 prompts,
+  includes the 70 ms quiet gate). See docs/PERFORMANCE.md.

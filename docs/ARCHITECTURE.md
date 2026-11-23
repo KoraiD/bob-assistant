@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Task 3 (Brain layer). Sections marked *planned* describe the target design from the specs.
+Status: Task 4 (Ghost Text engine). Sections marked *planned* describe the target design from the specs.
 
 ## Overview
 
@@ -57,7 +57,10 @@ flowchart LR
 | llama-server sidecar | `brain/sidecar.rs` | done; fake-server tests for start, auth, stop, crash restart; ignored real-model test |
 | Brain service + IPC commands | `brain/service.rs`, `commands.rs` | done |
 | Brain panel | `src/components/BrainPanel.tsx`, `src/lib/brains.ts` | done |
-| Ghost engine | `src-tauri/src/ghost/*` | planned (Tasks 4 to 6) |
+| Ghost core: redaction, prompt window, chip polish, typing-through, accept-word | `src-tauri/src/ghost/{redact,prompt,chip}.rs` | done; property tests P1 to P5 |
+| Ghost engine (debounce, cancel, stream, keys, quiet zones, stats) | `src-tauri/src/ghost/engine.rs` | done; 12 tests against the real Brain service + test server; ignored real-model pipeline test |
+| Key tap (conditional Tab / Shift+Tab / Esc) and Unicode insertion | `native/bob-native/Sources/BobNativeCore/{KeyTap,TextInserter}.swift` | done; decision logic and chunking tested |
+| Ghost card (on/off, p50/p95) | `src/components/GhostCard.tsx` | done |
 
 ## Decisions log
 | Date | Decision | Reason |
@@ -79,6 +82,26 @@ flowchart LR
 | 2026-11-22 | PID file + startup cleanup, SIGTERM/SIGINT routed to `app.exit` | a crashed or killed BOB would otherwise leave llama-server holding ~1 GB; verified by killing the app |
 | 2026-11-22 | `env_logger` to stderr, metadata only | without a logger `log::warn!` was silently dropped, which hid a startup bug |
 
+## Ghost Text pipeline
+```mermaid
+sequenceDiagram
+  participant App as Any app
+  participant N as bob-native
+  participant E as Ghost engine
+  participant B as Ghost brain
+  App->>N: keystroke (AXValueChanged)
+  N->>E: text_state (text before caret, caret rect)
+  E->>E: typing-through? update chip locally, done
+  E->>E: else quiet gate 70 ms, redact, prefix-stable prompt
+  E->>B: /completion stream (cache_prompt, id_slot 0)
+  B-->>E: tokens
+  E->>N: show_chip (polished, grows per token) + capture_keys on
+  App->>N: Tab (swallowed only while capturing)
+  N->>E: key tab
+  E->>N: insert_text " word"
+  N->>App: synthetic Unicode key events (marked, never re-captured)
+```
+
 ## Brain layer
 `BrainConfig` (provider kind, endpoint, optional model, capability flags) is persisted in `brains.json` (no secrets).
 Roles route features to brains: Ghost Text needs the `ghost` capability (raw completion endpoint), Selection
@@ -87,8 +110,9 @@ brain is removed or loses a capability. A connection test proves capabilities wi
 what it proved. The built-in brain resolves to the running sidecar's loopback endpoint and per-launch key.
 
 ## Native bridge protocol (v1)
-Newline-delimited JSON over `$TMPDIR/bob-<uid>/native.sock`. Helper to core: `hello`, `permissions`, `focus`, `text_state`,
-`error`. Core to helper: `hello_ack`, `reject`, `show_chip`, `hide_chip`, `request_permissions`, `quit`. Unknown `type` values are
+Version 2. Newline-delimited JSON over `$TMPDIR/bob-<uid>/native.sock`. Helper to core: `hello`, `permissions`, `focus`,
+`text_state`, `error`, `key`. Core to helper: `hello_ack`, `reject`, `show_chip`, `hide_chip`, `insert_text`, `capture_keys`,
+`request_permissions`, `quit`. Unknown `type` values are
 ignored on both sides. Shared fixtures: `native/bob-native/Tests/Fixtures/*.jsonl` (decoded and re-encoded by both test suites).
 Typed text only travels in `text_state.before_caret`, is capped to the last 2000 characters, and is never logged.
 

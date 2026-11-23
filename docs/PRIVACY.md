@@ -40,4 +40,10 @@ Before a prompt leaves the machine, credential-like tokens are dropped or replac
 PEM blocks, long opaque or hex tokens). Behavior is property-tested.
 
 ## Quiet zones
-BOB does not read or suggest in secure text fields or in apps on the blocklist.
+BOB does not read or suggest in secure text fields, when no caret position is known, or while text is selected.
+Prompts are redacted before they leave the engine, even for the local brain.
+
+## Keyboard
+While (and only while) a suggestion is visible, BOB swallows Tab, Shift+Tab and Esc. Shortcuts with Cmd, Ctrl, Option
+or Fn always pass through. Text BOB types is marked so BOB never captures its own keystrokes. Key presses are not
+logged or stored.

@@ -65,3 +65,15 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
 - **Where is the app?** There was none: `make dev` runs a bare binary, so permissions went to the terminal. Added
   `make app`: a Developer-ID-signed, hardened-runtime BOB.app with the helper inside, microphone entitlement and usage
   strings (the helper embeds its Info.plist via `-sectcreate`). Verified signature, entitlements, and a clean launch.
+
+## 2026-11-23: Task 4, Ghost Text engine
+- **Spec IDs drove the tests again:** GT-1..GT-18 map to engine tests (quiet gate, cancellation, typing-through, Tab,
+  Shift+Tab, Esc, quiet zones, redaction, helper restart) and to properties P1 to P5.
+- **Property tests found two real bugs in chip polishing before any user saw them:** a quiz check that lowercased text
+  before testing for an uppercase letter, and a repeat check skipped when the caret looked mid-word. 2,560 cases per
+  property afterwards.
+- **A real-model test found a bug the unit tests missed:** every chip froze at its first word, because the overlay was
+  only updated when a chip first appeared. The unit test had asserted only the first chip; it now asserts the final one.
+- **Tooling lesson (third time):** scripted text replacement breaks after `cargo fmt` reformats code. Edits to
+  formatted files now go through exact-match replacement or a full rewrite, and builds run strictly after edits.
+- **Tests now:** Rust 122 + 2 end-to-end (+3 ignored real-world tests), Swift 54, Vitest 25.
