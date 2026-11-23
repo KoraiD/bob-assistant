@@ -4,6 +4,7 @@
 //! Brain layer (registry, providers, built-in llama-server sidecar). Later tasks add the
 //! Ghost/Selection/Dictation engines.
 
+pub mod activity;
 pub mod app_info;
 pub mod bench;
 pub mod brain;
@@ -59,6 +60,30 @@ fn request_permissions(bridge: State<'_, Bridge>) -> Result<(), String> {
     bridge
         .send(&CoreCommand::RequestPermissions)
         .map_err(|e| format!("native helper is not connected: {e}"))
+}
+
+/// Emitted whenever the orb state changes (payload: `activity::OrbView`).
+pub const ORB_EVENT: &str = "orb-state";
+
+/// Tray tooltip for an orb state, in BOB's voice.
+pub fn tray_tooltip(v: &activity::OrbView) -> String {
+    let s = match v.state {
+        activity::Orb::Idle => "BOB is floating nearby",
+        activity::Orb::Listening => "BOB is listening...",
+        activity::Orb::Thinking => "BOB is thinking...",
+        activity::Orb::Haunting => "BOB is haunting your caret",
+        activity::Orb::Error => "BOB needs a hand",
+    };
+    match &v.message {
+        Some(m) if !m.is_empty() => format!("{s}: {m}"),
+        _ => s.to_string(),
+    }
+}
+
+/// IPC: the orb's current state (the UI then follows `orb-state` events).
+#[tauri::command]
+fn orb_get(activity: State<'_, std::sync::Arc<activity::Activity>>) -> activity::OrbView {
+    activity.view()
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
@@ -346,6 +371,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             app_quit,
+            orb_get,
             native_status,
             request_permissions,
             commands::brain_snapshot,
@@ -397,9 +423,24 @@ pub fn run() {
             app.manage(brains.clone());
             commands::autostart_builtin(app.handle().clone(), brains.clone());
 
+            // Live orb state for the window and the tray, observed from engine commands (UI-3).
+            let handle = app.handle().clone();
+            let activity = activity::Activity::new(move |v| {
+                let _ = handle.emit(ORB_EVENT, v.clone());
+                if let Some(tray) = handle.tray_by_id("bob-tray") {
+                    let _ = tray.set_tooltip(Some(tray_tooltip(v)));
+                }
+            });
+            app.manage(activity.clone());
+            let observed = |activity: &std::sync::Arc<activity::Activity>| -> std::sync::Arc<dyn ghost::engine::Sink> {
+                std::sync::Arc::new(activity::ObservedSink {
+                    inner: std::sync::Arc::new(app.state::<Bridge>().inner().clone()),
+                    activity: activity.clone(),
+                })
+            };
+
             // Ghost Text engine: native events in, chip/insert commands out over the bridge.
-            let bridge = app.state::<Bridge>().inner().clone();
-            let sink: std::sync::Arc<dyn ghost::engine::Sink> = std::sync::Arc::new(bridge);
+            let sink = observed(&activity);
             let ghost = tauri::async_runtime::block_on(async {
                 ghost::engine::spawn_ctx(
                     brains,
@@ -411,8 +452,7 @@ pub fn run() {
             });
             app.manage(ghost.clone());
             let selection = {
-                let sink: std::sync::Arc<dyn ghost::engine::Sink> =
-                    std::sync::Arc::new(app.state::<Bridge>().inner().clone());
+                let sink = observed(&activity);
                 let brains = app.state::<commands::Brains>().inner().clone();
                 let dir = app.path().app_config_dir()?;
                 let ctx = context.clone();
@@ -422,8 +462,7 @@ pub fn run() {
             };
             app.manage(selection.clone());
             let dictation = {
-                let sink: std::sync::Arc<dyn ghost::engine::Sink> =
-                    std::sync::Arc::new(app.state::<Bridge>().inner().clone());
+                let sink = observed(&activity);
                 let brains = app.state::<commands::Brains>().inner().clone();
                 let dir = app.path().app_config_dir()?;
                 let models_dir = brains.models_dir().to_path_buf();

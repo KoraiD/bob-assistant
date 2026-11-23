@@ -75,7 +75,7 @@ export function PermissionsCard() {
     <section aria-label="Permissions" className="soft-card panel-in mt-6 p-5">
       <h2 className="mb-1 text-lg font-medium">Permissions</h2>
       <p className="mb-2 text-sm" style={{ color: "var(--text-muted)" }}>
-        BOB never records your screen. It only asks for what each feature needs.
+        BOB only asks for what each feature needs. Reading the screen is opt-in (Personalize).
       </p>
       <ul>
         <Row name="Accessibility" why="Read the caret position and insert text in other apps." state={accessibilityState(status)} />

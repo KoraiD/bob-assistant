@@ -4,6 +4,16 @@ All notable changes to BOB. Format follows [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+### Added (Task 9, haunted UI)
+- Sidebar navigation with a panel per feature (Overview, Ghost Text, Selection Actions, Voice Dictation, Brains, Personalize, About).
+- A live orb in the sidebar (floating, listening, thinking, haunting, needs a hand), driven by the core; the tray tooltip follows it.
+- First-run welcome tour: permissions, BOB's own brain, the speech model and a cheat sheet; reopen it from About.
+- Themes: Midnight (default), Daylight, Match macOS.
+- Accessibility: WCAG AA contrast proven from the tokens in both themes, axe-core audit of every panel, visible focus ring.
+
+### Fixed
+- Daylight theme: accent, pumpkin and status colors failed WCAG AA on white; darkened to pass.
+
 ### Added (Task 8, Voice Dictation)
 - Hold Option+Space (configurable), speak, release: the text is typed at the cursor. Speech is recognized on the Mac by whisper.cpp inside BOB's helper; audio is never saved or sent.
 - Speech models in Overview > Voice Dictation: Whisper large-v3 turbo Q5_0 (default, about 0.3 s for a short phrase) and Whisper base (light); language choice or automatic detection.

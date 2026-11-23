@@ -41,12 +41,16 @@
   --border-strong: rgba(40, 30, 90, 0.18);
   --text: #1f1b3a;
   --text-muted: #6a6590;
-  --accent: #14a36b;
+  /* Darker than the dark theme's hues so text passes WCAG AA on white (tokens.test.ts). */
+  --accent: #0f784f;
   --accent-fg: #ffffff;
-  --accent-soft: rgba(20, 163, 107, 0.12);
-  --accent-2: #e8742a;
-  --accent-2-soft: rgba(232, 116, 42, 0.14);
-  --glow: 0 0 18px rgba(20, 163, 107, 0.25);
+  --accent-soft: rgba(15, 120, 79, 0.12);
+  --accent-2: #a74c12;
+  --accent-2-soft: rgba(167, 76, 18, 0.14);
+  --success: #15854b;
+  --warn: #996b00;
+  --danger: #ea0033;
+  --glow: 0 0 18px rgba(15, 120, 79, 0.25);
   --shadow-card: 0 8px 28px rgba(31, 27, 58, 0.08), 0 1px 2px rgba(31, 27, 58, 0.05);
 }
 
@@ -132,3 +136,67 @@
 .markdown pre { background: var(--surface); border-radius: 0.5rem; padding: 0.5rem; overflow: auto; }
 .markdown table { border-collapse: collapse; }
 .markdown th, .markdown td { border: 1px solid var(--border); padding: 0.2rem 0.5rem; }
+
+/* UI-8: a visible focus ring on every control, in both themes. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* UI-3: the orb. Ring states: idle floats, listening pulses, thinking spins, haunting glows, error turns pumpkin. */
+.orb {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+.orb-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid var(--border-strong);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.orb-listening .orb-ring {
+  border-color: var(--accent);
+  animation: orb-pulse 1.1s ease-in-out infinite;
+}
+.orb-thinking .orb-ring {
+  border-color: var(--accent-soft);
+  border-top-color: var(--accent);
+  animation: orb-spin 0.9s linear infinite;
+}
+.orb-haunting .orb-ring {
+  border-color: var(--accent);
+  box-shadow: var(--glow);
+}
+.orb-error .orb-ring {
+  border-color: var(--accent-2);
+}
+@keyframes orb-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 var(--accent-soft);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 0 8px var(--accent-soft);
+  }
+}
+@keyframes orb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orb-listening .orb-ring,
+  .orb-thinking .orb-ring {
+    animation: none;
+  }
+}
+
+/* Panels start at the top edge, aligned with the Overview heading (cards carry their own top margin). */
+.panel-body > :first-child {
+  margin-top: 0;
+}

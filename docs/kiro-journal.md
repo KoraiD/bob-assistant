@@ -143,3 +143,17 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
 - **State machine first:** the timing rules (250 ms minimum, 5-minute cap, cleanup fallback) are a pure Rust machine with
   two property tests (P1, P2). The async engine around it stays thin.
 - **Tests now:** Rust 191 + 2 end-to-end (+3 ignored real-world tests), Swift 84 (incl. a golden transcription when a model is installed), Vitest 53.
+## 2026-11-23: Task 9, haunted UI
+- **The spec's properties paid off immediately:** the contrast test (P1) failed 7 of 30 pairs on its first run, all in
+  the daylight theme, which had never overridden the status colors. A short script found the closest darker shade of
+  each hue that passes.
+- **Orb state without touching the engines:** every engine already tells the helper what to show (chip, orb, menu
+  status). Wrapping the helper sink in an observer gives one place that knows BOB's state. It took three unit tests
+  and changed no engine.
+- **axe-core in unit tests** caught an `aria-label` on a plain `span` (the wizard's step counter). That is invisible
+  to a screen reader, so it became visually hidden text.
+- **Screenshots as review:** the screenshot script now takes `?theme=` and `?panel=`, so I could see a real layout
+  problem (panels started lower than the Overview heading) and stale copy ("never records your screen", untrue since
+  opt-in screen context). The first fix (a Tailwind arbitrary variant) lost to the utility layer, so a plain
+  unlayered rule replaced it.
+- **Tests now:** Rust 194 + 2 end-to-end (+3 ignored), Swift 84, Vitest 104 (incl. 35 token/palette checks and axe audits of every panel).
