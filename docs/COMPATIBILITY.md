@@ -52,12 +52,15 @@ Taking a screenshot activates the system capture UI, which BOB used to treat as 
 now ignores `com.apple.screencaptureui` and `com.apple.screenshot.launcher` activations (`TransientApps`). Re-test with
 Cmd+Shift+4. A delayed capture also works: `screencapture -T 5 ~/Desktop/chip.png`, then click into the app within 5 s.
 
-## Open: quitting BOB.app (needs a manual check)
-`osascript -e 'tell application id "dev.bob.assistant" to quit'` from the agent's shell did not quit BOB (no
-`applicationWillTerminate`, no `RunEvent::Exit`), but `activate` from the same shell did not work either, so the agent
-shell is most likely not allowed to send Apple Events to other apps (Automation consent). Tray "Quit BOB" and SIGTERM
-go through `app.exit` and are verified to stop BOB, the helper and llama-server. **To check by hand:** Cmd+Q with the BOB
-window focused, and Dock > Quit. Logout depends on the same quit event.
+## Quitting BOB.app
+- **Dock > Quit:** works (owner, 2026-11-23).
+- **Cmd+Q:** did not work (owner, 2026-11-23). Findings: Tauri's default menu was installed with "Quit bob" (named after
+  the Rust package) using `terminate:`, the same action Dock > Quit triggers, so the key equivalent was being lost
+  before the menu. wry documents this class of bug: WKWebView's `performKeyEquivalent:` can consume Cmd shortcuts and
+  stop them reaching the menu (comment referencing tauri-apps/tauri#9426 in `wry/src/wkwebview/class/wry_web_view.rs`).
+- **Fix (needs the owner's confirmation):** BOB now installs its own menu ("BOB > Quit BOB" Cmd+Q calling `app.exit`, the
+  path that also stops llama-server), and the web page catches a plain Cmd+Q itself and calls `app_quit` in case the
+  web view swallows it. Tray "Quit BOB" and SIGTERM are verified.
 
 ## Open spike questions
 1. **TCC attribution of the nested helper.** Partly answered (2026-11-23): `make dev` and `make probe` inherit the

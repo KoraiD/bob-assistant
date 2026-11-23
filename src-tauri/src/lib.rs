@@ -18,7 +18,7 @@ use protocol::{CoreCommand, MicStatus, NativeEvent};
 use std::sync::Mutex;
 use supervisor::{Backoff, Supervisor};
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
     Emitter, Manager, State, WindowEvent,
 };
@@ -33,6 +33,13 @@ struct HelperGuard(#[allow(dead_code)] Mutex<Option<Supervisor>>);
 #[tauri::command]
 fn app_info() -> AppInfo {
     AppInfo::current()
+}
+
+/// IPC: quit BOB the same way the tray item does (used by the in-window Cmd+Q fallback).
+#[tauri::command]
+fn app_quit(app: tauri::AppHandle) {
+    log::info!("quit requested from the window");
+    app.exit(0);
 }
 
 /// IPC: current helper connection and permission status.
@@ -166,6 +173,78 @@ fn start_native_bridge(
     app.manage(HelperGuard(Mutex::new(guard)));
 }
 
+/// BOB's macOS app menu. Replaces Tauri's default, which is titled after the Rust package ("bob") and
+/// whose Quit uses `terminate:`. Here Quit is a regular item that calls `app.exit`, the path that stops
+/// the model server. Edit items stay predefined so copy/paste keep working in BOB's text fields.
+fn app_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let quit = MenuItem::with_id(app, "app-quit", "Quit BOB", true, Some("CmdOrCtrl+Q"))?;
+    let bob = Submenu::with_items(
+        app,
+        "BOB",
+        true,
+        &[
+            &PredefinedMenuItem::about(app, Some("About BOB"), None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, Some("Hide BOB"))?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::show_all(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &quit,
+        ],
+    )?;
+    let edit = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+    let window = Submenu::with_items(
+        app,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::close_window(app, None)?,
+        ],
+    )?;
+    Menu::with_items(app, &[&bob, &edit, &window])
+}
+
+/// Debug aid: log the macOS app menu (titles and accelerators only).
+fn log_app_menu(app: &tauri::App) {
+    let Some(menu) = app.menu() else {
+        log::info!("app menu: none installed");
+        return;
+    };
+    for item in menu.items().unwrap_or_default() {
+        if let Some(sub) = item.as_submenu() {
+            let names: Vec<String> = sub
+                .items()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|i| {
+                    i.as_predefined_menuitem()
+                        .and_then(|p| p.text().ok())
+                        .or_else(|| i.as_menuitem().and_then(|m| m.text().ok()))
+                })
+                .collect();
+            log::info!(
+                "app menu: {:?} -> {:?}",
+                sub.text().unwrap_or_default(),
+                names
+            );
+        }
+    }
+}
+
 /// Route SIGTERM (logout, shutdown, `kill`) and SIGINT (Ctrl+C in a terminal) through the normal quit
 /// path, so `RunEvent::Exit` runs and the model server is stopped instead of orphaned.
 fn quit_on_signals(app: tauri::AppHandle) {
@@ -195,9 +274,17 @@ pub fn run() {
     )
     .try_init();
     tauri::Builder::default()
+        .menu(app_menu)
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "app-quit" {
+                log::info!("quit requested from the app menu");
+                app.exit(0);
+            }
+        })
         .manage(Bridge::new())
         .invoke_handler(tauri::generate_handler![
             app_info,
+            app_quit,
             native_status,
             request_permissions,
             commands::brain_snapshot,
@@ -240,6 +327,7 @@ pub fn run() {
             app.manage(ghost.clone());
             quit_on_signals(app.handle().clone());
 
+            log_app_menu(app);
             let (ax, mic) = setup_tray(app)?;
             let bridge = app.state::<Bridge>().inner().clone();
             start_native_bridge(app, bridge, ghost, ax, mic);
