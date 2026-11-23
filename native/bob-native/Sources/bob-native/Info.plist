@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Embedded into the bob-native executable (__TEXT,__info_plist) by Package.swift, so the bare helper
+     binary has a bundle identity and the usage description macOS requires before microphone access. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>dev.bob.assistant.native</string>
+  <key>CFBundleName</key>
+  <string>BOB Helper</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>BOB listens only while you hold the dictation key, and transcribes on your Mac.</string>
+</dict>
+</plist>

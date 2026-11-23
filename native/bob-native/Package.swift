@@ -1,5 +1,11 @@
 // swift-tools-version: 6.0
+import Foundation
 import PackageDescription
+
+// Embed Info.plist into the executable (__TEXT,__info_plist) so the bare helper has a bundle identity and
+// the NSMicrophoneUsageDescription macOS requires before microphone access.
+let infoPlist = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    .appendingPathComponent("Sources/bob-native/Info.plist").path
 
 // bob-native: the macOS integration helper (Accessibility, event tap, overlays, mic).
 // Logic lives in the BobNativeCore library so it is unit-testable; the executable is a thin shell.
@@ -16,7 +22,12 @@ let package = Package(
     ],
     targets: [
         .target(name: "BobNativeCore"),
-        .executableTarget(name: "bob-native", dependencies: ["BobNativeCore"]),
+        .executableTarget(
+            name: "bob-native",
+            dependencies: ["BobNativeCore"],
+            exclude: ["Info.plist"],
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", infoPlist])]
+        ),
         .testTarget(name: "BobNativeCoreTests", dependencies: ["BobNativeCore"]),
     ],
     swiftLanguageModes: [.v5]

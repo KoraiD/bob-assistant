@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Build a signed BOB.app for local use, with the Swift helper inside it, so macOS shows "BOB" in
+# Privacy & Security and the grants survive rebuilds.
+#
+#   export BOB_SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID)>"   # or the identity's SHA-1 hash
+#   make app            -> src-tauri/target/debug/bundle/macos/BOB.app
+#   open src-tauri/target/debug/bundle/macos/BOB.app
+#
+# Without BOB_SIGN_IDENTITY the app is ad-hoc signed: it works, but macOS treats every rebuild as a new
+# app and asks for permissions again. The identity is read from the environment and never committed.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+IDENTITY="${BOB_SIGN_IDENTITY:--}"
+[ "$IDENTITY" = "-" ] && echo "warning: BOB_SIGN_IDENTITY not set, using ad-hoc signing (permissions reset on every rebuild)" >&2
+
+echo "== helper (release)"
+(cd native/bob-native && swift build -c release >/dev/null)
+HELPER="native/bob-native/.build/release/bob-native"
+
+echo "== app bundle"
+npx tauri build --debug --bundles app >/dev/null
+APP="src-tauri/target/debug/bundle/macos/BOB.app"
+[ -d "$APP" ] || { echo "bundle not found: $APP" >&2; exit 1; }
+
+cp "$HELPER" "$APP/Contents/MacOS/bob-native"
+
+echo "== signing with: $([ "$IDENTITY" = "-" ] && echo ad-hoc || echo "configured identity")"
+# Nested code first, then the bundle (which also re-signs the main executable).
+codesign --force --options runtime --timestamp=none \
+  --entitlements native/bob-native/BobNative.entitlements \
+  --identifier dev.bob.assistant.native --sign "$IDENTITY" "$APP/Contents/MacOS/bob-native"
+codesign --force --options runtime --timestamp=none \
+  --entitlements src-tauri/Entitlements.plist --sign "$IDENTITY" "$APP"
+codesign --verify --strict --deep "$APP"
+
+echo "== done: $APP"
+echo "Open it with:  open \"$APP\""
