@@ -53,7 +53,11 @@ now ignores `com.apple.screencaptureui` and `com.apple.screenshot.launcher` acti
 Cmd+Shift+4. A delayed capture also works: `screencapture -T 5 ~/Desktop/chip.png`, then click into the app within 5 s.
 
 ## Open spike questions
-1. **TCC attribution of the nested helper.** Run `make probe` from Terminal (grant goes to Terminal). Then run the packaged
+1. **TCC attribution of the nested helper.** Partly answered (2026-11-23): `make dev` and `make probe` inherit the
+   terminal's grants. `make app` builds BOB.app with the helper at `Contents/MacOS/bob-native`, both signed with the same
+   Developer ID and hardened runtime; launched with `open`, the helper ran from inside the bundle and connected. Whether
+   macOS shows a single "BOB" entry for both processes needs the owner's grant to confirm.
+   Previous note: Run `make probe` from Terminal (grant goes to Terminal). Then run the packaged
    `BOB.app` (Task 10) and check that the **helper** shows as granted under BOB, not as a separate entry. Dev note: grants are
    tied to the signing identity, so use `make sign-dev` (identity from `BOB_SIGN_IDENTITY`, never committed) to keep grants
    across rebuilds.

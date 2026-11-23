@@ -48,6 +48,16 @@ make dev          # then open Brains > "BOB's own brain" > Download, then Use
 The default model is Qwen2.5-1.5B-Instruct (Q4_K_M, 1.1 GB, Apache-2.0). You can also add Ollama, LM Studio or any
 OpenAI-compatible endpoint in the Brains tab. Models and binaries are never committed.
 
+### Run BOB as a real app (needed for permissions)
+`make dev` runs a bare binary from your terminal, so macOS attributes its permissions to the terminal app.
+To give BOB its own Accessibility and Microphone permissions, build the signed bundle:
+```bash
+export BOB_SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)"   # optional; keeps grants across rebuilds
+make app
+open src-tauri/target/debug/bundle/macos/BOB.app
+```
+Then Overview > Grant permissions, and switch BOB on in System Settings > Privacy & Security.
+
 ### Permissions (added as features land)
 BOB asks for **Accessibility** (read the caret, insert text) and **Microphone** (dictation). It never asks for
 Screen Recording. See [docs/PRIVACY.md](docs/PRIVACY.md).

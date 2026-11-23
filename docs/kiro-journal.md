@@ -55,3 +55,13 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
   `llama-server` running with ~1 GB of RAM. All three are fixed and verified on the running app.
 - **Guard hook paid off:** the Kiroween secret scan flagged a fake `sk-...` test key; the test now builds it at runtime.
 - **Tests now:** Rust 88 + 2 end-to-end (+2 ignored: real Keychain, real model), Swift 48, Vitest 22.
+
+## 2026-11-23: owner feedback on the Brains tab
+- **Duplicated words in "Try it"** turned out to be a UI bug, not the model: an async event listener leaked under React
+  StrictMode's double mount, so every token was appended twice. Fixed with a `useTauriEvent` hook and a test that mounts
+  under StrictMode with an async fake `listen()`. All three listeners in the panel had the same pattern.
+- **"Wrong text"** is model drift after the first sentence (instruct model). Raw output is shown in "Try it"; Ghost Text
+  polishing (Task 4) addresses it.
+- **Where is the app?** There was none: `make dev` runs a bare binary, so permissions went to the terminal. Added
+  `make app`: a Developer-ID-signed, hardened-runtime BOB.app with the helper inside, microphone entitlement and usage
+  strings (the helper embeds its Info.plist via `-sectcreate`). Verified signature, entitlements, and a clean launch.
