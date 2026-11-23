@@ -115,7 +115,36 @@ What this shows (12 traces per run; Task 5 found about 7 points of run-to-run no
 - **Caveat:** half of the seeded memory phrases appear in the corpus, so the memory gain is what a user whose
   phrases recur can expect, not a general gain. A corpus from real accepted phrases would be the next step.
 
-**Decision:** pending, owner's call (PC-8). Defaults stay off.
+**Decision (owner, 2026-11-23):** every layer stays off by default. Personalize offers "Use my remembered
+phrases" on its own, with "Also use the window title" as an optional addition that needs memory. Profile and
+screen text are not offered for Ghost Text (the profile showed no gain; screen text was not benchmarked). They
+remain available to Selection Actions and Dictation, and the benchmark can still measure them.
+
+## Voice Dictation (Task 8, VD-10)
+`bob-native --transcribe <audio> --model <ggml.bin> [--lang xx] [--audio-ctx N]` runs the helper's own
+`Transcriber` (whisper.cpp b5907 xcframework, Metal, greedy decoding, no timestamps) on a file and prints timings.
+Fixtures are synthetic speech from macOS `say`, generated on demand and never committed. They are a 3.2 s English
+sentence, a 12.3 s English paragraph, and a 3.7 s Hungarian sentence (voice Tünde). Measured on an Apple M4 Max,
+2026-11-23; times are warm runs (runs 2 and 3), the first inference after loading was 504 to 591 ms (Metal warm-up).
+
+| Model | Encoder window | 3.2 s English | 12.3 s English | 3.7 s Hungarian | Peak memory | Errors |
+|---|---|---|---|---|---|---|
+| **large-v3-turbo Q5_0 (default)** | **full (30 s)** | **258 ms** | **307 ms** | **266 ms** | **0.9 GB** | **none** |
+| large-v3-turbo Q5_0 | shortened to the clip | 54 ms | 159 ms | 983 ms | 0.9 GB | "the larger sample"; Hungarian sentence repeated (hallucination) |
+| base | full (30 s) | 32 ms | 77 ms | 43 ms | 0.45 GB | "the larger sample"; Hungarian unusable ("Szió annak, hónak...") |
+| base | shortened | 18 ms | 77 ms | 45 ms | 0.45 GB | same |
+
+Decisions:
+- **Default model: large-v3-turbo Q5_0.** It was the only model with no errors and works in many languages.
+  Transcription takes a quarter to a third of a second here, which leaves most of the 1.5 s budget (VD-10) for slower
+  Macs. Base remains as the light option.
+- **Full encoder window.** Shortening it is faster but less accurate and, for Hungarian, both slower and wrong.
+- **Warm-up after loading.** One second of silence is transcribed right after the model loads, so the user's first
+  dictation is not the slow one.
+- The model stays loaded while dictation is on (helper footprint about 0.75 to 0.8 GB). Together with the built-in
+  brain (1.4 GB) that is about 2.3 GB, which fits a 16 GB Mac.
+- **Not measured yet:** release-to-insert in real apps (the Dictation card shows it after each dictation) and any
+  M3 numbers.
 
 ## Measurements
 First real numbers come from the ignored end-to-end test (`real_llama_server_streams_a_ghost_completion`), not from

@@ -235,6 +235,10 @@ pub async fn model_download(
             })
             .await;
         let error = res.err().map(|e| e.to_string());
+        // A new speech model may be the one dictation waits for: tell the helper to load it.
+        if error.is_none() && crate::brain::models::find_speech(&id).is_some() {
+            push_dictation(&app);
+        }
         let _ = app.emit(
             MODEL_PROGRESS,
             ProgressEvent {
@@ -524,5 +528,53 @@ pub async fn selection_set_settings(
         .set_settings(settings)
         .map_err(|e| format!("cannot save the settings: {e}"))?;
     let _ = bridge.send(&selection.hotkey_command());
+    Ok(())
+}
+
+// ---- Voice Dictation ----
+
+/// Send the current dictation configuration to the helper (hotkey, model to load, language).
+pub fn push_dictation(app: &AppHandle) {
+    use tauri::Manager;
+    if let (Some(d), Some(bridge)) = (
+        app.try_state::<crate::dictation::engine::DictationHandle>(),
+        app.try_state::<crate::native_ipc::Bridge>(),
+    ) {
+        let _ = bridge.send(&d.command());
+    }
+}
+
+#[derive(Serialize)]
+pub struct DictationView {
+    pub settings: crate::dictation::settings::DictationSettings,
+    pub models: Vec<ModelInfo>,
+    pub stats: crate::dictation::engine::DictationStats,
+    pub microphone: Option<crate::protocol::MicStatus>,
+}
+
+#[tauri::command]
+pub async fn dictation_get(
+    dictation: State<'_, crate::dictation::engine::DictationHandle>,
+    brains: State<'_, Brains>,
+    bridge: State<'_, crate::native_ipc::Bridge>,
+) -> Result<DictationView, String> {
+    Ok(DictationView {
+        settings: dictation.settings(),
+        models: brains.speech_models(),
+        stats: dictation.stats(),
+        microphone: bridge.status().microphone,
+    })
+}
+
+#[tauri::command]
+pub async fn dictation_set_settings(
+    app: AppHandle,
+    dictation: State<'_, crate::dictation::engine::DictationHandle>,
+    settings: crate::dictation::settings::DictationSettings,
+) -> Result<(), String> {
+    dictation
+        .set_settings(settings)
+        .map_err(|e| format!("cannot save the settings: {e}"))?;
+    push_dictation(&app);
     Ok(())
 }

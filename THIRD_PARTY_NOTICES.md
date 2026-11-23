@@ -10,12 +10,16 @@ binaries or model files below are stored in this repository; scripts download pi
 | [Qwen2.5-1.5B-Instruct GGUF](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF) | Q4_K_M | Apache-2.0 | default local model, downloaded by the user from the Brains tab |
 | [Qwen3-4B-Instruct-2507 GGUF](https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF) (base model by Qwen) | Q4_K_M | Apache-2.0 | optional local model |
 | [Qwen3-1.7B-Base GGUF](https://huggingface.co/mradermacher/Qwen3-1.7B-Base-GGUF) (base model by Qwen) | Q4_K_M | Apache-2.0 | optional, experimental Ghost Text model |
+| [whisper.cpp](https://github.com/ggml-org/whisper.cpp) `whisper.xcframework` (with ggml) | build b5907 (official prebuilt) | MIT | on-device speech recognition linked into the Swift helper (`make whisper`), embedded in BOB.app |
+| [Whisper large-v3 turbo, ggml Q5_0](https://huggingface.co/ggerganov/whisper.cpp) (model by OpenAI) | revision 5359861 | MIT | default dictation model, downloaded by the user |
+| [Whisper base, ggml](https://huggingface.co/ggerganov/whisper.cpp) (model by OpenAI) | revision 5359861 | MIT | light dictation model, downloaded by the user |
 
 ## Libraries
 Rust crates (see `src-tauri/Cargo.lock`) and npm packages (see `package-lock.json`) are used under their own permissive
 licenses (MIT, Apache-2.0, BSD, ISC and similar). Notable: Tauri (MIT/Apache-2.0), tokio (MIT), reqwest (MIT/Apache-2.0),
-rustls (Apache-2.0/ISC/MIT), keyring (MIT/Apache-2.0), React (MIT), Tailwind CSS (MIT), Vite (MIT), Vitest (MIT).
-The Swift helper uses only Apple system frameworks.
+rustls (Apache-2.0/ISC/MIT), keyring (MIT/Apache-2.0), objc2 (MIT), React (MIT), react-markdown, remark-gfm and
+remark-emoji (MIT), Tailwind CSS (MIT), Vite (MIT), Vitest (MIT). Apart from whisper.cpp (above), the Swift helper
+uses only Apple system frameworks.
 
 ## Research references (not code)
 Design decisions cite public documentation and source, for example the llama.cpp server README and the Chromium

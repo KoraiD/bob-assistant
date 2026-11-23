@@ -60,7 +60,8 @@ impl Tone {
 }
 
 /// Which context layers Ghost Text adds to its prompt. All off by default: Ghost Text has the tightest
-/// latency budget, and the benchmark decides whether any layer earns its cost (docs/PERFORMANCE.md).
+/// latency budget. Owner decision after the benchmark (docs/PERFORMANCE.md): the app offers memory alone,
+/// optionally with the window title; profile and screen stay benchmark-only (see `ContextSettings::sanitized`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GhostLayers {
@@ -89,12 +90,26 @@ pub struct ContextSettings {
 }
 
 impl ContextSettings {
+    /// The Ghost layers the app allows: memory, and the window title only together with memory.
+    pub fn sanitized(mut self) -> Self {
+        let g = self.ghost;
+        self.ghost = GhostLayers {
+            profile: false,
+            memory: g.memory,
+            window: g.memory && g.window,
+            screen: false,
+        };
+        self
+    }
+
     pub fn load(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
-            Ok(text) => serde_json::from_str(&text).unwrap_or_else(|_| {
-                let _ = std::fs::rename(path, path.with_extension("json.corrupt"));
-                Self::default()
-            }),
+            Ok(text) => serde_json::from_str::<Self>(&text)
+                .map(Self::sanitized)
+                .unwrap_or_else(|_| {
+                    let _ = std::fs::rename(path, path.with_extension("json.corrupt"));
+                    Self::default()
+                }),
             Err(_) => Self::default(),
         }
     }
@@ -188,7 +203,9 @@ impl ContextHub {
         self.settings.lock().expect("context settings").clone()
     }
 
+    /// Save settings (sanitized: Ghost layers follow the owner's rule).
     pub fn set_settings(&self, s: ContextSettings) -> std::io::Result<()> {
+        let s = s.sanitized();
         let scope_changed = {
             let mut cur = self.settings.lock().expect("context settings");
             let changed = cur.scope != s.scope;
@@ -626,6 +643,33 @@ mod tests {
             Tone::Friendly
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_app_offers_memory_alone_or_with_the_window_title() {
+        let h = ContextHub::in_memory(Default::default(), "");
+        let set = |profile, memory, window, screen| {
+            h.set_settings(ContextSettings {
+                ghost: GhostLayers {
+                    profile,
+                    memory,
+                    window,
+                    screen,
+                },
+                ..Default::default()
+            })
+            .unwrap();
+            h.settings().ghost
+        };
+        assert_eq!(ContextSettings::default().ghost, GhostLayers::default());
+        let only = |memory, window| GhostLayers {
+            memory,
+            window,
+            ..Default::default()
+        };
+        assert_eq!(set(true, true, false, true), only(true, false));
+        assert_eq!(set(false, true, true, false), only(true, true));
+        assert_eq!(set(false, false, true, false), only(false, false));
     }
 
     proptest! {

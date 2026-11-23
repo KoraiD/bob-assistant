@@ -66,8 +66,46 @@ pub const CATALOG: &[ModelEntry] = &[
     },
 ];
 
+/// Speech-to-text models for Voice Dictation (whisper.cpp, run inside the Swift helper). Pinned to one
+/// revision of `ggerganov/whisper.cpp` (MIT); sizes and SHA-256 from the Hugging Face API, read 2026-11-23.
+/// Measured in docs/PERFORMANCE.md (Task 8).
+pub const SPEECH_CATALOG: &[ModelEntry] = &[
+    ModelEntry {
+        id: "whisper-large-v3-turbo-q5",
+        name: "Whisper large-v3 turbo (Q5_0)",
+        role: "Default: accurate in many languages, about 0.3 s for a short phrase on Apple Silicon, about 0.9 GB of memory",
+        file: "ggml-large-v3-turbo-q5_0.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin",
+        size: 574_041_195,
+        sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+        license: "MIT",
+        min_ram_gb: 16,
+    },
+    ModelEntry {
+        id: "whisper-base",
+        name: "Whisper base",
+        role: "Light and very fast; good for English, weak for other languages, about 0.45 GB of memory",
+        file: "ggml-base.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin",
+        size: 147_951_465,
+        sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+        license: "MIT",
+        min_ram_gb: 8,
+    },
+];
+
+/// A language model for the built-in brain (never a speech model).
 pub fn find(id: &str) -> Option<&'static ModelEntry> {
     CATALOG.iter().find(|m| m.id == id)
+}
+
+pub fn find_speech(id: &str) -> Option<&'static ModelEntry> {
+    SPEECH_CATALOG.iter().find(|m| m.id == id)
+}
+
+/// Any downloadable model, language or speech.
+pub fn find_any(id: &str) -> Option<&'static ModelEntry> {
+    find(id).or_else(|| find_speech(id))
 }
 
 /// `~/Library/Application Support/BOB/models` (macOS) or the platform equivalent.
@@ -317,6 +355,17 @@ mod tests {
             );
         }
         assert!(find("qwen2.5-1.5b-instruct-q4km").is_some());
+        for m in SPEECH_CATALOG {
+            assert!(ids.insert(m.id), "duplicate id {}", m.id);
+            assert_eq!(m.sha256.len(), 64);
+            assert!(m
+                .url
+                .starts_with("https://huggingface.co/ggerganov/whisper.cpp/resolve/"));
+            assert!(m.url.ends_with(m.file) && m.file.ends_with(".bin"));
+            assert_eq!(m.license, "MIT");
+            // A speech model can never be started as the built-in language model.
+            assert!(find(m.id).is_none() && find_any(m.id).is_some());
+        }
     }
 
     #[tokio::test]

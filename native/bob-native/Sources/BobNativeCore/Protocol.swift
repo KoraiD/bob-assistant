@@ -48,6 +48,11 @@ public struct Hotkey: Codable, Equatable, Sendable {
     }
 }
 
+/// What the dictation orb shows (VD-3).
+public enum OrbState: String, Codable, Equatable, Sendable {
+    case hidden, listening, thinking, done, error
+}
+
 public enum MicStatus: String, Codable, Equatable, Sendable {
     case granted
     case denied
@@ -76,6 +81,10 @@ public enum NativeEvent: Equatable, Sendable {
     case menuChoice(index: Int)
     case menuCancel
     case replaceResult(ok: Bool, method: String?, error: String?)
+    case dictationKey(pressed: Bool)
+    case transcript(text: String, language: String?, speech: Bool, audioMs: Int, transcribeMs: Int)
+    case dictationError(reason: String)
+    case dictationStatus(modelLoaded: Bool, error: String?)
     case error(message: String)
     case key(Key)
     /// Any `type` this build does not know (decode only).
@@ -98,6 +107,10 @@ public enum CoreCommand: Equatable, Sendable {
     case hideMenu
     case replaceSelection(expected: String, text: String)
     case setHotkey(Hotkey)
+    case setDictation(hotkey: Hotkey?, modelPath: String?, language: String)
+    case startRecording
+    case stopRecording(transcribe: Bool)
+    case orb(state: OrbState, text: String?)
     case quit
     /// Any `type` this build does not know (decode only).
     case unknown
@@ -157,6 +170,19 @@ extension NativeEvent: Codable {
             self = .replaceResult(ok: try c.decode(Bool.self, forKey: Keys("ok")),
                                   method: try c.decodeIfPresent(String.self, forKey: Keys("method")),
                                   error: try c.decodeIfPresent(String.self, forKey: Keys("error")))
+        case "dictation_key":
+            self = .dictationKey(pressed: try c.decode(Bool.self, forKey: Keys("pressed")))
+        case "transcript":
+            self = .transcript(text: try c.decode(String.self, forKey: Keys("text")),
+                               language: try c.decodeIfPresent(String.self, forKey: Keys("language")),
+                               speech: try c.decode(Bool.self, forKey: Keys("speech")),
+                               audioMs: try c.decode(Int.self, forKey: Keys("audio_ms")),
+                               transcribeMs: try c.decode(Int.self, forKey: Keys("transcribe_ms")))
+        case "dictation_error":
+            self = .dictationError(reason: try c.decode(String.self, forKey: Keys("reason")))
+        case "dictation_status":
+            self = .dictationStatus(modelLoaded: try c.decode(Bool.self, forKey: Keys("model_loaded")),
+                                    error: try c.decodeIfPresent(String.self, forKey: Keys("error")))
         case "error":
             self = .error(message: try c.decode(String.self, forKey: Keys("message")))
         case "key":
@@ -219,6 +245,23 @@ extension NativeEvent: Codable {
             try c.encode(ok, forKey: Keys("ok"))
             try c.encode(method, forKey: Keys("method"))
             try c.encode(error, forKey: Keys("error"))
+        case let .dictationKey(pressed):
+            try c.encode("dictation_key", forKey: Keys("type"))
+            try c.encode(pressed, forKey: Keys("pressed"))
+        case let .transcript(text, language, speech, audioMs, transcribeMs):
+            try c.encode("transcript", forKey: Keys("type"))
+            try c.encode(text, forKey: Keys("text"))
+            try c.encode(language, forKey: Keys("language"))
+            try c.encode(speech, forKey: Keys("speech"))
+            try c.encode(audioMs, forKey: Keys("audio_ms"))
+            try c.encode(transcribeMs, forKey: Keys("transcribe_ms"))
+        case let .dictationError(reason):
+            try c.encode("dictation_error", forKey: Keys("type"))
+            try c.encode(reason, forKey: Keys("reason"))
+        case let .dictationStatus(modelLoaded, error):
+            try c.encode("dictation_status", forKey: Keys("type"))
+            try c.encode(modelLoaded, forKey: Keys("model_loaded"))
+            try c.encode(error, forKey: Keys("error"))
         case let .error(message):
             try c.encode("error", forKey: Keys("type"))
             try c.encode(message, forKey: Keys("message"))
@@ -264,6 +307,15 @@ extension CoreCommand: Codable {
             self = .replaceSelection(expected: try c.decode(String.self, forKey: Keys("expected")),
                                      text: try c.decode(String.self, forKey: Keys("text")))
         case "set_hotkey": self = .setHotkey(try c.decode(Hotkey.self, forKey: Keys("hotkey")))
+        case "set_dictation":
+            self = .setDictation(hotkey: try c.decodeIfPresent(Hotkey.self, forKey: Keys("hotkey")),
+                                 modelPath: try c.decodeIfPresent(String.self, forKey: Keys("model_path")),
+                                 language: try c.decode(String.self, forKey: Keys("language")))
+        case "start_recording": self = .startRecording
+        case "stop_recording": self = .stopRecording(transcribe: try c.decode(Bool.self, forKey: Keys("transcribe")))
+        case "orb":
+            self = .orb(state: try c.decode(OrbState.self, forKey: Keys("state")),
+                        text: try c.decodeIfPresent(String.self, forKey: Keys("text")))
         case "quit": self = .quit
         default: self = .unknown
         }
@@ -313,6 +365,19 @@ extension CoreCommand: Codable {
         case let .setHotkey(hotkey):
             try c.encode("set_hotkey", forKey: Keys("type"))
             try c.encode(hotkey, forKey: Keys("hotkey"))
+        case let .setDictation(hotkey, modelPath, language):
+            try c.encode("set_dictation", forKey: Keys("type"))
+            try c.encode(hotkey, forKey: Keys("hotkey"))
+            try c.encode(modelPath, forKey: Keys("model_path"))
+            try c.encode(language, forKey: Keys("language"))
+        case .startRecording: try c.encode("start_recording", forKey: Keys("type"))
+        case let .stopRecording(transcribe):
+            try c.encode("stop_recording", forKey: Keys("type"))
+            try c.encode(transcribe, forKey: Keys("transcribe"))
+        case let .orb(state, text):
+            try c.encode("orb", forKey: Keys("type"))
+            try c.encode(state, forKey: Keys("state"))
+            try c.encode(text, forKey: Keys("text"))
         case .quit: try c.encode("quit", forKey: Keys("type"))
         case .unknown: try c.encode("unknown", forKey: Keys("type"))
         }

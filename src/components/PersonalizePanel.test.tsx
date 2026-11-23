@@ -83,9 +83,16 @@ describe("PersonalizePanel", () => {
 
   it("toggles Ghost Text layers and shows the preview on request", async () => {
     render(<PersonalizePanel />);
-    await userEvent.click(await screen.findByRole("checkbox", { name: "Remembered phrases" }));
+    const windowBox = await screen.findByRole("checkbox", { name: /Also use the window title/ });
+    expect(windowBox).toBeDisabled();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Use my remembered phrases" }));
     expect(invoke).toHaveBeenCalledWith("context_set_settings", {
       settings: expect.objectContaining({ ghost: { profile: false, memory: true, window: false, screen: false } }),
+    });
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Also use the window title/ })).toBeEnabled());
+    await userEvent.click(screen.getByRole("checkbox", { name: /Also use the window title/ }));
+    expect(invoke).toHaveBeenCalledWith("context_set_settings", {
+      settings: expect.objectContaining({ ghost: { profile: false, memory: true, window: true, screen: false } }),
     });
     expect(invoke).not.toHaveBeenCalledWith("context_preview");
     await userEvent.click(screen.getByRole("button", { name: "Show preview" }));

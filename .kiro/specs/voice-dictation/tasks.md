@@ -1,13 +1,12 @@
 # Voice Dictation: tasks
-
-Plan task 8.
-
-- [ ] 1. Pure state machine with property test P1 (_VD-3, VD-4, VD-11_)
-- [ ] 2. Decide and wire the resident whisper approach; model catalog entries (_VD-2_)
-- [ ] 3. Native: hotkey hold detection, AVAudioEngine capture to 16 kHz mono, permission flow (_VD-1, VD-7_)
-- [ ] 4. Transcription client, VAD trim, golden test (_VD-2, VD-5_)
-- [ ] 5. Cleanup presets via brain with fallback P2 (_VD-6_)
-- [ ] 6. Insert at caret; secure field guard (_VD-9_)
-- [ ] 7. Orb listening/thinking states (with haunted-ui) (_VD-3_)
-- [ ] 8. Latency measurement recorded in `docs/PERFORMANCE.md` (_VD-10_)
-- [ ] 9. Docs and journal
+Plan task 8. Tick a box in the same commit as the code.
+- [x] 1. Pure state machine with property test P1 (_VD-3, VD-4, VD-11_): `dictation::machine`
+- [x] 2. Decide and wire the resident whisper approach; model catalog entries (_VD-2_): official whisper.cpp xcframework in the helper (decision log); `SPEECH_CATALOG` with large-v3-turbo Q5_0 (default) and base
+- [x] 3. Native: hotkey hold detection, AVAudioEngine capture to 16 kHz mono, permission flow (_VD-1, VD-7_): Carbon press/release (default Option+Space), `AudioRecorder`, microphone prompt on first use
+- [x] 4. Transcription, VAD, golden test (_VD-2, VD-5_): `Transcriber`, energy-based `SpeechGate`, golden test with `say` audio generated at test time
+- [x] 5. Cleanup presets via brain with fallback P2 (_VD-6_): Clean, Translate to English, Meeting notes; off by default
+- [x] 6. Insert at caret; secure field guard (_VD-9_): in the engine and in the helper's insert path; spacing after a word
+- [x] 7. Orb listening/thinking states (_VD-3_): native `OrbPanel` near the caret, level-reactive, reduced motion honored
+- [x] 8. Latency measurement recorded in `docs/PERFORMANCE.md` (_VD-10_): model timings on fixtures; release-to-insert is shown in the card
+  - [ ] 8.1 Owner check: real dictation in TextEdit, Mail, Chrome; release-to-insert numbers; an M3 measurement
+- [x] 9. Docs and journal

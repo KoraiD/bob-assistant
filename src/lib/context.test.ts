@@ -1,4 +1,12 @@
-import { applyFormat, byteLength } from "./context";
+import { applyFormat, byteLength, ghostLayers } from "./context";
+
+describe("ghostLayers", () => {
+  it("offers memory alone or with the window title, never the window title alone", () => {
+    expect(ghostLayers(true, false)).toEqual({ profile: false, memory: true, window: false, screen: false });
+    expect(ghostLayers(true, true)).toEqual({ profile: false, memory: true, window: true, screen: false });
+    expect(ghostLayers(false, true)).toEqual({ profile: false, memory: false, window: false, screen: false });
+  });
+});
 
 describe("applyFormat", () => {
   it("wraps a selection with inline markers and keeps it selected", () => {

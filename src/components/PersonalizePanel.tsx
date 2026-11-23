@@ -7,7 +7,7 @@ import {
   applyFormat,
   byteLength,
   contextApi,
-  GHOST_LAYERS,
+  ghostLayers,
   SCOPES,
   TONES,
   type ContextPreview,
@@ -155,15 +155,17 @@ export function PersonalizePanel() {
 
       <Card title="Ghost Text context (experimental)" label="Ghost Text context">
         <p className="mb-2 text-xs" style={muted}>
-          Off by default: every layer makes Ghost Text prompts longer. The measured effect on speed and accuracy is in docs/PERFORMANCE.md.
+          Off by default. In BOB's benchmark, remembered phrases raised the share of right next words from 32% to about 40% and cost about 4 ms per suggestion (docs/PERFORMANCE.md).
         </p>
-        <div className="flex flex-wrap gap-4 text-sm">
-          {GHOST_LAYERS.map((l) => (
-            <label key={l.id} className="flex items-center gap-2">
-              <input type="checkbox" checked={s.ghost[l.id]} onChange={(e) => void update({ ghost: { ...s.ghost, [l.id]: e.currentTarget.checked } })} />
-              {l.label}
-            </label>
-          ))}
+        <div className="space-y-2 text-sm">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={s.ghost.memory} onChange={(e) => void update({ ghost: ghostLayers(e.currentTarget.checked, false) })} />
+            Use my remembered phrases
+          </label>
+          <label className="ml-6 flex items-center gap-2" style={s.ghost.memory ? undefined : muted}>
+            <input type="checkbox" disabled={!s.ghost.memory} checked={s.ghost.window} onChange={(e) => void update({ ghost: ghostLayers(true, e.currentTarget.checked) })} />
+            Also use the window title (about 7 ms more)
+          </label>
         </div>
       </Card>
 

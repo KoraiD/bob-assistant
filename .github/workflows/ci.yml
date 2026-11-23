@@ -44,6 +44,8 @@ jobs:
           workspaces: src-tauri
       - run: npm ci
       - run: npm run build # tauri-build needs ../dist
+      - name: Fetch the pinned whisper.cpp xcframework (verified SHA-256)
+        run: bash scripts/fetch-whisper.sh
       - name: Build the Swift helper (used by the end-to-end handshake test)
         run: swift build
         working-directory: native/bob-native
@@ -55,6 +57,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch the pinned whisper.cpp xcframework (verified SHA-256)
+        run: bash scripts/fetch-whisper.sh
       - name: Swift tests
         working-directory: native/bob-native
         run: swift test

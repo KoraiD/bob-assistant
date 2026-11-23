@@ -12,7 +12,9 @@ public enum HelperMode {
 
 /// Wires the observer, the chip and the socket together. Not unit-tested (needs a window server and
 /// permissions); its pieces are tested individually and the whole is covered by the manual matrix.
-public final class HelperRuntime {
+/// State is only touched on the main thread; background callbacks (transcriber, capture) hop back with
+/// `DispatchQueue.main.async`, hence `@unchecked Sendable`.
+public final class HelperRuntime: @unchecked Sendable {
     private let mode: HelperMode
     private let observer = FocusObserver()
     private let chip = ChipPanel()
@@ -22,6 +24,14 @@ public final class HelperRuntime {
     private let menu = ActionMenuPanel()
     /// The app whose selection the menu is working on (SA-7: replacement only goes there).
     private var selectionPID: pid_t = 0
+    // Voice Dictation: audio and transcription stay in this process (VD-8).
+    private let orb = OrbPanel()
+    private let recorder = AudioRecorder()
+    private let transcriber = Transcriber()
+    private var dictationModel: String?
+    private var dictationLanguage = ""
+    /// Last known caret (AX coordinates), to place the orb.
+    private var lastCaret: Rect?
     private var client: SocketClient?
     private var lastAccessibility = false
     private var lastScreenRecording = false
@@ -53,7 +63,7 @@ public final class HelperRuntime {
             self.client = client
             client.startReading(
                 onCommand: { [weak self] cmd in DispatchQueue.main.async { self?.handle(cmd) } },
-                onClose: { exit(0) }  // the core went away: the helper exits with it (NB-5)
+                onClose: { [weak self] in self?.exitCleanly(0) ?? exit(0) }  // the core went away (NB-5)
             )
             try client.send(NativeEvent.hello(version: BobNativeInfo.protocolVersion,
                                               pid: Int(ProcessInfo.processInfo.processIdentifier)))
@@ -80,6 +90,11 @@ public final class HelperRuntime {
         case .hideChip:
             chip.hide()
         case let .insertText(text):
+            // VD-9 / GT-3: never type into a secure field, whoever asked.
+            if let focused = AXReader.focusedElement(),
+               AXReader.string(focused, kAXSubroleAttribute) == (kAXSecureTextFieldSubrole as String) {
+                break
+            }
             TextInserter.insert(text)
         case let .captureKeys(active):
             keyTap.isCapturing = active
@@ -108,13 +123,21 @@ public final class HelperRuntime {
             SelectionIO.replace(expected: expected, text: text, pid: selectionPID) { [weak self] ok, method, error in
                 try? self?.client?.send(NativeEvent.replaceResult(ok: ok, method: method, error: error))
             }
+        case let .setDictation(hotkey, modelPath, language):
+            configureDictation(hotkey: hotkey, modelPath: modelPath, language: language)
+        case .startRecording:
+            startRecording()
+        case let .stopRecording(transcribe):
+            stopRecording(transcribe: transcribe)
+        case let .orb(state, text):
+            orb.show(state, text: text, caretAX: lastCaret)
         case let .setHotkey(hotkey):
             if !hotkeys.register(hotkey) {
                 try? client?.send(NativeEvent.error(message: "hotkey unavailable"))
                 hotkeys.register(HotkeyCenter.defaultHotkey)
             }
         case .quit:
-            NSApp.terminate(nil)
+            exitCleanly(0)
         case .unknown:
             break
         }
@@ -141,8 +164,17 @@ public final class HelperRuntime {
         observer.onSnapshot = { [weak self] snap, reason in self?.forward(snap, reason) }
         observer.start()
         keyTap.onKey = { [weak self] key in try? self?.client?.send(NativeEvent.key(key)) }
-        hotkeys.onPress = { [weak self] in self?.selectionHotkey() }
-        hotkeys.register(HotkeyCenter.defaultHotkey)
+        hotkeys.onPress = { [weak self] slot in
+            switch slot {
+            case .selection: self?.selectionHotkey()
+            case .dictation: try? self?.client?.send(NativeEvent.dictationKey(pressed: true))
+            }
+        }
+        hotkeys.onRelease = { [weak self] slot in
+            if slot == .dictation { try? self?.client?.send(NativeEvent.dictationKey(pressed: false)) }
+        }
+        hotkeys.register(HotkeyCenter.defaultHotkey, slot: .selection)
+        recorder.onLevel = { [weak self] level in self?.orb.setLevel(level) }
         keyTap.onMenuKey = { [weak self] key in self?.menuKey(key) }
         menu.onClick = { [weak self] i in self?.chooseMenu(i) }
         screen.onText = { [weak self] scope, app, text, ms in
@@ -150,6 +182,78 @@ public final class HelperRuntime {
         }
         if !keyTap.install() {
             FileHandle.standardError.write(Data("bob-native: key tap unavailable (Accessibility not granted yet)\n".utf8))
+        }
+    }
+
+    /// Exit after releasing the whisper model (see `Transcriber.shutdown`).
+    func exitCleanly(_ code: Int32) -> Never {
+        _ = recorder.stop(keep: false)
+        transcriber.shutdown()
+        exit(code)
+    }
+
+    // MARK: Voice Dictation
+
+    private func configureDictation(hotkey: Hotkey?, modelPath: String?, language: String) {
+        dictationLanguage = language
+        if let hotkey {
+            if !hotkeys.register(hotkey, slot: .dictation) {
+                try? client?.send(NativeEvent.dictationError(reason: "the dictation hotkey is taken by another app"))
+            }
+        } else {
+            hotkeys.unregister(.dictation)
+        }
+        guard modelPath != dictationModel else { return }
+        dictationModel = modelPath
+        transcriber.setModel(path: modelPath) { [weak self] failure in
+            guard let self else { return }
+            if failure == nil, modelPath != nil {
+                // Warm up Metal so the first real dictation is not the slow one (measured: ~590 vs ~260 ms).
+                self.transcriber.transcribe([Float](repeating: 0, count: 16_000), language: "en") { _ in }
+            }
+            DispatchQueue.main.async {
+                try? self.client?.send(NativeEvent.dictationStatus(modelLoaded: failure == nil && modelPath != nil,
+                                                                   error: failure.map { "\($0)" }))
+            }
+        }
+    }
+
+    private func startRecording() {
+        if Permissions.microphoneStatus() == .undetermined {
+            Permissions.requestMicrophoneIfPossible { [weak self] _ in
+                DispatchQueue.main.async { self?.sendPermissions() }
+            }
+        }
+        do {
+            try recorder.start()
+        } catch let failure as AudioRecorder.Failure {
+            try? client?.send(NativeEvent.dictationError(reason: "\(failure)"))
+        } catch {
+            try? client?.send(NativeEvent.dictationError(reason: "the microphone could not start"))
+        }
+    }
+
+    private func stopRecording(transcribe: Bool) {
+        let samples = recorder.stop(keep: transcribe)
+        guard transcribe else { return }
+        let audioMs = samples.count / 16
+        guard SpeechGate.hasSpeech(samples) else {
+            try? client?.send(NativeEvent.transcript(text: "", language: nil, speech: false, audioMs: audioMs, transcribeMs: 0))
+            return
+        }
+        let language = dictationLanguage.isEmpty ? nil : dictationLanguage
+        transcriber.transcribe(samples, language: language) { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case let .success(r):
+                    try? self?.client?.send(NativeEvent.transcript(text: r.text, language: r.language, speech: true,
+                                                                   audioMs: audioMs, transcribeMs: r.ms))
+                case .failure(.noModel):
+                    try? self?.client?.send(NativeEvent.dictationError(reason: "no_model"))
+                case let .failure(f):
+                    try? self?.client?.send(NativeEvent.dictationError(reason: "\(f)"))
+                }
+            }
         }
     }
 
@@ -188,6 +292,8 @@ public final class HelperRuntime {
     private func forward(_ snap: AXSnapshot, _ reason: FocusObserver.Reason) {
         // Switching away from the app closes an open action menu (SA-7).
         if reason == .appActivated, menu.isMenuVisible, snap.pid != selectionPID { cancelMenu() }
+        if let caret = snap.caret { lastCaret = caret }
+        if reason == .appActivated { lastCaret = snap.caret }
         if reason == .appActivated || reason == .focusChanged {
             try? client?.send(NativeEvent.focus(appBundleId: snap.appBundleId, appName: snap.appName,
                                                 secure: snap.secure, editable: snap.editable))

@@ -25,8 +25,18 @@ APP="src-tauri/target/debug/bundle/macos/BOB.app"
 
 cp "$HELPER" "$APP/Contents/MacOS/bob-native"
 
+# whisper.cpp for on-device dictation (Task 8): embed the framework and let the helper find it.
+WHISPER_FW="native/bob-native/Frameworks/whisper.xcframework/macos-arm64_x86_64/whisper.framework"
+[ -d "$WHISPER_FW" ] || { echo "whisper.framework missing: run make whisper" >&2; exit 1; }
+mkdir -p "$APP/Contents/Frameworks"
+rm -rf "$APP/Contents/Frameworks/whisper.framework"
+cp -R "$WHISPER_FW" "$APP/Contents/Frameworks/"
+otool -l "$APP/Contents/MacOS/bob-native" | grep -q "@executable_path/../Frameworks" ||
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/bob-native"
+
 echo "== signing with: $([ "$IDENTITY" = "-" ] && echo ad-hoc || echo "configured identity")"
 # Nested code first, then the bundle (which also re-signs the main executable).
+codesign --force --options runtime --timestamp=none --sign "$IDENTITY" "$APP/Contents/Frameworks/whisper.framework"
 codesign --force --options runtime --timestamp=none \
   --entitlements native/bob-native/BobNative.entitlements \
   --identifier dev.bob.assistant.native --sign "$IDENTITY" "$APP/Contents/MacOS/bob-native"

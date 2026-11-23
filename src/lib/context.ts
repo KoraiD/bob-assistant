@@ -67,12 +67,13 @@ export const TONES: { id: Tone; label: string }[] = [
   { id: "concise", label: "Concise" },
 ];
 
-export const GHOST_LAYERS: { id: keyof GhostLayers; label: string }[] = [
-  { id: "profile", label: "My profile" },
-  { id: "memory", label: "Remembered phrases" },
-  { id: "window", label: "Window title" },
-  { id: "screen", label: "Screen text (needs a capture scope)" },
-];
+/**
+ * Ghost Text layers the app offers (owner decision after the benchmark): remembered phrases alone, optionally
+ * with the window title. The window title needs memory; profile and screen text stay benchmark-only.
+ */
+export function ghostLayers(memory: boolean, window: boolean): GhostLayers {
+  return { profile: false, memory, window: memory && window, screen: false };
+}
 
 export const contextApi = {
   get: () => invoke<ContextView>("context_get"),

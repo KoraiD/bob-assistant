@@ -128,3 +128,18 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
 - **A test expectation was wrong, not the code:** `NSPasteboard.string(forType:)` joins all items with newlines. A
   probe program confirmed it before the test was changed.
 - **Tests now:** Rust 175 + 2 end-to-end (+3 ignored real-world tests), Swift 76, Vitest 48.
+## 2026-11-23: Ghost memory decision, Task 8 Voice Dictation
+- **Owner decision encoded where it cannot drift:** `ContextSettings::sanitized` reduces any saved Ghost layers to
+  "memory, optionally plus the window title". The UI only offers that, and a test covers it (PC-8a in the spec).
+- **The spike question answered with release metadata, not assumptions:** listing whisper.cpp's release assets showed no
+  macOS server binary, but an official xcframework. Linking it into the helper keeps audio inside the process that
+  records it.
+- **Measured before choosing:** a small `--transcribe` mode in the helper timed two models on `say` fixtures (English and
+  Hungarian). The shortened encoder window looked like a free 2 to 5 times speedup, but the Hungarian fixture exposed a
+  hallucination, so it stays off.
+- **A smoke test found a crash the unit tests could not:** quitting BOB with a model loaded produced a crash report.
+  The log showed a ggml Metal assertion in a static destructor at `exit`. The helper now frees the model before every
+  exit path, verified by counting crash reports before and after.
+- **State machine first:** the timing rules (250 ms minimum, 5-minute cap, cleanup fallback) are a pure Rust machine with
+  two property tests (P1, P2). The async engine around it stays thin.
+- **Tests now:** Rust 191 + 2 end-to-end (+3 ignored real-world tests), Swift 84 (incl. a golden transcription when a model is installed), Vitest 53.

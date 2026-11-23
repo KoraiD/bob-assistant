@@ -33,6 +33,9 @@ and what is visible around the caret. Owner decisions (2026-11-23) are recorded 
 - **PC-8** Ghost Text SHALL use no context layer by default. Each layer (profile, memory, window, screen) SHALL be a
   separate switch, and the benchmark SHALL report each layer's effect on latency and accuracy before any default
   changes. (Owner: measure memory first, then decide; Ghost Text context may be removed.)
+- **PC-8a** After the benchmark (owner, 2026-11-23): Ghost Text SHALL offer only remembered phrases (off by default),
+  and the window title only as an addition to remembered phrases. Settings that ask for anything else SHALL be
+  reduced to that rule.
 ### Transparency
 - **PC-9** THE System SHALL let the user preview, on request, exactly what context would be added to Ghost Text and
   chat prompts, after redaction.

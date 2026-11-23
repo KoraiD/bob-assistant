@@ -272,13 +272,25 @@ impl BrainService {
             .collect()
     }
 
-    /// Download a catalog model. Only one download per model runs at a time.
+    /// Speech models (Voice Dictation) with their install state.
+    pub fn speech_models(&self) -> Vec<ModelInfo> {
+        models::SPEECH_CATALOG
+            .iter()
+            .map(|m| ModelInfo {
+                entry: m.clone(),
+                installed: models::installed_path(&self.models_dir, m).is_file(),
+                active: false,
+            })
+            .collect()
+    }
+
+    /// Download a catalog model (language or speech). Only one download per model runs at a time.
     pub async fn download(
         &self,
         id: &str,
         on_progress: impl FnMut(Progress),
     ) -> Result<PathBuf, ServiceError> {
-        let entry = models::find(id).ok_or_else(|| ServiceError::UnknownModel(id.into()))?;
+        let entry = models::find_any(id).ok_or_else(|| ServiceError::UnknownModel(id.into()))?;
         let flag = Arc::new(AtomicBool::new(false));
         {
             let mut d = self.downloading.lock().await;

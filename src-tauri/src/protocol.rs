@@ -16,7 +16,9 @@ use std::fmt;
 /// Bumped on every incompatible schema change. Both sides refuse to talk on a mismatch (NB-2).
 /// v3: personal context (`context_state`, `screen_text`, `set_context_mode`, `request_screen_recording`,
 /// `permissions.screen_recording`) and Selection Actions (`selection`, `menu_choice`, `menu_cancel`,
-/// `replace_result`, `show_menu`, `menu_status`, `hide_menu`, `replace_selection`, `set_hotkey`).
+/// `replace_result`, `show_menu`, `menu_status`, `hide_menu`, `replace_selection`, `set_hotkey`) and Voice
+/// Dictation (`dictation_key`, `transcript`, `dictation_error`, `dictation_status`, `set_dictation`,
+/// `start_recording`, `stop_recording`, `orb`).
 pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Longest accepted line in bytes. Longer lines are dropped, not buffered without bound.
@@ -77,6 +79,17 @@ pub enum SelectionSource {
 pub struct Hotkey {
     pub key_code: u32,
     pub modifiers: Vec<String>,
+}
+
+/// What the dictation orb shows (VD-3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OrbState {
+    Hidden,
+    Listening,
+    Thinking,
+    Done,
+    Error,
 }
 
 /// Messages sent by the Swift helper to the core.
@@ -140,6 +153,28 @@ pub enum NativeEvent {
     ReplaceResult {
         ok: bool,
         method: Option<String>,
+        error: Option<String>,
+    },
+    /// The dictation hotkey went down or up (VD-1). The core's state machine decides what happens.
+    DictationKey {
+        pressed: bool,
+    },
+    /// Result of a recording (VD-2, VD-5). `speech` is false when the speech gate found no speech, in
+    /// which case `text` is empty and nothing was transcribed. Audio never leaves the helper (VD-8).
+    Transcript {
+        text: String,
+        language: Option<String>,
+        speech: bool,
+        audio_ms: u32,
+        transcribe_ms: u32,
+    },
+    /// Recording or transcription failed; `reason` is "microphone", "no_model" or a short message.
+    DictationError {
+        reason: String,
+    },
+    /// The dictation model finished loading (or failed to).
+    DictationStatus {
+        model_loaded: bool,
         error: Option<String>,
     },
     Error {
@@ -206,6 +241,23 @@ pub enum CoreCommand {
     /// Register the Selection Actions hotkey (replaces the previous one).
     SetHotkey {
         hotkey: Hotkey,
+    },
+    /// Configure Voice Dictation: the hold-to-talk hotkey (None turns dictation off), the whisper model to
+    /// keep loaded, and the language ("" = detect).
+    SetDictation {
+        hotkey: Option<Hotkey>,
+        model_path: Option<String>,
+        language: String,
+    },
+    StartRecording,
+    /// Stop recording; transcribe only when `transcribe` (a too-short hold is discarded, VD-4).
+    StopRecording {
+        transcribe: bool,
+    },
+    /// Show the dictation orb in a state, with an optional short message.
+    Orb {
+        state: OrbState,
+        text: Option<String>,
     },
     Quit,
     /// Any `type` this build does not know.
@@ -302,6 +354,36 @@ impl fmt::Debug for NativeEvent {
                 .field("ok", ok)
                 .field("method", method)
                 .finish_non_exhaustive(),
+            NativeEvent::DictationKey { pressed } => f
+                .debug_struct("DictationKey")
+                .field("pressed", pressed)
+                .finish(),
+            NativeEvent::Transcript {
+                text,
+                language,
+                speech,
+                audio_ms,
+                transcribe_ms,
+            } => f
+                .debug_struct("Transcript")
+                .field("text_chars", &text.chars().count())
+                .field("language", language)
+                .field("speech", speech)
+                .field("audio_ms", audio_ms)
+                .field("transcribe_ms", transcribe_ms)
+                .finish(),
+            NativeEvent::DictationError { reason } => f
+                .debug_struct("DictationError")
+                .field("reason", reason)
+                .finish(),
+            NativeEvent::DictationStatus {
+                model_loaded,
+                error,
+            } => f
+                .debug_struct("DictationStatus")
+                .field("model_loaded", model_loaded)
+                .field("error", error)
+                .finish(),
             NativeEvent::Error { .. } => f.debug_struct("Error").finish_non_exhaustive(),
             NativeEvent::Key { key } => f.debug_struct("Key").field("key", key).finish(),
             NativeEvent::Unknown => f.write_str("Unknown"),

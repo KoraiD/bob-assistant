@@ -5,13 +5,14 @@ import { GhostCard } from "./components/GhostCard";
 import { PermissionsCard } from "./components/PermissionsCard";
 import { PersonalizePanel } from "./components/PersonalizePanel";
 import { SelectionCard } from "./components/SelectionCard";
+import { DictationCard } from "./components/DictationCard";
 import { BROWSER_APP_INFO, getAppInfo, type AppInfo } from "./lib/appInfo";
 
 /** The three capabilities, in priority order (see .kiro/steering/product.md). */
 export const CAPABILITIES = [
   { id: "ghost", title: "Ghost Text", blurb: "Inline next-word predictions at your caret, in any app.", status: "Live" },
   { id: "selection", title: "Selection Actions", blurb: "Highlight text, press a hotkey, rewrite it in place.", status: "Live" },
-  { id: "dictation", title: "Voice Dictation", blurb: "Hold a key, speak, release. Clean text appears at the caret.", status: "Coming soon" },
+  { id: "dictation", title: "Voice Dictation", blurb: "Hold a key, speak, release. Clean text appears at the caret.", status: "Live" },
 ] as const;
 
 /** Footer text: "BOB 0.1.0 · macos aarch64", or a plain preview label outside the app. */
@@ -94,6 +95,7 @@ export default function App() {
 
       <GhostCard />
       <SelectionCard />
+      <DictationCard />
       <PermissionsCard />
         </>
       )}

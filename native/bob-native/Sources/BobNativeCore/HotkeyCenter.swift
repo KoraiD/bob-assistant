@@ -1,15 +1,24 @@
 import Carbon.HIToolbox
 import Foundation
 
-/// The Selection Actions hotkey (SA-1), registered with Carbon's `RegisterEventHotKey`: system-wide, no event
-/// tap, no extra permission, and the key press is not delivered to the frontmost app.
+/// Global hotkeys, registered with Carbon's `RegisterEventHotKey`: system-wide, no event tap, no extra
+/// permission, and the key press is not delivered to the frontmost app. One slot per feature: Selection
+/// Actions (press, SA-1) and Voice Dictation (hold: press and release, VD-1).
 public final class HotkeyCenter {
-    public static let defaultHotkey = Hotkey(keyCode: kVK_ANSI_J, modifiers: ["cmd", "shift"])
+    public enum Slot: UInt32, CaseIterable, Sendable {
+        case selection = 1
+        case dictation = 2
+    }
 
-    private var ref: EventHotKeyRef?
+    public static let defaultHotkey = Hotkey(keyCode: kVK_ANSI_J, modifiers: ["cmd", "shift"])
+    public static let defaultDictationHotkey = Hotkey(keyCode: kVK_Space, modifiers: ["option"])
+    static let signature = OSType(0x424F_4253)  // "BOBS"
+
+    private var refs: [Slot: EventHotKeyRef] = [:]
     private var handler: EventHandlerRef?
-    /// Called on the main thread when the hotkey is pressed.
-    public var onPress: (() -> Void)?
+    /// Called on the main thread.
+    public var onPress: ((Slot) -> Void)?
+    public var onRelease: ((Slot) -> Void)?
 
     public init() {}
 
@@ -34,34 +43,43 @@ public final class HotkeyCenter {
         return mask & UInt32(cmdKey | controlKey | optionKey) != 0
     }
 
-    /// Register `hotkey`, replacing the previous one. Returns false when it is unacceptable or taken.
+    /// Register `hotkey` in `slot`, replacing what was there. False when unacceptable or already taken
+    /// (by BOB's other slot or another app).
     @discardableResult
-    public func register(_ hotkey: Hotkey) -> Bool {
-        unregister()
+    public func register(_ hotkey: Hotkey, slot: Slot = .selection) -> Bool {
+        unregister(slot)
         guard Self.isAcceptable(hotkey), let mask = Self.carbonModifiers(hotkey.modifiers) else { return false }
         installHandlerOnce()
-        let id = EventHotKeyID(signature: OSType(0x424F_4253), id: 1)  // "BOBS"
         var newRef: EventHotKeyRef?
+        let id = EventHotKeyID(signature: Self.signature, id: slot.rawValue)
         let status = RegisterEventHotKey(UInt32(hotkey.keyCode), mask, id, GetApplicationEventTarget(), 0, &newRef)
-        guard status == noErr else { return false }
-        ref = newRef
+        guard status == noErr, let newRef else { return false }
+        refs[slot] = newRef
         return true
     }
 
-    public func unregister() {
-        if let ref { UnregisterEventHotKey(ref) }
-        ref = nil
+    public func unregister(_ slot: Slot) {
+        if let ref = refs.removeValue(forKey: slot) { UnregisterEventHotKey(ref) }
     }
 
     private func installHandlerOnce() {
         guard handler == nil else { return }
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        var specs = [
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased)),
+        ]
         let refcon = Unmanaged.passUnretained(self).toOpaque()
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, refcon in
-            guard let refcon else { return OSStatus(eventNotHandledErr) }
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, refcon in
+            guard let refcon, let event else { return OSStatus(eventNotHandledErr) }
+            var id = EventHotKeyID()
+            let status = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                           nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
+            guard status == noErr, id.signature == HotkeyCenter.signature,
+                  let slot = Slot(rawValue: id.id) else { return OSStatus(eventNotHandledErr) }
+            let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
             let me = Unmanaged<HotkeyCenter>.fromOpaque(refcon).takeUnretainedValue()
-            DispatchQueue.main.async { me.onPress?() }
+            DispatchQueue.main.async { pressed ? me.onPress?(slot) : me.onRelease?(slot) }
             return noErr
-        }, 1, &spec, refcon, &handler)
+        }, specs.count, &specs, refcon, &handler)
     }
 }

@@ -19,3 +19,10 @@
 {"type":"menu_cancel"}
 {"type":"replace_result","ok":true,"method":"accessibility","error":null}
 {"type":"replace_result","ok":false,"method":null,"error":"the selection changed"}
+{"type":"dictation_key","pressed":true}
+{"type":"dictation_key","pressed":false}
+{"type":"transcript","text":"Thanks for the update, I will call you tomorrow.","language":"en","speech":true,"audio_ms":3240,"transcribe_ms":258}
+{"type":"transcript","text":"","language":null,"speech":false,"audio_ms":900,"transcribe_ms":0}
+{"type":"dictation_error","reason":"microphone"}
+{"type":"dictation_status","model_loaded":true,"error":null}
+{"type":"dictation_status","model_loaded":false,"error":"cannot load the dictation model ggml-base.bin"}

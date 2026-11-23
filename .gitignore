@@ -20,6 +20,8 @@ src-tauri/gen/
 # Swift
 native/bob-native/.build/
 native/bob-native/.swiftpm/
+native/bob-native/Frameworks/
+native/bob-native/Frameworks/
 *.xcodeproj/xcuserdata/
 
 # Sidecar binaries and models are fetched/built by scripts, never committed

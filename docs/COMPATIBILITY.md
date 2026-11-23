@@ -61,6 +61,18 @@ note "ok" or what went wrong; the paste fallback briefly changes the clipboard a
 | Slack | - | - | - | - | |
 | VS Code | - | - | - | - | |
 
+## Voice Dictation (Task 8)
+Hold Option+Space, say a sentence, release. Record whether the orb appears near the cursor, whether the text is right,
+and the "typed ... ms after release" number from the Dictation card. On first use macOS asks for the microphone.
+
+| App | Orb placement | Text correct | Release to text | Notes |
+|---|---|---|---|---|
+| TextEdit | - | - | - | |
+| Notes | - | - | - | |
+| Mail (compose) | - | - | - | |
+| Chrome (textarea) | - | - | - | |
+| Slack | - | - | - | Option+Space is also a common shortcut for other assistants; change it in the card if it clashes |
+
 ## Screen context (opt-in)
 Personalize > What BOB can see > "Active window", grant Screen Recording, type in Mail with a thread open, then
 Personalize > Preview: "Text visible on screen" should list the thread. Record capture + OCR time (shown in Personalize).
@@ -107,7 +119,9 @@ Cmd+Shift+4. A delayed capture also works: `screencapture -T 5 ~/Desktop/chip.pn
    `BOB.app` (Task 10) and check that the **helper** shows as granted under BOB, not as a separate entry. Dev note: grants are
    tied to the signing identity, so use `make sign-dev` (identity from `BOB_SIGN_IDENTITY`, never committed) to keep grants
    across rebuilds.
-2. **whisper.cpp resident server.** Not investigated yet (Task 8 decides between a bundled server and `whisper-rs`).
+2. **whisper.cpp resident server.** Answered (2026-11-23): whisper.cpp publishes no macOS server binary (release assets:
+   Windows/Linux binaries and an Apple xcframework). BOB links the official xcframework into the helper (decision log
+   in ARCHITECTURE.md).
 3. **Input Monitoring.** Whether the active event tap and modifier-only hotkeys need it in addition to Accessibility
    (Task 4 / Task 8).
 4. **Which apps return usable `kAXBoundsForRangeParameterizedAttribute` values?** The matrix above answers this; the helper

@@ -69,6 +69,9 @@ flowchart LR
 | Hotkey, selection read/replace, clipboard snapshot, action menu | `HotkeyCenter.swift`, `SelectionIO.swift`, `ActionMenuPanel.swift` | done; P1 to P3 tested; undo per app is a manual check |
 | Selection card (hotkey, actions, custom actions, stats) | `src/components/SelectionCard.tsx` | done |
 | Cmd+Q key monitor | `src-tauri/src/quit_key.rs` | done |
+| Dictation state machine (P1, P2), settings, engine with cleanup presets | `src-tauri/src/dictation/` | done; property tests and engine tests |
+| Hold-to-talk hotkey, microphone capture (16 kHz mono, memory only), speech gate, whisper transcriber, orb | `HotkeyCenter.swift`, `AudioRecorder.swift`, `Transcriber.swift`, `OrbPanel.swift` | done; speech gate, layout and a golden `say` transcription tested |
+| Dictation card (on/off, hotkey, language, cleanup, speech models, timings) | `src/components/DictationCard.tsx` | done |
 
 ## Decisions log
 | Date | Decision | Reason |
@@ -89,6 +92,11 @@ flowchart LR
 | 2026-11-22 | Qwen2.5-3B rejected | its license is not Apache-2.0 ("other" on the model card); every catalog entry must be Apache-2.0 (unit test) |
 | 2026-11-22 | PID file + startup cleanup, SIGTERM/SIGINT routed to `app.exit` | a crashed or killed BOB would otherwise leave llama-server holding ~1 GB; verified by killing the app |
 | 2026-11-22 | `env_logger` to stderr, metadata only | without a logger `log::warn!` was silently dropped, which hid a startup bug |
+| 2026-11-23 | Dictation = whisper.cpp's official xcframework (b5907) linked into the Swift helper | answers spike question 2. whisper.cpp ships no macOS server binary. In-helper inference keeps audio inside the process that records it (VD-8), needs no unauthenticated local HTTP server (`whisper-server` has no auth and a `/load` endpoint), and uses the upstream Metal build pinned by SHA-256. Alternatives: building `whisper-server` in CI, or `whisper-rs` in the Rust core (a crash would take down the app) |
+| 2026-11-23 | Default speech model large-v3-turbo Q5_0; base as the light option | measured on fixtures (PERFORMANCE.md): turbo was exact in English and Hungarian at 258 to 308 ms warm; base is 20 to 80 ms but mangles Hungarian |
+| 2026-11-23 | Full 30 s encoder window (`audio_ctx` = 0) | a shortened window was 2 to 5 times faster but added a word error in English and a hallucinated repeat in Hungarian |
+| 2026-11-23 | Free the whisper model before every helper exit | ggml's Metal backend asserts in a static destructor when model buffers are alive at `exit`, so every quit produced a crash report; reproduced and verified fixed |
+| 2026-11-23 | Dictation state machine in Rust, audio in Swift | the core owns timing rules (250 ms minimum hold, 5-minute cap) as a pure, property-tested machine; the helper only records, gates silence and transcribes |
 
 ## Ghost Text pipeline
 ```mermaid

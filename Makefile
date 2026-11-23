@@ -3,7 +3,7 @@
 CARGO_MANIFEST := src-tauri/Cargo.toml
 NATIVE_DIR := native/bob-native
 
-.PHONY: help setup dev build native app sidecars probe chip-demo sign-dev test test-rust test-swift test-ui screenshot bench lint fmt check-kiro check clean
+.PHONY: help setup dev build whisper native app sidecars probe chip-demo sign-dev test test-rust test-swift test-ui screenshot bench lint fmt check-kiro check clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[35m%-12s\033[0m %s\n", $$1, $$2}'
@@ -17,7 +17,10 @@ dev: ## Run the app in development mode (Tauri + Vite)
 build: ## Build the release app bundle
 	npm run tauri build
 
-native: ## Build the Swift helper (debug)
+whisper: ## Fetch the pinned, SHA-256-verified whisper.cpp xcframework for the helper
+	bash scripts/fetch-whisper.sh
+
+native: whisper ## Build the Swift helper (debug)
 	cd $(NATIVE_DIR) && swift build
 
 app: native ## Build a signed BOB.app with the helper inside (set BOB_SIGN_IDENTITY to keep permission grants)

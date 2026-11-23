@@ -9,6 +9,7 @@ pub mod bench;
 pub mod brain;
 pub mod commands;
 pub mod context;
+pub mod dictation;
 pub mod ghost;
 pub mod native_ipc;
 pub mod protocol;
@@ -120,15 +121,27 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<(MenuItem<tauri::Wry>, MenuItem
 }
 
 /// Bind the socket, supervise the helper and forward status changes to the tray and UI.
-fn start_native_bridge(
-    app: &tauri::App,
-    bridge: Bridge,
+/// The engines that consume helper events.
+struct Engines {
     ghost: ghost::engine::GhostHandle,
     context: commands::Context,
     selection: selection::engine::SelectionHandle,
+    dictation: dictation::engine::DictationHandle,
+}
+
+fn start_native_bridge(
+    app: &tauri::App,
+    bridge: Bridge,
+    engines: Engines,
     ax_item: MenuItem<tauri::Wry>,
     mic_item: MenuItem<tauri::Wry>,
 ) {
+    let Engines {
+        ghost,
+        context,
+        selection,
+        dictation,
+    } = engines;
     let socket = native_ipc::default_socket_path();
     let listener = match native_ipc::bind_socket(&socket) {
         Ok(l) => l,
@@ -157,6 +170,21 @@ fn start_native_bridge(
             if matches!(event, NativeEvent::Hello { .. }) {
                 commands::push_context_mode(&cmd_bridge, &context, &ghost);
                 let _ = cmd_bridge.send(&selection.hotkey_command());
+                let _ = cmd_bridge.send(&dictation.command());
+            }
+            // Voice Dictation (focus and text events only tell it whether the field is secure and what
+            // precedes the caret; transcripts never reach the UI or logs).
+            if matches!(
+                event,
+                NativeEvent::DictationKey { .. }
+                    | NativeEvent::Transcript { .. }
+                    | NativeEvent::DictationError { .. }
+                    | NativeEvent::DictationStatus { .. }
+                    | NativeEvent::Focus { .. }
+                    | NativeEvent::TextState { .. }
+                    | NativeEvent::Hello { .. }
+            ) {
+                dictation.native(event.clone());
             }
             // Selection Actions (selected text never reaches the UI or logs).
             if matches!(
@@ -344,6 +372,8 @@ pub fn run() {
             commands::brain_set_share_context,
             commands::selection_get,
             commands::selection_set_settings,
+            commands::dictation_get,
+            commands::dictation_set_settings,
         ])
         .setup(|app| {
             // Brain service: registry in the config dir, models in the data dir, the sidecar's key and
@@ -391,6 +421,18 @@ pub fn run() {
                 })
             };
             app.manage(selection.clone());
+            let dictation = {
+                let sink: std::sync::Arc<dyn ghost::engine::Sink> =
+                    std::sync::Arc::new(app.state::<Bridge>().inner().clone());
+                let brains = app.state::<commands::Brains>().inner().clone();
+                let dir = app.path().app_config_dir()?;
+                let models_dir = brains.models_dir().to_path_buf();
+                let ctx = context.clone();
+                tauri::async_runtime::block_on(async move {
+                    dictation::engine::spawn(brains, ctx, sink, Some(dir), models_dir)
+                })
+            };
+            app.manage(dictation.clone());
             quit_on_signals(app.handle().clone());
 
             log_app_menu(app);
@@ -398,7 +440,13 @@ pub fn run() {
             quit_key::install(move || handle.exit(0));
             let (ax, mic) = setup_tray(app)?;
             let bridge = app.state::<Bridge>().inner().clone();
-            start_native_bridge(app, bridge, ghost, context, selection, ax, mic);
+            let engines = Engines {
+                ghost,
+                context,
+                selection,
+                dictation,
+            };
+            start_native_bridge(app, bridge, engines, ax, mic);
             Ok(())
         })
         // Closing the window hides it; BOB keeps running from the menu bar.

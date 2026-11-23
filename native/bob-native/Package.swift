@@ -21,7 +21,9 @@ let package = Package(
         .executable(name: "bob-native", targets: ["bob-native"]),
     ],
     targets: [
-        .target(name: "BobNativeCore"),
+        // whisper.cpp (MIT), official prebuilt xcframework, fetched and verified by scripts/fetch-whisper.sh.
+        .binaryTarget(name: "whisper", path: "Frameworks/whisper.xcframework"),
+        .target(name: "BobNativeCore", dependencies: ["whisper"]),
         .executableTarget(
             name: "bob-native",
             dependencies: ["BobNativeCore"],

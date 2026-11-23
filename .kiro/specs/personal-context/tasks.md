@@ -9,6 +9,6 @@ Tick a box in the same commit as the code.
 - [x] 5. Brains: per-brain `share_context`, default by locality; Ghost engine uses the preamble only for allowed brains (_PC-6_; P-PC3)
 - [x] 6. UI: Personalize tab (profile editor, scope, style, Ghost layers, preview) and the per-brain switch (_PC-2, PC-9_)
 - [x] 7. Benchmark: `ghost-bench --context` with a sample profile, seeded memory and window titles; results in docs/PERFORMANCE.md (_PC-8_): memory is the only layer above noise (+8.5 points right word, +4 ms p50)
-- [ ] 8. Owner decision on Ghost Text defaults after the benchmark (_PC-8_)
+- [x] 8. Owner decision on Ghost Text defaults after the benchmark (_PC-8, PC-8a_): memory off by default, offered alone, window title only as an add-on; enforced by `ContextSettings::sanitized` and the Personalize card
 - [ ] 9. Selection Actions and Dictation use `chat_system` (Tasks 7 and 8)
 - [ ] 10. Manual check: screen context in Mail, Safari and a second display; compatibility matrix

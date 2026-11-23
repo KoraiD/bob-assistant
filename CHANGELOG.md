@@ -4,6 +4,19 @@ All notable changes to BOB. Format follows [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+### Added (Task 8, Voice Dictation)
+- Hold Option+Space (configurable), speak, release: the text is typed at the cursor. Speech is recognized on the Mac by whisper.cpp inside BOB's helper; audio is never saved or sent.
+- Speech models in Overview > Voice Dictation: Whisper large-v3 turbo Q5_0 (default, about 0.3 s for a short phrase) and Whisper base (light); language choice or automatic detection.
+- Optional cleanup presets on the Dictation brain (clean up fillers, translate to English, meeting notes) with a fallback to the raw transcript.
+- A native ghost orb near the cursor: listening (breathes with your voice), thinking, done, or a short message.
+- Taps under 250 ms are ignored, silence is detected, recordings stop at 5 minutes, and password fields are never typed into.
+
+### Changed
+- Ghost Text context: remembered phrases (off by default) can be switched on alone, with the window title as an optional addition. Profile and screen text are no longer offered for Ghost Text.
+
+### Fixed
+- The helper no longer crashes on quit once a speech model is loaded (ggml Metal assertion at exit).
+
 ### Added (Task 7, Selection Actions)
 - Select text in any app, press Cmd+Shift+J (configurable), pick an action with the arrow keys, and the result replaces the selection: Fix grammar, Rephrase, Make shorter, Make friendlier, Make professional, Summarize, Translate, and up to 12 of your own actions.
 - Native: Carbon hotkey, selection via Accessibility or Cmd+C (clipboard restored), a non-activating menu panel with streamed preview, and replacement only if the selection is unchanged (Accessibility write, paste fallback).
