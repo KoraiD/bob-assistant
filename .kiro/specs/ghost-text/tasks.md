@@ -12,5 +12,5 @@ Plan tasks 4 to 6. Tick a box in the same commit as the code.
 - [ ] 4. Wire native <-> engine end to end in TextEdit and Notes (_GT-1 to GT-12_): wired and tested up to the helper; **typing in real apps needs the owner's Accessibility grant for BOB.app**
 - [x] 5. Quiet zones: secure fields, no caret, active selection (_GT-3_, GT-4); per-app blocklist moves to Task 6
 - [ ] 6. Robustness: Chromium/Electron AX enablement, missing caret bounds fallback (_GT-4, GT-9_)
-- [ ] 7. Benchmark harness and tuning; record results in `docs/PERFORMANCE.md` (_GT-19, GT-20_)
+- [x] 7. Benchmark harness and tuning; record results in `docs/PERFORMANCE.md` (_GT-19, GT-20_): `ghost-bench`, oracle CI test, model and settings sweep, prompt-cache evidence
 - [ ] 8. Docs: ARCHITECTURE, PRIVACY, COMPATIBILITY updated; journal entry

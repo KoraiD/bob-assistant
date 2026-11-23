@@ -36,6 +36,7 @@ make setup        # installs JS dependencies
 make dev          # runs the app (Tauri + Vite)
 make test         # Rust, Swift and UI tests
 make check        # everything CI runs
+make bench        # Ghost Text benchmark with the real local model (see docs/PERFORMANCE.md)
 ```
 
 `make help` lists all tasks.

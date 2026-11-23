@@ -5,6 +5,12 @@ All notable changes to BOB. Format follows [Keep a Changelog](https://keepachang
 ## [Unreleased]
 
 ### Added
+- Ghost Text benchmark: `make bench` / `ghost-bench` replays seeded typing traces through the real engine and model; scores latency, pause coverage, right-word rate and Tab-accurate keystroke savings; oracle test in CI; `scripts/cache-probe.sh` for prompt-cache reuse; Stop hook with a benchmark smoke test.
+
+### Fixed
+- Cmd+Q now quits BOB (own app menu named BOB, plus an in-page fallback).
+
+### Added (Task 4)
 - Ghost Text v1: polished inline suggestions (sentence boundary, 6 words, script-switch and repeat filters), 70 ms quiet gate, cancellation on every keystroke, typing-through, Tab / Shift+Tab / Esc, quiet zones, redaction, latency stats; Ghost card with on/off and p50/p95; Try it shows the polished chip.
 - Protocol v2: `key`, `insert_text`, `capture_keys`; conditional key tap and Unicode text insertion in the helper.
 - `make app`: signed BOB.app (Developer ID from `BOB_SIGN_IDENTITY`, hardened runtime, microphone entitlement) with the helper bundled.

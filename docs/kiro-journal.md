@@ -77,3 +77,17 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
 - **Tooling lesson (third time):** scripted text replacement breaks after `cargo fmt` reformats code. Edits to
   formatted files now go through exact-match replacement or a full rewrite, and builds run strictly after edits.
 - **Tests now:** Rust 122 + 2 end-to-end (+3 ignored real-world tests), Swift 54, Vitest 25.
+
+## 2026-11-23: Cmd+Q investigation and Task 5, benchmark
+- **Cmd+Q:** Dock > Quit worked, Cmd+Q did not. Reading the Tauri, muda and wry sources showed the default menu quits
+  with `terminate:` (same as Dock), so the shortcut was lost before the menu; wry documents WKWebView consuming Cmd
+  key equivalents. BOB now has its own menu and an in-page Cmd+Q fallback. Owner verification pending.
+- **Benchmark caught its own bug:** the first run reported 49% keystroke savings with 8% word accuracy, which cannot
+  both be true. Per-trace data showed the savings metric credited partial words and the leading space. Fixed to Tab
+  semantics; a property test then flagged a wrong property of mine (accepting nothing is always valid).
+- **Evidence over intuition:** the base model was expected to beat the instruct model for continuation. It did not
+  (31% vs 35% right word, +590 MB). Defaults kept, with the numbers and the run-to-run noise documented.
+- **Prompt cache verified with llama.cpp's own timings:** 1 token evaluated per keystroke instead of 157.
+- **Kiro hook:** a Stop hook now runs the oracle benchmark smoke test (about 3 s) at the end of every agent turn.
+- **Process slip, twice:** I started the benchmark in the same batch as its rebuild and measured the old binary. Fixed
+  by stopping and rerunning; noted so long-running measurements always start after their build completes.

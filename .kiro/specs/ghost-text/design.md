@@ -63,3 +63,8 @@ protocol and chip geometry; manual compatibility matrix (`docs/COMPATIBILITY.md`
 - A helper `hello` resets the engine (a restarted helper has no chip and no key capture).
 - Measured end to end with the real model (M4 Max): keystroke to first chip p50 104 ms, p95 114 ms (10 prompts,
   includes the 70 ms quiet gate). See docs/PERFORMANCE.md.
+
+## Benchmark-driven decisions (Task 5, 2026-11-23)
+GT-19 is met on the development machine: p50 89 ms, p95 99 ms keystroke to first chip (M4 Max; M3 not yet measured).
+The defaults (Qwen2.5-1.5B-Instruct, 70 ms quiet gate, temperature 0.2) were kept on evidence, not changed; see
+docs/PERFORMANCE.md for the table, the noise estimate and the prompt-cache measurement.

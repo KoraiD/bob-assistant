@@ -24,7 +24,8 @@ Custom agents list steering explicitly in `resources` because steering is not au
 | swift-build-on-save | PostFileSave `\.swift$` | catch compile errors immediately |
 | ts-typecheck-on-save | PostFileSave `\.(ts|tsx)$` | catch type errors immediately |
 | kiroween-guard | PostFileSave `.gitignore`, `.kiro/`, `LICENSE` | enforce Kiroween rules |
-| stop-quick-check | Stop | rule guard each turn (benchmark smoke added in Task 5) |
+| stop-quick-check | Stop | Kiroween rule guard each turn |
+| stop-bench-smoke | Stop | oracle replay through the real Ghost engine (about 3 s): latency and scoring regressions surface every turn |
 | task-docs-reminder | PostTaskExec (agent) | keep docs, tasks.md and journal in sync |
 
 ## Custom agents (`.kiro/agents/`)
