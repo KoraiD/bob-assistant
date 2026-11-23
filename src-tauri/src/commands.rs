@@ -1,13 +1,15 @@
-//! Tauri IPC commands for the Brain panel. Thin wrappers around [`BrainService`]; errors become
-//! user-facing strings. Streaming results are delivered as events, keyed by a request id.
+//! Tauri IPC commands for the Brain panel and Ghost Text. Thin wrappers around [`BrainService`] and the
+//! Ghost engine; errors become user-facing strings. Streaming results are delivered as events, keyed by
+//! a request id.
 
 use crate::brain::client::TestReport;
 use crate::brain::registry::Role;
 use crate::brain::service::{BrainService, ModelInfo, Snapshot};
 use crate::brain::{BrainConfig, ChatRequest, CompletionRequest};
+use crate::ghost::engine::{GhostHandle, GhostStats};
 use futures_util::StreamExt;
 use serde::Serialize;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
@@ -22,6 +24,7 @@ pub const BRAIN_TOKEN: &str = "brain-token";
 pub const MODEL_PROGRESS: &str = "model-progress";
 
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
+static GHOST_ENABLED: AtomicBool = AtomicBool::new(true);
 
 fn changed(app: &AppHandle) {
     let _ = app.emit(BRAINS_CHANGED, ());
@@ -91,10 +94,40 @@ pub struct TokenEvent {
     pub first_token_ms: Option<u64>,
     pub done: bool,
     pub error: Option<String>,
+    /// Ghost mode, on the final event: what Ghost Text would actually show (the polished chip).
+    pub polished: Option<String>,
+}
+
+impl TokenEvent {
+    fn token(request_id: u64, text: String, ms: u64) -> Self {
+        Self {
+            request_id,
+            text: Some(text),
+            first_token_ms: Some(ms),
+            done: false,
+            error: None,
+            polished: None,
+        }
+    }
+    fn end(
+        request_id: u64,
+        first: Option<u64>,
+        error: Option<String>,
+        polished: Option<String>,
+    ) -> Self {
+        Self {
+            request_id,
+            text: None,
+            first_token_ms: first,
+            done: true,
+            error,
+            polished,
+        }
+    }
 }
 
 /// "Try it": stream a short completion (`mode = "ghost"`) or chat answer (`"chat"`) from a brain.
-/// Typed text in the prompt comes from the user's own input in the panel and is never logged.
+/// The prompt is the user's own input in the panel and is never logged.
 #[tauri::command]
 pub async fn brain_try(
     app: AppHandle,
@@ -110,11 +143,12 @@ pub async fn brain_try(
             let _ = app.emit(BRAIN_TOKEN, e);
         };
         let started = Instant::now();
-        let stream = if mode == "ghost" {
+        let ghost_mode = mode == "ghost";
+        let stream = if ghost_mode {
             brain
                 .complete_stream(&CompletionRequest {
                     max_tokens: 24,
-                    ..CompletionRequest::ghost(prompt)
+                    ..CompletionRequest::ghost(prompt.clone())
                 })
                 .await
         } else {
@@ -122,7 +156,7 @@ pub async fn brain_try(
                 .chat_stream(&ChatRequest {
                     system: "You are BOB, a concise assistant. Answer in at most two sentences."
                         .into(),
-                    user: prompt,
+                    user: prompt.clone(),
                     max_tokens: 120,
                     temperature: 0.4,
                 })
@@ -130,47 +164,33 @@ pub async fn brain_try(
         };
         let mut stream = match stream {
             Ok(s) => s,
-            Err(e) => {
-                return emit(TokenEvent {
-                    request_id,
-                    text: None,
-                    first_token_ms: None,
-                    done: true,
-                    error: Some(e.to_string()),
-                })
-            }
+            Err(e) => return emit(TokenEvent::end(request_id, None, Some(e.to_string()), None)),
         };
         let mut first = None;
+        let mut raw = String::new();
         while let Some(item) = stream.next().await {
             match item {
                 Ok(text) => {
                     let ms = *first.get_or_insert(started.elapsed().as_millis() as u64);
-                    emit(TokenEvent {
-                        request_id,
-                        text: Some(text),
-                        first_token_ms: Some(ms),
-                        done: false,
-                        error: None,
-                    });
+                    raw.push_str(&text);
+                    emit(TokenEvent::token(request_id, text, ms));
                 }
                 Err(e) => {
-                    return emit(TokenEvent {
+                    return emit(TokenEvent::end(
                         request_id,
-                        text: None,
-                        first_token_ms: first,
-                        done: true,
-                        error: Some(e.to_string()),
-                    })
+                        first,
+                        Some(e.to_string()),
+                        None,
+                    ))
                 }
             }
         }
-        emit(TokenEvent {
-            request_id,
-            text: None,
-            first_token_ms: first,
-            done: true,
-            error: None,
-        });
+        let polished = if ghost_mode {
+            crate::ghost::chip::polish(&raw, &prompt)
+        } else {
+            None
+        };
+        emit(TokenEvent::end(request_id, first, None, polished));
     });
     Ok(request_id)
 }
@@ -213,18 +233,15 @@ pub async fn model_download(
                 );
             })
             .await;
-        let (done_err, total) = match &res {
-            Ok(_) => (None, 0),
-            Err(e) => (Some(e.to_string()), 0),
-        };
+        let error = res.err().map(|e| e.to_string());
         let _ = app.emit(
             MODEL_PROGRESS,
             ProgressEvent {
                 id,
                 downloaded: 0,
-                total,
+                total: 0,
                 done: true,
-                error: done_err,
+                error,
             },
         );
         changed(&app);
@@ -265,12 +282,44 @@ pub async fn builtin_stop(app: AppHandle, brains: State<'_, Brains>) -> Result<(
     Ok(())
 }
 
+/// Ghost Text status for the UI: enabled flag plus recent latency statistics.
+#[derive(Serialize)]
+pub struct GhostStatus {
+    pub enabled: bool,
+    pub stats: GhostStats,
+    pub p50_ms: Option<u64>,
+    pub p95_ms: Option<u64>,
+}
+
+#[tauri::command]
+pub async fn ghost_status(ghost: State<'_, GhostHandle>) -> Result<GhostStatus, String> {
+    let stats = ghost.stats();
+    Ok(GhostStatus {
+        enabled: GHOST_ENABLED.load(Ordering::SeqCst),
+        p50_ms: stats.percentile(50.0),
+        p95_ms: stats.percentile(95.0),
+        stats,
+    })
+}
+
+#[tauri::command]
+pub async fn ghost_set_enabled(ghost: State<'_, GhostHandle>, enabled: bool) -> Result<(), String> {
+    GHOST_ENABLED.store(enabled, Ordering::SeqCst);
+    ghost.set_enabled(enabled);
+    Ok(())
+}
+
 /// At launch: start the built-in brain with the first installed model, if any.
 pub fn autostart_builtin(app: AppHandle, brains: Brains) {
     tauri::async_runtime::spawn(async move {
         let Some(model) = brains.first_installed_model() else {
+            log::info!(
+                "built-in brain: no model installed yet (models dir: {})",
+                brains.models_dir().display()
+            );
             return;
         };
+        log::info!("built-in brain: starting with model {model}");
         if let Err(e) = brains.start_builtin(model, Duration::from_secs(120)).await {
             log::warn!("built-in brain did not start: {e}");
         }

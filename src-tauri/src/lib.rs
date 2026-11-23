@@ -7,6 +7,7 @@
 pub mod app_info;
 pub mod brain;
 pub mod commands;
+pub mod ghost;
 pub mod native_ipc;
 pub mod protocol;
 pub mod supervisor;
@@ -111,6 +112,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<(MenuItem<tauri::Wry>, MenuItem
 fn start_native_bridge(
     app: &tauri::App,
     bridge: Bridge,
+    ghost: ghost::engine::GhostHandle,
     ax_item: MenuItem<tauri::Wry>,
     mic_item: MenuItem<tauri::Wry>,
 ) {
@@ -127,6 +129,16 @@ fn start_native_bridge(
     let serve_bridge = bridge.clone();
     std::thread::spawn(move || {
         serve_bridge.run(listener, |event, status| {
+            // Text, focus and key events drive Ghost Text; they never go to the UI.
+            if matches!(
+                event,
+                NativeEvent::TextState { .. }
+                    | NativeEvent::Focus { .. }
+                    | NativeEvent::Key { .. }
+                    | NativeEvent::Hello { .. }
+            ) {
+                ghost.native(event.clone());
+            }
             // Only status-relevant events reach the UI; typed text never leaves the engine path.
             if matches!(
                 event,
@@ -199,6 +211,8 @@ pub fn run() {
             commands::model_cancel,
             commands::builtin_start,
             commands::builtin_stop,
+            commands::ghost_status,
+            commands::ghost_set_enabled,
         ])
         .setup(|app| {
             // Brain service: registry in the config dir, models in the data dir, the sidecar's key and
@@ -216,12 +230,19 @@ pub fn run() {
                 Box::new(brain::secrets::KeychainStore),
             ));
             app.manage(brains.clone());
-            commands::autostart_builtin(app.handle().clone(), brains);
+            commands::autostart_builtin(app.handle().clone(), brains.clone());
+
+            // Ghost Text engine: native events in, chip/insert commands out over the bridge.
+            let bridge = app.state::<Bridge>().inner().clone();
+            let sink: std::sync::Arc<dyn ghost::engine::Sink> = std::sync::Arc::new(bridge);
+            let ghost =
+                tauri::async_runtime::block_on(async { ghost::engine::spawn(brains, sink) });
+            app.manage(ghost.clone());
             quit_on_signals(app.handle().clone());
 
             let (ax, mic) = setup_tray(app)?;
             let bridge = app.state::<Bridge>().inner().clone();
-            start_native_bridge(app, bridge, ax, mic);
+            start_native_bridge(app, bridge, ghost, ax, mic);
             Ok(())
         })
         // Closing the window hides it; BOB keeps running from the menu bar.

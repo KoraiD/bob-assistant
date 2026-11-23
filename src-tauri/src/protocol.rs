@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Bumped on every incompatible schema change. Both sides refuse to talk on a mismatch (NB-2).
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Longest accepted line in bytes. Longer lines are dropped, not buffered without bound.
 pub const MAX_LINE_BYTES: usize = 1 << 20;
@@ -35,6 +35,15 @@ pub enum MicStatus {
     Granted,
     Denied,
     Undetermined,
+}
+
+/// Keys the helper captures, and only while the core has asked it to (`CaptureKeys { active: true }`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Key {
+    Tab,
+    ShiftTab,
+    Escape,
 }
 
 /// Messages sent by the Swift helper to the core.
@@ -65,6 +74,10 @@ pub enum NativeEvent {
     Error {
         message: String,
     },
+    /// A captured key press (GT-10 to GT-12). Never sent while capture is off (GT-13).
+    Key {
+        key: Key,
+    },
     /// Any `type` this build does not know.
     #[serde(other)]
     Unknown,
@@ -85,6 +98,14 @@ pub enum CoreCommand {
         anchor: Rect,
     },
     HideChip,
+    /// Type `text` at the caret of the focused app (GT-14).
+    InsertText {
+        text: String,
+    },
+    /// Swallow Tab / Shift+Tab / Esc and report them as `Key` events, only while `active` (GT-13).
+    CaptureKeys {
+        active: bool,
+    },
     RequestPermissions,
     Quit,
     /// Any `type` this build does not know.
@@ -135,6 +156,7 @@ impl fmt::Debug for NativeEvent {
                 .field("has_caret", &caret.is_some())
                 .finish(),
             NativeEvent::Error { .. } => f.debug_struct("Error").finish_non_exhaustive(),
+            NativeEvent::Key { key } => f.debug_struct("Key").field("key", key).finish(),
             NativeEvent::Unknown => f.write_str("Unknown"),
         }
     }
@@ -412,6 +434,8 @@ mod tests {
                     }
                 ),
             "(?s).{0,60}".prop_map(|message| NativeEvent::Error { message }),
+            prop_oneof![Just(Key::Tab), Just(Key::ShiftTab), Just(Key::Escape)]
+                .prop_map(|key| NativeEvent::Key { key }),
         ]
     }
 
@@ -464,8 +488,8 @@ mod tests {
         /// NB-3: any object with an unrecognized `type` decodes to Unknown.
         #[test]
         fn unknown_types_decode_to_unknown(t in "[a-z_]{1,20}") {
-            let known = ["hello","permissions","focus","text_state","error",
-                         "hello_ack","reject","show_chip","hide_chip","request_permissions","quit"];
+            let known = ["hello","permissions","focus","text_state","error","key",
+                         "hello_ack","reject","show_chip","hide_chip","insert_text","capture_keys","request_permissions","quit"];
             prop_assume!(!known.contains(&t.as_str()));
             let line = format!(r#"{{"type":"{t}","payload":[1,2,3]}}"#);
             prop_assert_eq!(parse_event(&line).unwrap(), NativeEvent::Unknown);

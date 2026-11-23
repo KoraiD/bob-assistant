@@ -1,6 +1,9 @@
-{"type":"hello_ack","version":1}
-{"type":"reject","reason":"protocol version mismatch: core 1, helper 0"}
+{"type":"hello_ack","version":2}
+{"type":"reject","reason":"protocol version mismatch: core 2, helper 1"}
 {"type":"show_chip","text":" the quick brown","anchor":{"x":120.5,"y":340.25,"width":1.5,"height":18.0}}
 {"type":"hide_chip"}
 {"type":"request_permissions"}
 {"type":"quit"}
+{"type":"insert_text","text":" lazy"}
+{"type":"capture_keys","active":true}
+{"type":"capture_keys","active":false}
