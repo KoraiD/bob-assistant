@@ -1,4 +1,4 @@
-import { brainsForRole, draftToConfig, formatBytes, isCloudUrl, percent, slugify, uniqueId, validateDraft, type BrainView, type Draft } from "./brains";
+import { brainsForRole, ghostSummary, type GhostStatus, draftToConfig, formatBytes, isCloudUrl, percent, slugify, uniqueId, validateDraft, type BrainView, type Draft } from "./brains";
 
 const brain = (id: string, ghost: boolean, chat: boolean): BrainView => ({
   id, name: id, kind: "ollama", endpoint: "http://127.0.0.1:11434", model: null,
@@ -53,5 +53,21 @@ describe("brains helpers", () => {
     const c = draftToConfig({ name: "Cloud", kind: "open_ai_compatible", endpoint: " https://api.x.com ", model: " gpt ", apiKey: "k" }, ["cloud"]);
     expect(c).toMatchObject({ id: "cloud-2", endpoint: "https://api.x.com", model: "gpt", capabilities: { ghost: false, chat: true } });
     expect(JSON.stringify(c)).not.toContain('"k"');
+  });
+});
+
+describe("ghostSummary", () => {
+  const g = (over: Partial<GhostStatus> = {}): GhostStatus => ({
+    enabled: true, p50_ms: null, p95_ms: null,
+    stats: { requests: 0, chips_shown: 0, accepted_words: 0, accepted_all: 0, dismissed: 0, errors: 0, last_error: null, typing_through: 0 },
+    ...over,
+  });
+  it("explains every state in plain words", () => {
+    expect(ghostSummary(null, "builtin", true)).toBe("Checking...");
+    expect(ghostSummary(g({ enabled: false }), "builtin", true)).toBe("Off");
+    expect(ghostSummary(g(), null, true)).toMatch(/Choose a brain/);
+    expect(ghostSummary(g(), "builtin", false)).toMatch(/wake up/);
+    expect(ghostSummary(g(), "builtin", true)).toMatch(/Ready/);
+    expect(ghostSummary(g({ p50_ms: 120, p95_ms: 240 }), "builtin", true)).toBe("Haunting your caret · p50 120 ms · p95 240 ms");
   });
 });

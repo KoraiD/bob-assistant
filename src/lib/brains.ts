@@ -65,6 +65,34 @@ export interface TokenEvent {
   first_token_ms: number | null;
   done: boolean;
   error: string | null;
+  /** Ghost mode, final event: what Ghost Text would show after polishing. */
+  polished: string | null;
+}
+
+export interface GhostStatus {
+  enabled: boolean;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  stats: {
+    requests: number;
+    chips_shown: number;
+    accepted_words: number;
+    accepted_all: number;
+    dismissed: number;
+    errors: number;
+    last_error: string | null;
+    typing_through: number;
+  };
+}
+
+/** One-line summary of Ghost Text health for the Overview card. */
+export function ghostSummary(g: GhostStatus | null, ghostBrain: string | null, builtinAwake: boolean): string {
+  if (!g) return "Checking...";
+  if (!g.enabled) return "Off";
+  if (!ghostBrain) return "Choose a brain for Ghost Text in Brains";
+  if (ghostBrain === "builtin" && !builtinAwake) return "Waiting for BOB's own brain to wake up";
+  if (g.p50_ms !== null) return `Haunting your caret · p50 ${g.p50_ms} ms · p95 ${g.p95_ms} ms`;
+  return "Ready. Pause while typing in any app";
 }
 
 export interface ProgressEvent {
@@ -207,6 +235,8 @@ export const api = {
   cancel: (id: string) => invoke<void>("model_cancel", { id }),
   startBuiltin: (modelId: string) => invoke<void>("builtin_start", { modelId }),
   stopBuiltin: () => invoke<void>("builtin_stop"),
+  ghostStatus: () => invoke<GhostStatus>("ghost_status"),
+  ghostSetEnabled: (enabled: boolean) => invoke<void>("ghost_set_enabled", { enabled }),
 };
 
 export async function on<T>(event: string, handler: (payload: T) => void): Promise<() => void> {

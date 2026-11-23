@@ -335,16 +335,21 @@ function TryIt({ snapshot }: { snapshot: Snapshot }) {
   const [prompt, setPrompt] = useState("Thanks for your message. I will get back to you");
   const [output, setOutput] = useState("");
   const [meta, setMeta] = useState<string | null>(null);
+  const [polished, setPolished] = useState<string | null>(null);
   const current = useRef<number | null>(null);
 
   useTauriEvent<TokenEvent>("brain-token", (t) => {
     if (t.request_id !== current.current) return;
     if (t.text) setOutput((o) => o + t.text);
-    if (t.done) setMeta(t.error ? `Error: ${t.error}` : `First token in ${t.first_token_ms ?? "?"} ms`);
+    if (t.done) {
+      setMeta(t.error ? `Error: ${t.error}` : `First token in ${t.first_token_ms ?? "?"} ms`);
+      setPolished(t.polished);
+    }
   });
 
   const run = async () => {
     setOutput("");
+    setPolished(null);
     setMeta("Thinking...");
     try {
       current.current = await api.tryIt(brainId, prompt, mode);
@@ -373,9 +378,22 @@ function TryIt({ snapshot }: { snapshot: Snapshot }) {
         </Button>
       </div>
       <textarea aria-label="Prompt" className="h-20 w-full rounded-lg p-2 text-sm" style={{ background: "var(--bg)", border: "1px solid var(--border-strong)", color: "var(--text)" }} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      {mode === "ghost" && polished !== null && (
+        <p className="mt-2 text-sm" data-testid="try-polished">
+          <span className="mr-2 text-xs" style={muted}>
+            Ghost Text shows:
+          </span>
+          <span>{prompt}</span>
+          <span style={{ color: "var(--accent)" }}>{polished}</span>
+        </p>
+      )}
       <p className="mt-2 min-h-6 text-sm" data-testid="try-output">
-        {mode === "ghost" && <span>{prompt}</span>}
-        <span style={{ color: "var(--accent)" }}>{output}</span>
+        {mode === "ghost" && (
+          <span className="mr-2 text-xs" style={muted}>
+            Raw model output:
+          </span>
+        )}
+        <span style={{ color: mode === "ghost" ? "var(--text-muted)" : "var(--accent)" }}>{output}</span>
       </p>
       {meta && (
         <p className="text-xs" style={muted} data-testid="try-meta">

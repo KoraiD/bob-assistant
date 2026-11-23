@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { GhostMark } from "./components/GhostMark";
 import { BrainPanel } from "./components/BrainPanel";
+import { GhostCard } from "./components/GhostCard";
 import { PermissionsCard } from "./components/PermissionsCard";
 import { BROWSER_APP_INFO, getAppInfo, type AppInfo } from "./lib/appInfo";
 
 /** The three capabilities, in priority order (see .kiro/steering/product.md). */
 export const CAPABILITIES = [
-  { id: "ghost", title: "Ghost Text", blurb: "Inline next-word predictions at your caret, in any app.", status: "Coming soon" },
+  { id: "ghost", title: "Ghost Text", blurb: "Inline next-word predictions at your caret, in any app.", status: "Live" },
   { id: "selection", title: "Selection Actions", blurb: "Highlight text, press a hotkey, rewrite it in place.", status: "Coming soon" },
   { id: "dictation", title: "Voice Dictation", blurb: "Hold a key, speak, release. Clean text appears at the caret.", status: "Coming soon" },
 ] as const;
@@ -86,6 +87,7 @@ export default function App() {
         ))}
       </section>
 
+      <GhostCard />
       <PermissionsCard />
         </>
       )}
