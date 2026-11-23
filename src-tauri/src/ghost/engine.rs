@@ -23,6 +23,25 @@ use tokio::task::JoinHandle;
 
 /// Quiet gate after the last keystroke before asking the model (perf steering: 60 to 80 ms).
 pub const QUIET: Duration = Duration::from_millis(70);
+/// Tunables, swept by the benchmark (`ghost-bench`). `Default` is what the app ships.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct EngineConfig {
+    pub quiet: Duration,
+    pub max_tokens: u32,
+    pub temperature: f32,
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        let r = CompletionRequest::ghost("");
+        Self {
+            quiet: QUIET,
+            max_tokens: r.max_tokens,
+            temperature: r.temperature,
+        }
+    }
+}
+
 /// How many recent latencies to keep for the UI and the benchmark.
 const STATS_WINDOW: usize = 100;
 
@@ -118,11 +137,21 @@ impl GhostHandle {
     }
 }
 
-/// Start the engine task.
+/// Start the engine task with the shipped settings.
 pub fn spawn(brains: Arc<BrainService>, sink: Arc<dyn Sink>) -> GhostHandle {
+    spawn_with(brains, sink, EngineConfig::default())
+}
+
+/// Start the engine task with explicit settings (benchmark).
+pub fn spawn_with(
+    brains: Arc<BrainService>,
+    sink: Arc<dyn Sink>,
+    config: EngineConfig,
+) -> GhostHandle {
     let (tx, rx) = mpsc::unbounded_channel();
     let stats = Arc::new(Mutex::new(GhostStats::default()));
     let engine = Engine {
+        config,
         brains,
         sink,
         tx: tx.clone(),
@@ -141,6 +170,7 @@ pub fn spawn(brains: Arc<BrainService>, sink: Arc<dyn Sink>) -> GhostHandle {
 }
 
 struct Engine {
+    config: EngineConfig,
     brains: Arc<BrainService>,
     sink: Arc<dyn Sink>,
     tx: mpsc::UnboundedSender<Input>,
@@ -388,9 +418,14 @@ impl Engine {
         self.generation += 1;
         let generation = self.generation;
         self.first_chip_pending = Some((generation, keystroke));
-        let (brains, tx, stats) = (self.brains.clone(), self.tx.clone(), self.stats.clone());
+        let (brains, tx, stats, config) = (
+            self.brains.clone(),
+            self.tx.clone(),
+            self.stats.clone(),
+            self.config,
+        );
         self.pending = Some(tokio::spawn(async move {
-            tokio::time::sleep(QUIET).await;
+            tokio::time::sleep(config.quiet).await;
             let send_done = |error: Option<String>| {
                 let _ = tx.send(Input::Done { generation, error });
             };
@@ -407,7 +442,11 @@ impl Engine {
             }
             stats.lock().expect("stats").requests += 1;
             let mut stream = match brain
-                .complete_stream(&CompletionRequest::ghost(prompt_text))
+                .complete_stream(&CompletionRequest {
+                    max_tokens: config.max_tokens,
+                    temperature: config.temperature,
+                    ..CompletionRequest::ghost(prompt_text)
+                })
                 .await
             {
                 Ok(s) => s,

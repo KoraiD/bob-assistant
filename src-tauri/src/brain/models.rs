@@ -34,7 +34,7 @@ pub const CATALOG: &[ModelEntry] = &[
     ModelEntry {
         id: "qwen2.5-1.5b-instruct-q4km",
         name: "Qwen2.5 1.5B Instruct (Q4_K_M)",
-        role: "Default: Ghost Text and Selection Actions on 16 GB Macs",
+        role: "Default: best Ghost Text in our benchmark, about 1.4 GB of memory",
         file: "qwen2.5-1.5b-instruct-q4_k_m.gguf",
         url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
         size: 1_117_320_736,
@@ -45,7 +45,7 @@ pub const CATALOG: &[ModelEntry] = &[
     ModelEntry {
         id: "qwen3-4b-instruct-2507-q4km",
         name: "Qwen3 4B Instruct 2507 (Q4_K_M)",
-        role: "Higher quality Selection Actions; slower Ghost Text",
+        role: "Larger model for Selection Actions; no Ghost Text gain, about 3.1 GB of memory",
         file: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
         url: "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
         size: 2_497_281_120,
@@ -56,7 +56,7 @@ pub const CATALOG: &[ModelEntry] = &[
     ModelEntry {
         id: "qwen3-1.7b-base-q4km",
         name: "Qwen3 1.7B Base (Q4_K_M, experimental)",
-        role: "Ghost Text candidate (base model, pure continuation); benchmark in Task 5",
+        role: "Experimental base model; slightly below the default in our benchmark",
         file: "Qwen3-1.7B-Base.Q4_K_M.gguf",
         url: "https://huggingface.co/mradermacher/Qwen3-1.7B-Base-GGUF/resolve/main/Qwen3-1.7B-Base.Q4_K_M.gguf",
         size: 1_107_409_024,

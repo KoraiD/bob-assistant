@@ -5,6 +5,7 @@
 //! Ghost/Selection/Dictation engines.
 
 pub mod app_info;
+pub mod bench;
 pub mod brain;
 pub mod commands;
 pub mod ghost;
@@ -221,7 +222,7 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 /// Debug aid: log the macOS app menu (titles and accelerators only).
 fn log_app_menu(app: &tauri::App) {
     let Some(menu) = app.menu() else {
-        log::info!("app menu: none installed");
+        log::debug!("app menu: none installed");
         return;
     };
     for item in menu.items().unwrap_or_default() {
@@ -236,7 +237,7 @@ fn log_app_menu(app: &tauri::App) {
                         .or_else(|| i.as_menuitem().and_then(|m| m.text().ok()))
                 })
                 .collect();
-            log::info!(
+            log::debug!(
                 "app menu: {:?} -> {:?}",
                 sub.text().unwrap_or_default(),
                 names
