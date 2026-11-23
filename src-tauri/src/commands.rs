@@ -6,10 +6,12 @@ use crate::brain::client::TestReport;
 use crate::brain::registry::Role;
 use crate::brain::service::{BrainService, ModelInfo, Snapshot};
 use crate::brain::{BrainConfig, ChatRequest, CompletionRequest};
-use crate::ghost::engine::{GhostHandle, GhostStats};
+use crate::ghost::engine::{GhostHandle, GhostStats, RecentApp};
+use crate::ghost::memory::Memory;
+use crate::ghost::settings::QuietApp;
 use futures_util::StreamExt;
 use serde::Serialize;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
@@ -24,7 +26,6 @@ pub const BRAIN_TOKEN: &str = "brain-token";
 pub const MODEL_PROGRESS: &str = "model-progress";
 
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
-static GHOST_ENABLED: AtomicBool = AtomicBool::new(true);
 
 fn changed(app: &AppHandle) {
     let _ = app.emit(BRAINS_CHANGED, ());
@@ -282,10 +283,14 @@ pub async fn builtin_stop(app: AppHandle, brains: State<'_, Brains>) -> Result<(
     Ok(())
 }
 
-/// Ghost Text status for the UI: enabled flag plus recent latency statistics.
+/// Ghost Text status for the UI: settings, recent apps and latency statistics. Memory contents are
+/// fetched separately (`ghost_memory`) and only when the user opens them.
 #[derive(Serialize)]
 pub struct GhostStatus {
     pub enabled: bool,
+    pub quiet_apps: Vec<QuietApp>,
+    pub recent_apps: Vec<RecentApp>,
+    pub memory_count: usize,
     pub stats: GhostStats,
     pub p50_ms: Option<u64>,
     pub p95_ms: Option<u64>,
@@ -294,8 +299,12 @@ pub struct GhostStatus {
 #[tauri::command]
 pub async fn ghost_status(ghost: State<'_, GhostHandle>) -> Result<GhostStatus, String> {
     let stats = ghost.stats();
+    let settings = ghost.settings();
     Ok(GhostStatus {
-        enabled: GHOST_ENABLED.load(Ordering::SeqCst),
+        enabled: settings.enabled,
+        quiet_apps: settings.quiet_apps,
+        recent_apps: ghost.recent_apps(),
+        memory_count: ghost.memory().phrases.len(),
         p50_ms: stats.percentile(50.0),
         p95_ms: stats.percentile(95.0),
         stats,
@@ -304,8 +313,30 @@ pub async fn ghost_status(ghost: State<'_, GhostHandle>) -> Result<GhostStatus, 
 
 #[tauri::command]
 pub async fn ghost_set_enabled(ghost: State<'_, GhostHandle>, enabled: bool) -> Result<(), String> {
-    GHOST_ENABLED.store(enabled, Ordering::SeqCst);
     ghost.set_enabled(enabled);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ghost_set_quiet(
+    ghost: State<'_, GhostHandle>,
+    bundle_id: String,
+    name: String,
+    quiet: bool,
+) -> Result<(), String> {
+    ghost.set_quiet(&bundle_id, &name, quiet);
+    Ok(())
+}
+
+/// The remembered phrases (shown only when the user opens the list).
+#[tauri::command]
+pub async fn ghost_memory(ghost: State<'_, GhostHandle>) -> Result<Memory, String> {
+    Ok(ghost.memory())
+}
+
+#[tauri::command]
+pub async fn ghost_memory_clear(ghost: State<'_, GhostHandle>) -> Result<(), String> {
+    ghost.clear_memory();
     Ok(())
 }
 

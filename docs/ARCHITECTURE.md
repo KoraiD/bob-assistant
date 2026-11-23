@@ -58,9 +58,10 @@ flowchart LR
 | Brain service + IPC commands | `brain/service.rs`, `commands.rs` | done |
 | Brain panel | `src/components/BrainPanel.tsx`, `src/lib/brains.ts` | done |
 | Ghost core: redaction, prompt window, chip polish, typing-through, accept-word | `src-tauri/src/ghost/{redact,prompt,chip}.rs` | done; property tests P1 to P5 |
-| Ghost engine (debounce, cancel, stream, keys, quiet zones, stats) | `src-tauri/src/ghost/engine.rs` | done; 12 tests against the real Brain service + test server; ignored real-model pipeline test |
+| Ghost engine (debounce, cancel, stream, keys, quiet zones, quiet apps, recent apps, stats) | `src-tauri/src/ghost/engine.rs` | done; 16 tests against the real Brain service + test server; ignored real-model pipeline test |
+| Ghost settings (on/off, quiet apps) and accepted-phrase memory, persisted in the app config dir | `src-tauri/src/ghost/{settings,memory}.rs` | done; property tests for both (memory is P6) |
 | Key tap (conditional Tab / Shift+Tab / Esc) and Unicode insertion | `native/bob-native/Sources/BobNativeCore/{KeyTap,TextInserter}.swift` | done; decision logic and chunking tested |
-| Ghost card (on/off, p50/p95) | `src/components/GhostCard.tsx` | done |
+| Ghost card (on/off, p50/p95, quiet-app switches, remembered phrases with Forget all) | `src/components/GhostCard.tsx` | done |
 
 ## Decisions log
 | Date | Decision | Reason |

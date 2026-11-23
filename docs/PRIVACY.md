@@ -20,7 +20,9 @@ feature that changes the answer.
 | Data | Where it goes | Stored? |
 |---|---|---|
 | Text before the caret (Ghost Text) | the active Ghost brain, after redaction | not stored |
-| Accepted phrases | local `ghost-memory.json` (bounded, most recent first) | yes, locally, deletable in Settings |
+| Accepted phrases | local `ghost-memory.json` (at most 200 phrases of 64 characters, most recent first; secret-looking text is never kept); not sent to any brain yet | yes, locally; view and "Forget all" in the Ghost card |
+| Quiet apps, Ghost on/off | local `ghost-settings.json` | yes, locally |
+| Recently used apps (bundle id and name, last 12) | the quiet-apps list in the Ghost card | in memory only, gone when BOB quits |
 | Selected text (Selection Actions) | the selection brain, after redaction | not stored |
 | Audio (Dictation) | in memory, to the local transcriber | never written to disk |
 | Transcripts, typed text, selections | never logged | no |
@@ -42,6 +44,11 @@ PEM blocks, long opaque or hex tokens). Behavior is property-tested.
 ## Quiet zones
 BOB does not read or suggest in secure text fields, when no caret position is known, or while text is selected.
 Prompts are redacted before they leave the engine, even for the local brain.
+
+Quiet apps get no suggestions and no text from them reaches any brain. The defaults are terminals (Terminal, iTerm, Warp,
+Ghostty, kitty, Alacritty, WezTerm), password managers (1Password, Bitwarden, Passwords, Keychain Access) and BOB
+itself; the Ghost card lists them with the apps you used recently, and
+one switch per app adds or removes it. Changes apply at once, including to a suggestion already on screen.
 
 ## Keyboard
 While (and only while) a suggestion is visible, BOB swallows Tab, Shift+Tab and Esc. Shortcuts with Cmd, Ctrl, Option

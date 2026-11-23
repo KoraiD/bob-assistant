@@ -69,8 +69,28 @@ export interface TokenEvent {
   polished: string | null;
 }
 
+export interface AppRef {
+  bundle_id: string;
+  name: string;
+}
+
+export interface Phrase {
+  text: string;
+  uses: number;
+}
+
+export interface GhostMemory {
+  /** Most recent first. */
+  phrases: Phrase[];
+}
+
 export interface GhostStatus {
   enabled: boolean;
+  /** Apps where Ghost Text stays quiet (terminals and password managers by default). */
+  quiet_apps: AppRef[];
+  /** Apps seen recently, most recent first, for the quiet-apps picker. */
+  recent_apps: AppRef[];
+  memory_count: number;
   p50_ms: number | null;
   p95_ms: number | null;
   stats: {
@@ -93,6 +113,19 @@ export function ghostSummary(g: GhostStatus | null, ghostBrain: string | null, b
   if (ghostBrain === "builtin" && !builtinAwake) return "Waiting for BOB's own brain to wake up";
   if (g.p50_ms !== null) return `Haunting your caret · p50 ${g.p50_ms} ms · p95 ${g.p95_ms} ms`;
   return "Ready. Pause while typing in any app";
+}
+
+/** Rows for the quiet-apps list: every quiet app plus recent apps not already listed, quiet first. */
+export function quietAppRows(g: Pick<GhostStatus, "quiet_apps" | "recent_apps">): (AppRef & { quiet: boolean })[] {
+  const quietIds = new Set(g.quiet_apps.map((a) => a.bundle_id));
+  const rows = g.quiet_apps.map((a) => ({ ...a, quiet: true }));
+  const seen = new Set(quietIds);
+  for (const a of g.recent_apps) {
+    if (!a.bundle_id || seen.has(a.bundle_id)) continue;
+    seen.add(a.bundle_id);
+    rows.push({ ...a, quiet: false });
+  }
+  return rows;
 }
 
 export interface ProgressEvent {
@@ -237,6 +270,10 @@ export const api = {
   stopBuiltin: () => invoke<void>("builtin_stop"),
   ghostStatus: () => invoke<GhostStatus>("ghost_status"),
   ghostSetEnabled: (enabled: boolean) => invoke<void>("ghost_set_enabled", { enabled }),
+  ghostSetQuiet: (app: AppRef, quiet: boolean) =>
+    invoke<void>("ghost_set_quiet", { bundleId: app.bundle_id, name: app.name, quiet }),
+  ghostMemory: () => invoke<GhostMemory>("ghost_memory"),
+  ghostMemoryClear: () => invoke<void>("ghost_memory_clear"),
 };
 
 export async function on<T>(event: string, handler: (payload: T) => void): Promise<() => void> {

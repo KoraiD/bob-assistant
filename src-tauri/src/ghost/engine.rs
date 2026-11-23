@@ -8,6 +8,8 @@
 //! Privacy: the engine never logs text. It logs only timings and lengths.
 
 use super::chip::{self, TypeThrough};
+use super::memory::Memory;
+use super::settings::GhostSettings;
 use super::{prompt, redact};
 use crate::brain::registry::Role;
 use crate::brain::service::BrainService;
@@ -16,6 +18,7 @@ use crate::protocol::{CoreCommand, Key, NativeEvent, Rect};
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -74,6 +77,8 @@ pub enum Input {
     },
     /// Enable or disable Ghost Text (the UI toggle / role "Off").
     SetEnabled(bool),
+    /// Quiet apps changed: re-check the current app.
+    SettingsChanged,
 }
 
 /// Recent first-chip latencies (keystroke -> first chip on screen), for the UI and Task 5's benchmark.
@@ -117,11 +122,61 @@ struct Chip {
     before: String,
 }
 
+/// An app seen recently (from focus events), for the quiet-apps picker in the UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RecentApp {
+    pub bundle_id: String,
+    pub name: String,
+}
+
+const RECENT_APPS: usize = 12;
+
+/// State shared between the engine task and the rest of the app.
+#[derive(Default)]
+struct Shared {
+    settings: Mutex<GhostSettings>,
+    memory: Mutex<Memory>,
+    recent: Mutex<Vec<RecentApp>>,
+    /// Config directory for `ghost-settings.json` and `ghost-memory.json` (None: in memory only).
+    storage: Option<PathBuf>,
+}
+
+impl Shared {
+    fn save_settings(&self) {
+        if let Some(dir) = &self.storage {
+            if let Err(e) = self
+                .settings
+                .lock()
+                .expect("settings")
+                .save(&dir.join(SETTINGS_FILE))
+            {
+                log::warn!("ghost: cannot save settings: {e}");
+            }
+        }
+    }
+    fn save_memory(&self) {
+        if let Some(dir) = &self.storage {
+            if let Err(e) = self
+                .memory
+                .lock()
+                .expect("memory")
+                .save(&dir.join(MEMORY_FILE))
+            {
+                log::warn!("ghost: cannot save memory: {e}");
+            }
+        }
+    }
+}
+
+pub const SETTINGS_FILE: &str = "ghost-settings.json";
+pub const MEMORY_FILE: &str = "ghost-memory.json";
+
 /// Handle used by the rest of the app.
 #[derive(Clone)]
 pub struct GhostHandle {
     tx: mpsc::UnboundedSender<Input>,
     stats: Arc<Mutex<GhostStats>>,
+    shared: Arc<Shared>,
 }
 
 impl GhostHandle {
@@ -129,34 +184,93 @@ impl GhostHandle {
     pub fn native(&self, ev: NativeEvent) {
         let _ = self.tx.send(Input::Native(ev));
     }
+
+    /// Turn Ghost Text on or off (persisted).
     pub fn set_enabled(&self, on: bool) {
+        self.shared.settings.lock().expect("settings").enabled = on;
+        self.shared.save_settings();
         let _ = self.tx.send(Input::SetEnabled(on));
     }
+
+    /// Make BOB quiet (or not) in an app (persisted). Takes effect at the next text event.
+    pub fn set_quiet(&self, bundle_id: &str, name: &str, quiet: bool) {
+        self.shared
+            .settings
+            .lock()
+            .expect("settings")
+            .set_quiet(bundle_id, name, quiet);
+        self.shared.save_settings();
+        let _ = self.tx.send(Input::SettingsChanged);
+    }
+
+    pub fn settings(&self) -> GhostSettings {
+        self.shared.settings.lock().expect("settings").clone()
+    }
+
+    pub fn recent_apps(&self) -> Vec<RecentApp> {
+        self.shared.recent.lock().expect("recent").clone()
+    }
+
+    pub fn memory(&self) -> Memory {
+        self.shared.memory.lock().expect("memory").clone()
+    }
+
+    /// Forget every accepted phrase (persisted).
+    pub fn clear_memory(&self) {
+        self.shared.memory.lock().expect("memory").clear();
+        self.shared.save_memory();
+    }
+
     pub fn stats(&self) -> GhostStats {
         self.stats.lock().expect("stats").clone()
     }
 }
 
-/// Start the engine task with the shipped settings.
+/// Start the engine task with the shipped settings, in memory only (tests).
 pub fn spawn(brains: Arc<BrainService>, sink: Arc<dyn Sink>) -> GhostHandle {
     spawn_with(brains, sink, EngineConfig::default())
 }
 
-/// Start the engine task with explicit settings (benchmark).
+/// Start the engine task with explicit tunables, in memory only (benchmark).
 pub fn spawn_with(
     brains: Arc<BrainService>,
     sink: Arc<dyn Sink>,
     config: EngineConfig,
 ) -> GhostHandle {
+    spawn_full(brains, sink, config, None)
+}
+
+/// Start the engine task; settings and memory are loaded from and saved to `storage` when given (the app).
+pub fn spawn_full(
+    brains: Arc<BrainService>,
+    sink: Arc<dyn Sink>,
+    config: EngineConfig,
+    storage: Option<PathBuf>,
+) -> GhostHandle {
     let (tx, rx) = mpsc::unbounded_channel();
     let stats = Arc::new(Mutex::new(GhostStats::default()));
+    let (settings, memory) = match &storage {
+        Some(dir) => (
+            GhostSettings::load(&dir.join(SETTINGS_FILE)),
+            Memory::load(&dir.join(MEMORY_FILE)),
+        ),
+        None => (GhostSettings::default(), Memory::default()),
+    };
+    let enabled = settings.enabled;
+    let shared = Arc::new(Shared {
+        settings: Mutex::new(settings),
+        memory: Mutex::new(memory),
+        recent: Mutex::new(vec![]),
+        storage,
+    });
     let engine = Engine {
         config,
         brains,
         sink,
         tx: tx.clone(),
         stats: stats.clone(),
-        enabled: true,
+        shared: shared.clone(),
+        enabled,
         ctx: None,
         chip: None,
         generation: 0,
@@ -166,7 +280,7 @@ pub fn spawn_with(
         first_chip_pending: None,
     };
     tokio::spawn(engine.run(rx));
-    GhostHandle { tx, stats }
+    GhostHandle { tx, stats, shared }
 }
 
 struct Engine {
@@ -175,6 +289,7 @@ struct Engine {
     sink: Arc<dyn Sink>,
     tx: mpsc::UnboundedSender<Input>,
     stats: Arc<Mutex<GhostStats>>,
+    shared: Arc<Shared>,
     enabled: bool,
     ctx: Option<Context>,
     chip: Option<Chip>,
@@ -195,6 +310,33 @@ impl Engine {
         self.cancel();
     }
 
+    fn is_quiet(&self, app: &str) -> bool {
+        self.shared.settings.lock().expect("settings").is_quiet(app)
+    }
+
+    fn remember_app(&self, bundle_id: String, name: String) {
+        if bundle_id.is_empty() {
+            return;
+        }
+        let mut recent = self.shared.recent.lock().expect("recent");
+        recent.retain(|a| a.bundle_id != bundle_id);
+        recent.insert(0, RecentApp { bundle_id, name });
+        recent.truncate(RECENT_APPS);
+    }
+
+    /// Store accepted text locally (GT-17). Single words are only kept when they are long enough to be
+    /// worth suggesting again (names, terms); whole accepted chips are always offered to the memory.
+    fn remember_phrase(&self, text: &str) {
+        let words = text.split_whitespace().count();
+        let long_word = text.trim().chars().count() >= 6;
+        if words >= 2 || long_word {
+            let changed = self.shared.memory.lock().expect("memory").record(text);
+            if changed {
+                self.shared.save_memory();
+            }
+        }
+    }
+
     fn stat(&self, f: impl FnOnce(&mut GhostStats)) {
         f(&mut self.stats.lock().expect("stats"));
     }
@@ -208,11 +350,24 @@ impl Engine {
                     self.cancel();
                 }
             }
-            Input::Native(NativeEvent::Focus { .. }) => {
+            Input::Native(NativeEvent::Focus {
+                app_bundle_id,
+                app_name,
+                ..
+            }) => {
                 // App or field changed: the anchor is gone (GT-9).
                 self.hide();
                 self.cancel();
                 self.ctx = None;
+                self.remember_app(app_bundle_id, app_name);
+            }
+            Input::SettingsChanged => {
+                let quiet = self.ctx.as_ref().is_some_and(|c| self.is_quiet(&c.app));
+                if quiet {
+                    self.hide();
+                    self.cancel();
+                    self.ctx = None;
+                }
             }
             Input::Native(NativeEvent::TextState {
                 app_bundle_id,
@@ -292,7 +447,10 @@ impl Engine {
         caret: Option<Rect>,
     ) {
         // Quiet zones (GT-3, GT-4): secure fields, no caret position, an active selection.
-        let Some(caret) = caret.filter(|_| !secure && selection_len == 0 && self.enabled) else {
+        // Plus apps on the quiet list (terminals, password managers, BOB, user choices).
+        let quiet = self.is_quiet(&app);
+        let Some(caret) = caret.filter(|_| !secure && selection_len == 0 && self.enabled && !quiet)
+        else {
             self.hide();
             self.cancel();
             self.ctx = None;
@@ -366,11 +524,13 @@ impl Engine {
             Key::Tab => {
                 let (word, _) = chip::accept_word(&visible);
                 self.stat(|s| s.accepted_words += 1);
+                self.remember_phrase(&word);
                 // The chip stays; the text event caused by the insertion advances it (typing-through).
                 self.sink.send(CoreCommand::InsertText { text: word });
             }
             Key::ShiftTab => {
                 self.stat(|s| s.accepted_all += 1);
+                self.remember_phrase(&visible);
                 self.sink.send(CoreCommand::InsertText { text: visible });
             }
             Key::Escape => {
@@ -905,6 +1065,110 @@ mod tests {
         );
         svc.stop_builtin().await;
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn quiet_apps_never_reach_the_model_and_can_be_unquieted() {
+        let (g, rec, server, _root) = setup(&[" ls -la"], Duration::ZERO).await;
+        let term = |t: &str| NativeEvent::TextState {
+            app_bundle_id: "com.googlecode.iterm2".into(),
+            secure: false,
+            before_caret: t.into(),
+            selection_len: 0,
+            caret: Some(CARET),
+        };
+        g.native(term("git status"));
+        settle(300).await;
+        assert_eq!(server.request_count(), 0, "terminals are quiet by default");
+        assert!(rec.chips().is_empty());
+        g.set_quiet("com.googlecode.iterm2", "iTerm", false);
+        g.native(term("git status --"));
+        settle(300).await;
+        assert_eq!(
+            server.request_count(),
+            1,
+            "after un-quieting, suggestions resume"
+        );
+        // Quieting the current app hides its chip at once.
+        rec.take();
+        g.set_quiet("com.googlecode.iterm2", "iTerm", true);
+        settle(30).await;
+        assert!(rec.take().contains(&CoreCommand::HideChip));
+    }
+
+    #[tokio::test]
+    async fn accepted_chips_are_remembered_and_trivia_is_not() {
+        let (g, _rec, _server, _root) =
+            setup(&[" as", " soon", " as", " possible."], Duration::ZERO).await;
+        g.native(text("I will get back to you"));
+        settle(300).await;
+        g.native(NativeEvent::Key { key: Key::Tab });
+        settle(30).await;
+        assert!(
+            g.memory().phrases.is_empty(),
+            "a two-letter word is not worth remembering"
+        );
+        g.native(text("I will get back to you as"));
+        settle(50).await;
+        g.native(NativeEvent::Key { key: Key::ShiftTab });
+        settle(30).await;
+        let m = g.memory();
+        assert_eq!(
+            m.phrases.first().map(|p| p.text.as_str()),
+            Some("soon as possible.")
+        );
+        g.clear_memory();
+        assert!(g.memory().phrases.is_empty());
+    }
+
+    #[tokio::test]
+    async fn settings_and_memory_persist_across_restarts_and_recent_apps_are_tracked() {
+        let dir = std::env::temp_dir().join(format!("bob-ghost-store-{}", rand::random::<u32>()));
+        let svc = Arc::new(BrainService::new(
+            dir.join("c"),
+            dir.join("d"),
+            dir.join("r"),
+            Box::new(MemoryStore::default()),
+        ));
+        let g = spawn_full(
+            svc.clone(),
+            Arc::new(Recorder::default()),
+            EngineConfig::default(),
+            Some(dir.clone()),
+        );
+        g.set_enabled(false);
+        g.set_quiet("com.apple.Notes", "Notes", true);
+        g.shared
+            .memory
+            .lock()
+            .unwrap()
+            .record("Best regards, Dávid");
+        g.shared.save_memory();
+        g.native(NativeEvent::Focus {
+            app_bundle_id: "com.apple.Mail".into(),
+            app_name: "Mail".into(),
+            secure: false,
+            editable: true,
+        });
+        g.native(NativeEvent::Focus {
+            app_bundle_id: "com.apple.Notes".into(),
+            app_name: "Notes".into(),
+            secure: false,
+            editable: true,
+        });
+        settle(30).await;
+        let names: Vec<String> = g.recent_apps().into_iter().map(|a| a.name).collect();
+        assert_eq!(names, vec!["Notes".to_string(), "Mail".to_string()]);
+        let again = spawn_full(
+            svc,
+            Arc::new(Recorder::default()),
+            EngineConfig::default(),
+            Some(dir.clone()),
+        );
+        assert!(!again.settings().enabled);
+        assert!(again.settings().is_quiet("com.apple.Notes"));
+        assert_eq!(again.memory().phrases[0].text, "Best regards, Dávid");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

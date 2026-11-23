@@ -5,5 +5,7 @@
 
 pub mod chip;
 pub mod engine;
+pub mod memory;
 pub mod prompt;
 pub mod redact;
+pub mod settings;

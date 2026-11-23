@@ -301,11 +301,15 @@ pub fn run() {
             commands::builtin_stop,
             commands::ghost_status,
             commands::ghost_set_enabled,
+            commands::ghost_set_quiet,
+            commands::ghost_memory,
+            commands::ghost_memory_clear,
         ])
         .setup(|app| {
             // Brain service: registry in the config dir, models in the data dir, the sidecar's key and
             // PID files in the per-user 0700 runtime dir next to the helper socket.
             let config_dir = app.path().app_config_dir()?;
+            let ghost_dir = config_dir.clone();
             let data_dir = app.path().app_data_dir()?;
             let runtime_dir = native_ipc::default_socket_path()
                 .parent()
@@ -323,8 +327,14 @@ pub fn run() {
             // Ghost Text engine: native events in, chip/insert commands out over the bridge.
             let bridge = app.state::<Bridge>().inner().clone();
             let sink: std::sync::Arc<dyn ghost::engine::Sink> = std::sync::Arc::new(bridge);
-            let ghost =
-                tauri::async_runtime::block_on(async { ghost::engine::spawn(brains, sink) });
+            let ghost = tauri::async_runtime::block_on(async {
+                ghost::engine::spawn_full(
+                    brains,
+                    sink,
+                    ghost::engine::EngineConfig::default(),
+                    Some(ghost_dir),
+                )
+            });
             app.manage(ghost.clone());
             quit_on_signals(app.handle().clone());
 

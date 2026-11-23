@@ -1,4 +1,4 @@
-import { brainsForRole, ghostSummary, type GhostStatus, draftToConfig, formatBytes, isCloudUrl, percent, slugify, uniqueId, validateDraft, type BrainView, type Draft } from "./brains";
+import { brainsForRole, ghostSummary, quietAppRows, type GhostStatus, draftToConfig, formatBytes, isCloudUrl, percent, slugify, uniqueId, validateDraft, type BrainView, type Draft } from "./brains";
 
 const brain = (id: string, ghost: boolean, chat: boolean): BrainView => ({
   id, name: id, kind: "ollama", endpoint: "http://127.0.0.1:11434", model: null,
@@ -58,7 +58,7 @@ describe("brains helpers", () => {
 
 describe("ghostSummary", () => {
   const g = (over: Partial<GhostStatus> = {}): GhostStatus => ({
-    enabled: true, p50_ms: null, p95_ms: null,
+    enabled: true, p50_ms: null, p95_ms: null, quiet_apps: [], recent_apps: [], memory_count: 0,
     stats: { requests: 0, chips_shown: 0, accepted_words: 0, accepted_all: 0, dismissed: 0, errors: 0, last_error: null, typing_through: 0 },
     ...over,
   });
@@ -69,5 +69,22 @@ describe("ghostSummary", () => {
     expect(ghostSummary(g(), "builtin", false)).toMatch(/wake up/);
     expect(ghostSummary(g(), "builtin", true)).toMatch(/Ready/);
     expect(ghostSummary(g({ p50_ms: 120, p95_ms: 240 }), "builtin", true)).toBe("Haunting your caret · p50 120 ms · p95 240 ms");
+  });
+});
+
+describe("quietAppRows", () => {
+  const a = (bundle_id: string, name = bundle_id) => ({ bundle_id, name });
+  it("lists quiet apps first, then recent apps once each, skipping empty ids", () => {
+    const rows = quietAppRows({
+      quiet_apps: [a("com.googlecode.iterm2", "iTerm")],
+      recent_apps: [a("com.apple.Notes", "Notes"), a("com.googlecode.iterm2", "iTerm"), a(""), a("com.apple.Notes", "Notes")],
+    });
+    expect(rows).toEqual([
+      { bundle_id: "com.googlecode.iterm2", name: "iTerm", quiet: true },
+      { bundle_id: "com.apple.Notes", name: "Notes", quiet: false },
+    ]);
+  });
+  it("is empty when nothing is known", () => {
+    expect(quietAppRows({ quiet_apps: [], recent_apps: [] })).toEqual([]);
   });
 });

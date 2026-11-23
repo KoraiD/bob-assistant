@@ -91,3 +91,16 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
 - **Kiro hook:** a Stop hook now runs the oracle benchmark smoke test (about 3 s) at the end of every agent turn.
 - **Process slip, twice:** I started the benchmark in the same batch as its rebuild and measured the old binary. Fixed
   by stopping and rerunning; noted so long-running measurements always start after their build completes.
+## 2026-11-23: Task 6, quiet apps and phrase memory
+- **Spec gap closed:** the ghost-text spec left the per-app blocklist and the GT-17 memory lexicon for later. Both now
+  exist with their own property tests: settings keep one entry per app with the last edit winning, and memory (P6)
+  stays bounded, unique and most recent first. Secret-looking phrases are rejected through the same redaction code
+  the prompts use.
+- **Quiet by default where Tab already means something:** terminals (shell completion) and password managers. BOB's
+  own window is quiet too, so the Try-it box does not haunt itself.
+- **Privacy wording follows the code:** PRIVACY.md says memory is stored locally and is not sent to any brain yet,
+  because the personalization context stack (profile file, visible context, memory in prompts) waits on the owner's
+  decisions.
+- **Lint catch:** clippy's `field_reassign_with_default` flagged a test that built settings and then mutated a field;
+  rewritten with struct-update syntax.
+- **Tests now:** Rust 143 + 2 end-to-end (+3 ignored real-world tests), Swift 54, Vitest 32.

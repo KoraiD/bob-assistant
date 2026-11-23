@@ -4,6 +4,10 @@ All notable changes to BOB. Format follows [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+### Added (Task 6)
+- Quiet apps: Ghost Text stays silent in terminals, password managers and BOB by default; the Ghost card lists quiet and recently used apps with one switch each. Saved in `ghost-settings.json`, together with Ghost on/off.
+- Accepted-phrase memory: phrases accepted with Tab / Shift+Tab are kept locally in `ghost-memory.json` (bounded, secret-free); the Ghost card shows the count, lists them on demand and can forget all. Not yet used in prompts.
+
 ### Added
 - Ghost Text benchmark: `make bench` / `ghost-bench` replays seeded typing traces through the real engine and model; scores latency, pause coverage, right-word rate and Tab-accurate keystroke savings; oracle test in CI; `scripts/cache-probe.sh` for prompt-cache reuse; Stop hook with a benchmark smoke test.
 
