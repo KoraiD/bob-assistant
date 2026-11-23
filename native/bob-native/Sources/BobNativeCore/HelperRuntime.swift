@@ -17,8 +17,16 @@ public final class HelperRuntime {
     private let observer = FocusObserver()
     private let chip = ChipPanel()
     private let keyTap = KeyTap()
+    private let screen = ScreenContext()
+    private let hotkeys = HotkeyCenter()
+    private let menu = ActionMenuPanel()
+    /// The app whose selection the menu is working on (SA-7: replacement only goes there).
+    private var selectionPID: pid_t = 0
     private var client: SocketClient?
     private var lastAccessibility = false
+    private var lastScreenRecording = false
+    /// Last `context_state` sent, so unchanged surroundings are not re-sent on every keystroke.
+    private var lastContext: NativeEvent?
     private var permissionTimer: Timer?
 
     public init(mode: HelperMode) { self.mode = mode }
@@ -82,6 +90,29 @@ public final class HelperRuntime {
                 DispatchQueue.main.async { self?.sendPermissions() }
             }
             sendPermissions()
+        case let .setContextMode(scope, exclude):
+            screen.configure(scope: scope, exclude: exclude)
+        case .requestScreenRecording:
+            ScreenContext.requestPermission()
+            sendPermissions()
+        case let .showMenu(title, items, anchor):
+            menu.showMenu(title: title, items: items, anchorAX: anchor)
+            keyTap.isMenuOpen = true
+        case let .menuStatus(text, busy, error):
+            keyTap.isMenuOpen = false
+            menu.showStatus(text, busy: busy, error: error)
+        case .hideMenu:
+            keyTap.isMenuOpen = false
+            menu.hideMenu()
+        case let .replaceSelection(expected, text):
+            SelectionIO.replace(expected: expected, text: text, pid: selectionPID) { [weak self] ok, method, error in
+                try? self?.client?.send(NativeEvent.replaceResult(ok: ok, method: method, error: error))
+            }
+        case let .setHotkey(hotkey):
+            if !hotkeys.register(hotkey) {
+                try? client?.send(NativeEvent.error(message: "hotkey unavailable"))
+                hotkeys.register(HotkeyCenter.defaultHotkey)
+            }
         case .quit:
             NSApp.terminate(nil)
         case .unknown:
@@ -91,13 +122,16 @@ public final class HelperRuntime {
 
     private func sendPermissions() {
         let ax = Permissions.accessibilityTrusted()
+        let screenRecording = ScreenContext.permitted
         lastAccessibility = ax
-        try? client?.send(NativeEvent.permissions(accessibility: ax, microphone: Permissions.microphoneStatus()))
+        lastScreenRecording = screenRecording
+        try? client?.send(NativeEvent.permissions(accessibility: ax, microphone: Permissions.microphoneStatus(),
+                                                  screenRecording: screenRecording))
     }
 
     private func permissionTick() {
         let ax = Permissions.accessibilityTrusted()
-        if ax != lastAccessibility {
+        if ax != lastAccessibility || ScreenContext.permitted != lastScreenRecording {
             sendPermissions()
             if ax { observer.stop(); startObserving() }  // observers cannot attach while untrusted
         }
@@ -107,12 +141,53 @@ public final class HelperRuntime {
         observer.onSnapshot = { [weak self] snap, reason in self?.forward(snap, reason) }
         observer.start()
         keyTap.onKey = { [weak self] key in try? self?.client?.send(NativeEvent.key(key)) }
+        hotkeys.onPress = { [weak self] in self?.selectionHotkey() }
+        hotkeys.register(HotkeyCenter.defaultHotkey)
+        keyTap.onMenuKey = { [weak self] key in self?.menuKey(key) }
+        menu.onClick = { [weak self] i in self?.chooseMenu(i) }
+        screen.onText = { [weak self] scope, app, text, ms in
+            try? self?.client?.send(NativeEvent.screenText(scope: scope, appBundleId: app, text: text, ms: ms))
+        }
         if !keyTap.install() {
             FileHandle.standardError.write(Data("bob-native: key tap unavailable (Accessibility not granted yet)\n".utf8))
         }
     }
 
+    // MARK: Selection Actions
+
+    private func selectionHotkey() {
+        SelectionIO.read { [weak self] capture in
+            guard let self else { return }
+            self.selectionPID = capture.pid
+            try? self.client?.send(NativeEvent.selection(
+                appBundleId: capture.appBundleId, text: capture.text, secure: capture.secure,
+                source: capture.source, anchor: capture.anchor))
+        }
+    }
+
+    private func menuKey(_ key: MenuKey) {
+        guard menu.isMenuVisible else { keyTap.isMenuOpen = false; return }
+        switch menu.move(key) {
+        case .moved: break
+        case let .chose(i): chooseMenu(i)
+        case .cancelled: cancelMenu()
+        }
+    }
+
+    private func chooseMenu(_ index: Int) {
+        keyTap.isMenuOpen = false
+        try? client?.send(NativeEvent.menuChoice(index: index))
+    }
+
+    private func cancelMenu() {
+        keyTap.isMenuOpen = false
+        menu.hideMenu()
+        try? client?.send(NativeEvent.menuCancel)
+    }
+
     private func forward(_ snap: AXSnapshot, _ reason: FocusObserver.Reason) {
+        // Switching away from the app closes an open action menu (SA-7).
+        if reason == .appActivated, menu.isMenuVisible, snap.pid != selectionPID { cancelMenu() }
         if reason == .appActivated || reason == .focusChanged {
             try? client?.send(NativeEvent.focus(appBundleId: snap.appBundleId, appName: snap.appName,
                                                 secure: snap.secure, editable: snap.editable))
@@ -121,6 +196,15 @@ public final class HelperRuntime {
         try? client?.send(NativeEvent.textState(
             appBundleId: snap.appBundleId, secure: snap.secure, beforeCaret: snap.beforeCaret ?? "",
             selectionLen: snap.selectionLen ?? 0, caret: snap.caret))
+        guard !snap.secure else { return }
+        let context = NativeEvent.contextState(appBundleId: snap.appBundleId, windowTitle: snap.windowTitle,
+                                               afterCaret: snap.afterCaret ?? "")
+        if context != lastContext {
+            lastContext = context
+            try? client?.send(context)
+        }
+        screen.maybeCapture(appBundleId: snap.appBundleId, pid: snap.pid, windowTitle: snap.windowTitle,
+                            secure: snap.secure)
     }
 
     /// Explain which app needs the permission, open the right Settings pane and exit.

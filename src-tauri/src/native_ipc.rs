@@ -27,6 +27,8 @@ pub struct BridgeStatus {
     pub accessibility: Option<bool>,
     /// Last reported microphone status (None until the helper reports it).
     pub microphone: Option<MicStatus>,
+    /// Last reported Screen Recording permission (only needed for screen context, PC-4).
+    pub screen_recording: Option<bool>,
 }
 
 /// Default socket location: `$TMPDIR/bob-<uid>/native.sock`.
@@ -163,11 +165,13 @@ impl Bridge {
                 } else if let NativeEvent::Permissions {
                     accessibility,
                     microphone,
+                    screen_recording,
                 } = &event
                 {
                     let mut st = self.status.lock().expect("status lock");
                     st.accessibility = Some(*accessibility);
                     st.microphone = Some(*microphone);
+                    st.screen_recording = Some(*screen_recording);
                 }
                 if matches!(event, NativeEvent::Unknown) {
                     continue;
@@ -252,6 +256,7 @@ mod tests {
                 encode_line(&NativeEvent::Permissions {
                     accessibility: true,
                     microphone: MicStatus::Denied,
+                    screen_recording: false,
                 })
                 .as_bytes(),
             )
@@ -266,7 +271,8 @@ mod tests {
             BridgeStatus {
                 connected: true,
                 accessibility: Some(true),
-                microphone: Some(MicStatus::Denied)
+                microphone: Some(MicStatus::Denied),
+                screen_recording: Some(false),
             }
         );
         assert_eq!(bridge.status(), status);
@@ -337,6 +343,7 @@ mod tests {
                 encode_line(&NativeEvent::Permissions {
                     accessibility: true,
                     microphone: MicStatus::Granted,
+                    screen_recording: true,
                 })
                 .as_bytes(),
             )

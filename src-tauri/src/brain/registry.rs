@@ -66,6 +66,7 @@ pub fn builtin_brain() -> BrainConfig {
         model: None,
         capabilities: ProviderKind::Builtin.default_capabilities(),
         has_api_key: false,
+        share_context: None,
     }
 }
 
@@ -249,6 +250,7 @@ mod tests {
             model: Some("qwen2.5:1.5b".into()),
             capabilities: Capabilities { ghost, chat },
             has_api_key: false,
+            share_context: None,
         }
     }
 

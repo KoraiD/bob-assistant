@@ -3,12 +3,14 @@ import { GhostMark } from "./components/GhostMark";
 import { BrainPanel } from "./components/BrainPanel";
 import { GhostCard } from "./components/GhostCard";
 import { PermissionsCard } from "./components/PermissionsCard";
+import { PersonalizePanel } from "./components/PersonalizePanel";
+import { SelectionCard } from "./components/SelectionCard";
 import { BROWSER_APP_INFO, getAppInfo, type AppInfo } from "./lib/appInfo";
 
 /** The three capabilities, in priority order (see .kiro/steering/product.md). */
 export const CAPABILITIES = [
   { id: "ghost", title: "Ghost Text", blurb: "Inline next-word predictions at your caret, in any app.", status: "Live" },
-  { id: "selection", title: "Selection Actions", blurb: "Highlight text, press a hotkey, rewrite it in place.", status: "Coming soon" },
+  { id: "selection", title: "Selection Actions", blurb: "Highlight text, press a hotkey, rewrite it in place.", status: "Live" },
   { id: "dictation", title: "Voice Dictation", blurb: "Hold a key, speak, release. Clean text appears at the caret.", status: "Coming soon" },
 ] as const;
 
@@ -18,10 +20,11 @@ export function formatBuild(info: AppInfo): string {
   return `BOB ${info.version} · ${info.platform} ${info.arch}`;
 }
 
-type Tab = "overview" | "brains";
+type Tab = "overview" | "brains" | "personalize";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "brains", label: "Brains" },
+  { id: "personalize", label: "Personalize" },
 ];
 
 export default function App() {
@@ -68,6 +71,8 @@ export default function App() {
 
       {tab === "brains" ? (
         <BrainPanel />
+      ) : tab === "personalize" ? (
+        <PersonalizePanel />
       ) : (
         <>
       <section aria-label="Capabilities" className="grid gap-4 md:grid-cols-3">
@@ -88,6 +93,7 @@ export default function App() {
       </section>
 
       <GhostCard />
+      <SelectionCard />
       <PermissionsCard />
         </>
       )}

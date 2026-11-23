@@ -155,4 +155,18 @@ public enum TextWindow {
         let prefix = String(decoding: units[0..<end], as: UTF16.self)
         return String(prefix.suffix(maxChars))
     }
+
+    /// Context after the caret (PC-3) is kept short: it only tells the brain what follows.
+    public static let defaultAfterChars = 400
+
+    /// The first `maxChars` characters after the selection end (`caretUTF16 + selectionUTF16`), clamped
+    /// like `beforeCaret`.
+    public static func afterCaret(value: String, caretUTF16: Int, selectionUTF16: Int = 0,
+                                  maxChars: Int = defaultAfterChars) -> String {
+        let units = Array(value.utf16)
+        let start = min(max(caretUTF16, 0) + max(selectionUTF16, 0), units.count)
+        guard start < units.count, maxChars > 0 else { return "" }
+        let suffix = String(decoding: units[start...], as: UTF16.self)
+        return String(suffix.prefix(maxChars))
+    }
 }

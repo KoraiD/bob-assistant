@@ -247,12 +247,15 @@ dependencies = [
 name = "bob"
 version = "0.1.0"
 dependencies = [
+ "block2",
  "bytes",
  "env_logger",
  "futures-util",
  "hex",
  "keyring",
  "log",
+ "objc2",
+ "objc2-app-kit",
  "proptest",
  "rand 0.9.5",
  "reqwest",

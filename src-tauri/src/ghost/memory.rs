@@ -69,6 +69,13 @@ impl Memory {
         self.phrases.clear();
     }
 
+    /// Up to `n` phrases, most used first; ties keep the most recent first.
+    pub fn most_used(&self, n: usize) -> Vec<String> {
+        let mut v: Vec<&Phrase> = self.phrases.iter().collect();
+        v.sort_by_key(|p| std::cmp::Reverse(p.uses)); // stable: recency order survives ties
+        v.into_iter().take(n).map(|p| p.text.clone()).collect()
+    }
+
     pub fn load(path: &Path) -> Self {
         let mut m: Memory = std::fs::read_to_string(path)
             .ok()
@@ -127,6 +134,20 @@ mod tests {
         let key = format!("sk-{}", "Ab1".repeat(12));
         assert!(!m.record(&format!("my key {key}")));
         assert!(m.phrases.is_empty());
+    }
+
+    #[test]
+    fn most_used_ranks_by_uses_then_recency() {
+        let mut m = Memory::default();
+        m.record("see you soon");
+        m.record("best regards");
+        m.record("thanks a lot");
+        m.record("see you soon");
+        assert_eq!(
+            m.most_used(2),
+            vec!["see you soon".to_string(), "thanks a lot".to_string()]
+        );
+        assert!(Memory::default().most_used(5).is_empty());
     }
 
     #[test]

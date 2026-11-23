@@ -14,6 +14,7 @@ use super::{prompt, redact};
 use crate::brain::registry::Role;
 use crate::brain::service::BrainService;
 use crate::brain::CompletionRequest;
+use crate::context::{ContextHub, GHOST_MEMORY_PHRASES};
 use crate::protocol::{CoreCommand, Key, NativeEvent, Rect};
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -215,6 +216,13 @@ impl GhostHandle {
         self.shared.memory.lock().expect("memory").clone()
     }
 
+    /// Record a phrase as if it had been accepted (benchmark seeding; persisted when storage is set).
+    pub fn remember(&self, text: &str) {
+        if self.shared.memory.lock().expect("memory").record(text) {
+            self.shared.save_memory();
+        }
+    }
+
     /// Forget every accepted phrase (persisted).
     pub fn clear_memory(&self) {
         self.shared.memory.lock().expect("memory").clear();
@@ -240,12 +248,25 @@ pub fn spawn_with(
     spawn_full(brains, sink, config, None)
 }
 
-/// Start the engine task; settings and memory are loaded from and saved to `storage` when given (the app).
+/// Start the engine task; settings and memory are loaded from and saved to `storage` when given. No
+/// personal context.
 pub fn spawn_full(
     brains: Arc<BrainService>,
     sink: Arc<dyn Sink>,
     config: EngineConfig,
     storage: Option<PathBuf>,
+) -> GhostHandle {
+    let context = Arc::new(ContextHub::in_memory(Default::default(), ""));
+    spawn_ctx(brains, sink, config, storage, context)
+}
+
+/// Start the engine task with the app's personal context (the app and the context benchmark).
+pub fn spawn_ctx(
+    brains: Arc<BrainService>,
+    sink: Arc<dyn Sink>,
+    config: EngineConfig,
+    storage: Option<PathBuf>,
+    context: Arc<ContextHub>,
 ) -> GhostHandle {
     let (tx, rx) = mpsc::unbounded_channel();
     let stats = Arc::new(Mutex::new(GhostStats::default()));
@@ -270,6 +291,7 @@ pub fn spawn_full(
         tx: tx.clone(),
         stats: stats.clone(),
         shared: shared.clone(),
+        context,
         enabled,
         ctx: None,
         chip: None,
@@ -290,6 +312,8 @@ struct Engine {
     tx: mpsc::UnboundedSender<Input>,
     stats: Arc<Mutex<GhostStats>>,
     shared: Arc<Shared>,
+    /// Personal context (profile, memory, window, screen); used only when a Ghost layer is on.
+    context: Arc<ContextHub>,
     enabled: bool,
     ctx: Option<Context>,
     chip: Option<Chip>,
@@ -578,12 +602,22 @@ impl Engine {
         self.generation += 1;
         let generation = self.generation;
         self.first_chip_pending = Some((generation, keystroke));
-        let (brains, tx, stats, config) = (
+        let (brains, tx, stats, config, context) = (
             self.brains.clone(),
             self.tx.clone(),
             self.stats.clone(),
             self.config,
+            self.context.clone(),
         );
+        let memory = if context.settings().ghost.memory {
+            self.shared
+                .memory
+                .lock()
+                .expect("memory")
+                .most_used(GHOST_MEMORY_PHRASES)
+        } else {
+            vec![]
+        };
         self.pending = Some(tokio::spawn(async move {
             tokio::time::sleep(config.quiet).await;
             let send_done = |error: Option<String>| {
@@ -596,10 +630,17 @@ impl Engine {
             if !brain.config.capabilities.ghost {
                 return send_done(None);
             }
-            let prompt_text = redact::scrub(prompt::build(&before));
-            if prompt_text.trim().is_empty() {
+            let typed = redact::scrub(prompt::build(&before));
+            if typed.trim().is_empty() {
                 return send_done(None);
             }
+            // Personal context only for brains allowed to receive it (PC-6). Stable layers come first, so
+            // the server's prompt cache still covers everything up to the typed text.
+            let prompt_text = if brain.config.shares_context() {
+                format!("{}{typed}", context.ghost_preamble(&memory))
+            } else {
+                typed
+            };
             stats.lock().expect("stats").requests += 1;
             let mut stream = match brain
                 .complete_stream(&CompletionRequest {
@@ -692,6 +733,22 @@ mod tests {
         tokens: &'static [&'static str],
         gap: Duration,
     ) -> (GhostHandle, Arc<Recorder>, TestServer, std::path::PathBuf) {
+        let ctx = Arc::new(ContextHub::in_memory(Default::default(), ""));
+        let (g, rec, server, root, _svc) = setup_ctx(tokens, gap, ctx).await;
+        (g, rec, server, root)
+    }
+
+    async fn setup_ctx(
+        tokens: &'static [&'static str],
+        gap: Duration,
+        context: Arc<ContextHub>,
+    ) -> (
+        GhostHandle,
+        Arc<Recorder>,
+        TestServer,
+        std::path::PathBuf,
+        Arc<BrainService>,
+    ) {
         let server = TestServer::start(move |_| {
             let events: Vec<String> = tokens
                 .iter()
@@ -726,6 +783,7 @@ mod tests {
                     chat: true,
                 },
                 has_api_key: false,
+                share_context: None,
             },
             None,
         )
@@ -733,8 +791,14 @@ mod tests {
         .unwrap();
         svc.set_role(Role::Ghost, Some("local")).await.unwrap();
         let rec = Arc::new(Recorder::default());
-        let handle = spawn(svc, rec.clone());
-        (handle, rec, server, root)
+        let handle = spawn_ctx(
+            svc.clone(),
+            rec.clone(),
+            EngineConfig::default(),
+            None,
+            context,
+        );
+        (handle, rec, server, root, svc)
     }
 
     async fn settle(ms: u64) {
@@ -952,6 +1016,41 @@ mod tests {
             "GT-18: secret leaked into the prompt"
         );
         assert!(prompt.contains("[redacted]"));
+    }
+
+    /// PC-5 / PC-6: with a Ghost layer on, the notes precede the typed text; a brain that may not receive
+    /// personal context gets the typed text only.
+    #[tokio::test]
+    async fn context_notes_precede_the_text_only_for_allowed_brains() {
+        use crate::context::{ContextSettings, GhostLayers};
+        let ctx = Arc::new(ContextHub::in_memory(
+            ContextSettings {
+                ghost: GhostLayers {
+                    profile: true,
+                    memory: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            "- **Name:** Dávid",
+        ));
+        let (g, _rec, server, _root, svc) = setup_ctx(&[" ok"], Duration::ZERO, ctx).await;
+        let prompt = || {
+            server.last_request().json()["prompt"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        g.native(text("See you"));
+        settle(300).await;
+        assert_eq!(
+            prompt(),
+            "[Notes, not part of the text]\nAbout me: Name: Dávid\n[Text]\nSee you"
+        );
+        svc.set_share_context("local", false).await.unwrap();
+        g.native(text("See you at"));
+        settle(300).await;
+        assert_eq!(prompt(), "See you at");
     }
 
     #[tokio::test]

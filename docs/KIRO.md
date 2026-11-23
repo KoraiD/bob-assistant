@@ -7,9 +7,10 @@ Judges score depth and variety of Kiro usage, so each section states what we did
 IDE (specs, steering, hooks, PBT). CLI/Web/Crew: _record any use and the differences here_.
 
 ## Specs (`.kiro/specs/`)
-Seven specs, each with `requirements.md` (EARS), `design.md` (components, sequence diagrams, correctness
+Eight specs, each with `requirements.md` (EARS), `design.md` (components, sequence diagrams, correctness
 properties) and `tasks.md` (traceable to requirement IDs):
-`brain-router`, `native-bridge`, `ghost-text`, `selection-actions`, `voice-dictation`, `haunted-ui`, `packaging-release`.
+`brain-router`, `native-bridge`, `ghost-text`, `personal-context`, `selection-actions`, `voice-dictation`, `haunted-ui`,
+`packaging-release`. `personal-context` was written mid-project from the owner's answers (2026-11-23), before any code.
 Spec-driven vs vibe coding observations: see the journal.
 
 ## Steering (`.kiro/steering/`)

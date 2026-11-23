@@ -59,7 +59,7 @@ struct ProtocolFixtureTests {
 
     @Test func protocolVersionMatchesTheCore() {
         // Keep in sync with PROTOCOL_VERSION in src-tauri/src/protocol.rs.
-        #expect(BobNativeInfo.protocolVersion == 2)
+        #expect(BobNativeInfo.protocolVersion == 3)
     }
 }
 

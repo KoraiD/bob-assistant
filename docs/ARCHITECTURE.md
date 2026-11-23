@@ -62,6 +62,13 @@ flowchart LR
 | Ghost settings (on/off, quiet apps) and accepted-phrase memory, persisted in the app config dir | `src-tauri/src/ghost/{settings,memory}.rs` | done; property tests for both (memory is P6) |
 | Key tap (conditional Tab / Shift+Tab / Esc) and Unicode insertion | `native/bob-native/Sources/BobNativeCore/{KeyTap,TextInserter}.swift` | done; decision logic and chunking tested |
 | Ghost card (on/off, p50/p95, quiet-app switches, remembered phrases with Forget all) | `src/components/GhostCard.tsx` | done |
+| Personal context: settings, `profile.md`, visible state, prompt assembly (spec `personal-context`) | `src-tauri/src/context/` | done; unit + property tests (budget, redaction, scope) |
+| Window title, after-caret text, opt-in screen text (ScreenCaptureKit + Vision OCR) | `AXReader.swift`, `ScreenContext.swift` | done; capture policy and line layout tested |
+| Personalize tab (profile editor, scope, style, Ghost layers, preview), per-brain sharing switch | `src/components/PersonalizePanel.tsx`, `BrainPanel.tsx` | done |
+| Selection Actions engine, actions, output cleaner (spec `selection-actions`) | `src-tauri/src/selection/` | done; engine tests against a chat test server, cleaner property test P5 |
+| Hotkey, selection read/replace, clipboard snapshot, action menu | `HotkeyCenter.swift`, `SelectionIO.swift`, `ActionMenuPanel.swift` | done; P1 to P3 tested; undo per app is a manual check |
+| Selection card (hotkey, actions, custom actions, stats) | `src/components/SelectionCard.tsx` | done |
+| Cmd+Q key monitor | `src-tauri/src/quit_key.rs` | done |
 
 ## Decisions log
 | Date | Decision | Reason |

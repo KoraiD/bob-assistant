@@ -89,6 +89,10 @@ pub struct BrainConfig {
     /// True when an API key is stored in the Keychain for this brain.
     #[serde(default)]
     pub has_api_key: bool,
+    /// May this brain receive personal context (profile, tone, window title, screen text)? `None` means
+    /// the default: yes for brains on this Mac, no for cloud brains (PC-6).
+    #[serde(default)]
+    pub share_context: Option<bool>,
 }
 
 impl BrainConfig {
@@ -99,6 +103,11 @@ impl BrainConfig {
 
     pub fn dialect(&self) -> Dialect {
         self.kind.dialect()
+    }
+
+    /// Whether personal context may be sent to this brain (PC-6).
+    pub fn shares_context(&self) -> bool {
+        self.share_context.unwrap_or(!self.is_cloud())
     }
 }
 

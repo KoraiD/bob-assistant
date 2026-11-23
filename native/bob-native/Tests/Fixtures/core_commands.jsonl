@@ -1,5 +1,5 @@
-{"type":"hello_ack","version":2}
-{"type":"reject","reason":"protocol version mismatch: core 2, helper 1"}
+{"type":"hello_ack","version":3}
+{"type":"reject","reason":"protocol version mismatch: core 3, helper 2"}
 {"type":"show_chip","text":" the quick brown","anchor":{"x":120.5,"y":340.25,"width":1.5,"height":18.0}}
 {"type":"hide_chip"}
 {"type":"request_permissions"}
@@ -7,3 +7,12 @@
 {"type":"insert_text","text":" lazy"}
 {"type":"capture_keys","active":true}
 {"type":"capture_keys","active":false}
+{"type":"set_context_mode","scope":"accessibility","exclude":[]}
+{"type":"set_context_mode","scope":"all_screens","exclude":["com.1password.1password","dev.bob.assistant"]}
+{"type":"request_screen_recording"}
+{"type":"show_menu","title":"BOB","items":["Fix grammar","Rephrase","Summarize"],"anchor":{"x":200.0,"y":300.0,"width":140.0,"height":18.0}}
+{"type":"show_menu","title":"BOB","items":["Fix grammar"],"anchor":null}
+{"type":"menu_status","text":"Fixing grammar…","busy":true,"error":false}
+{"type":"hide_menu"}
+{"type":"replace_selection","expected":"teh quick","text":"the quick"}
+{"type":"set_hotkey","hotkey":{"key_code":38,"modifiers":["cmd","shift"]}}

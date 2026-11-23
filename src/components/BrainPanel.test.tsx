@@ -11,8 +11,8 @@ import { BrainPanel } from "./BrainPanel";
 
 const snapshot: Snapshot = {
   brains: [
-    { id: "builtin", name: "BOB built-in (local)", kind: "builtin", endpoint: "http://127.0.0.1:0", model: null, capabilities: { ghost: true, chat: true }, has_api_key: false, is_cloud: false },
-    { id: "cloud", name: "Cloud", kind: "open_ai_compatible", endpoint: "https://api.example.com", model: "gpt-x", capabilities: { ghost: false, chat: true }, has_api_key: true, is_cloud: true },
+    { id: "builtin", name: "BOB built-in (local)", kind: "builtin", endpoint: "http://127.0.0.1:0", model: null, capabilities: { ghost: true, chat: true }, has_api_key: false, is_cloud: false, shares_context: true },
+    { id: "cloud", name: "Cloud", kind: "open_ai_compatible", endpoint: "https://api.example.com", model: "gpt-x", capabilities: { ghost: false, chat: true }, has_api_key: true, is_cloud: true, shares_context: false },
   ],
   roles: { ghost: "builtin", selection: "cloud", dictation: null },
   builtin: { state: "ready", base_url: "http://127.0.0.1:5000" },
@@ -33,6 +33,15 @@ afterEach(() => {
 });
 
 describe("BrainPanel", () => {
+  it("shows the personal-context switch per brain, off for the cloud brain", async () => {
+    render(<BrainPanel />);
+    const cloud = await screen.findByRole("checkbox", { name: "Share personal context with Cloud" });
+    expect(cloud).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Share personal context with BOB built-in (local)" })).toBeChecked();
+    await userEvent.click(cloud);
+    expect(invoke).toHaveBeenCalledWith("brain_set_share_context", { id: "cloud", share: true });
+  });
+
   it("labels cloud brains and shows the built-in state and catalog", async () => {
     render(<BrainPanel />);
     const cloud = await screen.findByTestId("brain-cloud");

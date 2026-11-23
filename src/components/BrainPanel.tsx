@@ -193,6 +193,19 @@ function BrainCard({ brain, onChanged }: { brain: BrainView; onChanged: () => vo
           )}
         </div>
       </div>
+      <label className="mt-2 flex items-center gap-2 text-xs" style={muted}>
+        <input
+          type="checkbox"
+          checked={brain.shares_context}
+          aria-label={`Share personal context with ${brain.name}`}
+          onChange={async (e) => {
+            await api.setShareContext(brain.id, e.currentTarget.checked);
+            onChanged();
+          }}
+        />
+        Share my profile, tone and visible context with this brain
+        {brain.is_cloud && !brain.shares_context ? " (off: cloud brain)" : ""}
+      </label>
       {report && (
         <p className="mt-2 text-xs" data-testid={`report-${brain.id}`} style={{ color: report.error ? "var(--danger)" : "var(--text-muted)" }}>
           {report.error

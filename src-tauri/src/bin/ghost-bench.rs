@@ -9,11 +9,15 @@
 //! Models must be downloaded first (Brains tab, or the same files under the app data dir). Results print as
 //! a table and are written as JSON to `bench-results/local/` (gitignored); curated numbers go to
 //! docs/PERFORMANCE.md. Typing is replayed in real time, so a run takes about 3 minutes per model and setting.
+//!
+//! `--context none,profile,memory,window,profile+memory+window` measures the personal-context layers
+//! (sample profile, seeded memory and per-trace window titles from `bench::corpus`).
 
 use bob_lib::bench::{self, corpus, runner::Harness, Summary};
 use bob_lib::brain::secrets::MemoryStore;
 use bob_lib::brain::service::BrainService;
 use bob_lib::brain::{models, sidecar};
+use bob_lib::context::{ContextHub, ContextSettings, GhostLayers};
 use bob_lib::ghost::engine::EngineConfig;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -23,6 +27,7 @@ use std::time::Duration;
 #[derive(Serialize)]
 struct Row {
     model: String,
+    context: String,
     config: EngineConfig,
     summary: Summary,
     server_rss_mb: Option<u64>,
@@ -34,6 +39,7 @@ struct Args {
     quiet_ms: Vec<u64>,
     temperatures: Vec<f32>,
     max_tokens: Vec<u32>,
+    contexts: Vec<String>,
     traces: usize,
     seed: u64,
     data_dir: PathBuf,
@@ -50,6 +56,7 @@ fn parse() -> Args {
         quiet_ms: vec![],
         temperatures: vec![],
         max_tokens: vec![],
+        contexts: vec![],
         traces: corpus::SENTENCES.len(),
         seed: 2026,
         data_dir: PathBuf::from(home).join("Library/Application Support/dev.bob.assistant"),
@@ -62,6 +69,9 @@ fn parse() -> Args {
             "--quiet-ms" => a.quiet_ms.extend(list::<u64>(&v)),
             "--temperature" => a.temperatures.extend(list::<f32>(&v)),
             "--max-tokens" => a.max_tokens.extend(list::<u32>(&v)),
+            "--context" => a
+                .contexts
+                .extend(v.split(',').map(|x| x.trim().to_string())),
             "--traces" => a.traces = v.parse().unwrap_or(a.traces),
             "--seed" => a.seed = v.parse().unwrap_or(a.seed),
             "--data-dir" => a.data_dir = PathBuf::from(v),
@@ -84,7 +94,34 @@ fn parse() -> Args {
     if a.max_tokens.is_empty() {
         a.max_tokens.push(d.max_tokens);
     }
+    if a.contexts.is_empty() {
+        a.contexts.push("none".into());
+    }
+    for c in &a.contexts {
+        if layers(c).is_none() {
+            eprintln!(
+                "unknown context {c:?} (use none, profile, memory, window, screen, joined with +)"
+            );
+            std::process::exit(2);
+        }
+    }
     a
+}
+
+/// "profile+memory" -> layers. None for unknown names.
+fn layers(spec: &str) -> Option<GhostLayers> {
+    let mut l = GhostLayers::default();
+    for part in spec.split('+') {
+        match part {
+            "none" => {}
+            "profile" => l.profile = true,
+            "memory" => l.memory = true,
+            "window" => l.window = true,
+            "screen" => l.screen = true,
+            _ => return None,
+        }
+    }
+    Some(l)
 }
 
 /// Resident memory of the running llama-server, from its PID file.
@@ -123,8 +160,9 @@ async fn main() {
         .collect();
 
     println!(
-        "{:<30} {:>6} {:>5} {:>4} | {:>6} {:>6} {:>6} | {:>8} {:>8} {:>8} | {:>7}",
+        "{:<30} {:<22} {:>6} {:>5} {:>4} | {:>6} {:>6} {:>6} | {:>8} {:>8} {:>8} | {:>7}",
         "model",
+        "context",
         "quiet",
         "temp",
         "tok",
@@ -146,27 +184,39 @@ async fn main() {
             eprintln!("{model}: not ready ({e})");
             continue;
         }
-        for &q in &args.quiet_ms {
-            for &t in &args.temperatures {
-                for &n in &args.max_tokens {
-                    let config = EngineConfig {
-                        quiet: Duration::from_millis(q),
-                        temperature: t,
-                        max_tokens: n,
-                    };
-                    let h = Harness::new(svc.clone(), config);
-                    let mut scores = vec![];
-                    for tr in &traces {
-                        let events = h.replay(tr).await;
-                        scores.push(bench::score(tr, &events));
-                    }
-                    let summary = bench::summarize(&scores);
-                    let rss = server_rss_mb(&runtime);
-                    let ms =
-                        |x: Option<u64>| x.map(|v| v.to_string()).unwrap_or_else(|| "-".into());
-                    println!(
-                        "{:<30} {:>6} {:>5} {:>4} | {:>6} {:>6} {:>6} | {:>8} {:>8} {:>8} | {:>7}",
+        for ctx in &args.contexts {
+            for &q in &args.quiet_ms {
+                for &t in &args.temperatures {
+                    for &n in &args.max_tokens {
+                        let config = EngineConfig {
+                            quiet: Duration::from_millis(q),
+                            temperature: t,
+                            max_tokens: n,
+                        };
+                        let hub = Arc::new(ContextHub::in_memory(
+                            ContextSettings {
+                                ghost: layers(ctx).expect("validated"),
+                                ..Default::default()
+                            },
+                            corpus::PROFILE,
+                        ));
+                        let h = Harness::with_context(svc.clone(), config, hub);
+                        for phrase in corpus::MEMORY.iter().rev() {
+                            h.ghost.remember(phrase);
+                        }
+                        let mut scores = vec![];
+                        for tr in &traces {
+                            let events = h.replay(tr).await;
+                            scores.push(bench::score(tr, &events));
+                        }
+                        let summary = bench::summarize(&scores);
+                        let rss = server_rss_mb(&runtime);
+                        let ms =
+                            |x: Option<u64>| x.map(|v| v.to_string()).unwrap_or_else(|| "-".into());
+                        println!(
+                        "{:<30} {:<22} {:>6} {:>5} {:>4} | {:>6} {:>6} {:>6} | {:>8} {:>8} {:>8} | {:>7}",
                         model,
+                        ctx,
                         q,
                         t,
                         n,
@@ -178,13 +228,15 @@ async fn main() {
                         pct(summary.keystroke_savings),
                         ms(rss)
                     );
-                    rows.push(Row {
-                        model: model.clone(),
-                        config,
-                        summary,
-                        server_rss_mb: rss,
-                        scores,
-                    });
+                        rows.push(Row {
+                            model: model.clone(),
+                            context: ctx.clone(),
+                            config,
+                            summary,
+                            server_rss_mb: rss,
+                            scores,
+                        });
+                    }
                 }
             }
         }

@@ -22,7 +22,8 @@ stitched into one app. Secondary strengths: haunted UI (Costume Contest flavor),
 ## Product principles
 - **Bring Your Own Brain:** every capability works with a local sidecar model, Ollama, LM Studio or any
   OpenAI-compatible cloud endpoint. Capability flags decide what each brain can do.
-- **Local-first and private:** no telemetry, no accounts, no screen capture or OCR in v1.
+- **Local-first and private:** no telemetry, no accounts. Screen reading is opt-in, on-device, and its text
+  goes only to brains the user allows.
 - **Demoable first:** a working end-to-end path beats breadth. Cut stretch work before core work.
 - **Scope guard:** macOS (Apple Silicon, macOS 14+) only. Must run well on an M3 with 16 GB.
 

@@ -34,6 +34,13 @@ bytes = "1.12.2"
 rand = "0.9"
 env_logger = { version = "0.11.12", default-features = false, features = ["auto-color", "humantime"] }
 
+
+# AppKit access for the Cmd+Q key monitor (already in the tree through Tauri; same versions).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent", "NSResponder"] }
+block2 = "0.6"
+
 [dev-dependencies]
 proptest = "1"
 tokio = { version = "1.53.3", features = ["test-util"] }

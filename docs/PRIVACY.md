@@ -5,8 +5,12 @@ feature that changes the answer.
 
 ## Summary
 - No accounts, no telemetry, no analytics, no crash reporting.
-- No screen capture and no OCR. BOB never asks for the Screen Recording permission.
+- By default BOB reads only the field you type in, its window title and the text after your cursor (Accessibility).
+  Reading the screen is opt-in (Personalize > What BOB can see): BOB then asks for Screen Recording, recognizes the
+  text on this Mac and never stores or sends images.
 - Text is sent only to the brain you configured. Local brains stay on `127.0.0.1`; cloud brains are labeled "cloud".
+- Personal context (profile, tone, memory, window title, screen text) goes only to brains you allow, one switch per
+  brain. Cloud brains start with it off.
 - API keys are stored in the macOS Keychain only.
 
 ## Permissions (when each feature lands)
@@ -14,6 +18,7 @@ feature that changes the answer.
 |---|---|---|
 | Accessibility | read text near the caret, caret position, insert text, capture Tab/Esc only while a suggestion is visible | Ghost Text and Selection Actions are disabled with an explanation |
 | Microphone | Voice Dictation | Dictation is disabled with an explanation |
+| Screen Recording | only if you choose "Active window" or "All screens" as visible context | BOB stays at Accessibility-only context |
 | Input Monitoring | only if the spike shows it is required for modifier-only hotkeys | documented in `docs/COMPATIBILITY.md` |
 
 ## Data handling
@@ -23,7 +28,12 @@ feature that changes the answer.
 | Accepted phrases | local `ghost-memory.json` (at most 200 phrases of 64 characters, most recent first; secret-looking text is never kept); not sent to any brain yet | yes, locally; view and "Forget all" in the Ghost card |
 | Quiet apps, Ghost on/off | local `ghost-settings.json` | yes, locally |
 | Recently used apps (bundle id and name, last 12) | the quiet-apps list in the Ghost card | in memory only, gone when BOB quits |
-| Selected text (Selection Actions) | the selection brain, after redaction | not stored |
+| Your profile | local `profile.md` (0600), edited in Personalize; sent only to allowed brains, redacted | yes, locally |
+| Tone, language, visible-context scope, Ghost layers | local `context-settings.json` | yes, locally |
+| Window title, text after the cursor (up to 400 characters) | in memory; to allowed brains, redacted | no |
+| Text recognized on screen (opt-in, up to 4,000 characters, 90 s lifetime) | in memory; to allowed brains, redacted. Screenshots stay in memory for the OCR call only | no |
+| Selected text (Selection Actions) | read only when you press the hotkey; sent to the Selection brain. Cloud brains never receive text with credential-like tokens: the action is refused (redacting would write "[redacted]" into your document) | not stored |
+| Clipboard (Selection Actions fallback) | borrowed for Cmd+C / Cmd+V when an app hides its selection from Accessibility, then restored item by item | not stored |
 | Audio (Dictation) | in memory, to the local transcriber | never written to disk |
 | Transcripts, typed text, selections | never logged | no |
 | API keys | macOS Keychain | yes |
@@ -49,6 +59,14 @@ Quiet apps get no suggestions and no text from them reaches any brain. The defau
 Ghostty, kitty, Alacritty, WezTerm), password managers (1Password, Bitwarden, Passwords, Keychain Access) and BOB
 itself; the Ghost card lists them with the apps you used recently, and
 one switch per app adds or removes it. Changes apply at once, including to a suggestion already on screen.
+
+## Screen context
+- One frame per capture, of the window you type in or of every display, at most every 8 seconds unless you switch
+  app or window. Never for secure fields, quiet apps or BOB's own windows.
+- Text recognition is Apple's Vision framework on this Mac. Images are never written to disk or sent anywhere.
+- macOS shows its screen-recording indicator while a frame is taken, and may ask you to confirm the permission again
+  from time to time.
+- "Preview what BOB sends" in Personalize shows exactly what would be added to prompts.
 
 ## Keyboard
 While (and only while) a suggestion is visible, BOB swallows Tab, Shift+Tab and Esc. Shortcuts with Cmd, Ctrl, Option

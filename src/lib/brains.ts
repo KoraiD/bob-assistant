@@ -19,10 +19,14 @@ export interface BrainConfig {
   model: string | null;
   capabilities: Capabilities;
   has_api_key: boolean;
+  /** null: default (on for brains on this Mac, off for cloud brains). */
+  share_context?: boolean | null;
 }
 
 export interface BrainView extends BrainConfig {
   is_cloud: boolean;
+  /** Effective permission to receive personal context. */
+  shares_context: boolean;
 }
 
 export type SidecarState =
@@ -274,6 +278,7 @@ export const api = {
     invoke<void>("ghost_set_quiet", { bundleId: app.bundle_id, name: app.name, quiet }),
   ghostMemory: () => invoke<GhostMemory>("ghost_memory"),
   ghostMemoryClear: () => invoke<void>("ghost_memory_clear"),
+  setShareContext: (id: string, share: boolean) => invoke<void>("brain_set_share_context", { id, share }),
 };
 
 export async function on<T>(event: string, handler: (payload: T) => void): Promise<() => void> {

@@ -60,8 +60,9 @@ open src-tauri/target/debug/bundle/macos/BOB.app
 Then Overview > Grant permissions, and switch BOB on in System Settings > Privacy & Security.
 
 ### Permissions (added as features land)
-BOB asks for **Accessibility** (read the caret, insert text) and **Microphone** (dictation). It never asks for
-Screen Recording. See [docs/PRIVACY.md](docs/PRIVACY.md).
+BOB asks for **Accessibility** (read the caret, insert text) and **Microphone** (dictation). It asks for
+**Screen Recording** only if you let it read the active window or all screens (Personalize tab). See
+[docs/PRIVACY.md](docs/PRIVACY.md).
 
 ## Architecture in one picture
 

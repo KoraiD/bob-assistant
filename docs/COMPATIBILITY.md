@@ -43,9 +43,32 @@ make chip-demo     # show a ghost chip at the caret in whatever app you type in 
 | Notes | - | - | - | n/a | - | - | |
 | Mail (compose) | - | - | - | n/a | - | - | |
 | Safari (textarea) | - | - | - | - | - | - | |
-| Chrome (textarea) | - | - | - | - | - | - | |
+| Chrome (textarea) | yes (suggestions shown at the caret) | yes | - | - | - | - | Ghost Text works (owner, 2026-11-23); probe numbers not recorded yet |
 | VS Code | - | - | - | n/a | - | - | |
 | Slack | - | - | - | n/a | - | - | |
+
+## Selection Actions (Task 7)
+Select text, press Cmd+Shift+J, pick "Fix grammar", then press Cmd+Z once. Record whether the menu appears next to
+the selection, whether the text is replaced, and whether a single Cmd+Z restores the original. For Read and Replace,
+note "ok" or what went wrong; the paste fallback briefly changes the clipboard and restores it.
+
+| App | Menu at selection | Read | Replace | One-step undo | Notes |
+|---|---|---|---|---|---|
+| TextEdit | - | - | - | - | |
+| Notes | - | - | - | - | |
+| Mail (compose) | - | - | - | - | |
+| Chrome (textarea) | - | - | - | - | Chrome uses Cmd+Shift+J for Downloads; BOB's hotkey takes it while BOB runs (change it in Overview) |
+| Slack | - | - | - | - | |
+| VS Code | - | - | - | - | |
+
+## Screen context (opt-in)
+Personalize > What BOB can see > "Active window", grant Screen Recording, type in Mail with a thread open, then
+Personalize > Preview: "Text visible on screen" should list the thread. Record capture + OCR time (shown in Personalize).
+
+| Scope | App | Text recognized | ms | Notes |
+|---|---|---|---|---|
+| Active window | Mail | - | - | |
+| All screens | Safari article on a second display | - | - | |
 
 ## Capturing screenshots and video of the chip
 Taking a screenshot activates the system capture UI, which BOB used to treat as an app switch (the chip vanished). The helper
@@ -58,9 +81,22 @@ Cmd+Shift+4. A delayed capture also works: `screencapture -T 5 ~/Desktop/chip.pn
   the Rust package) using `terminate:`, the same action Dock > Quit triggers, so the key equivalent was being lost
   before the menu. wry documents this class of bug: WKWebView's `performKeyEquivalent:` can consume Cmd shortcuts and
   stop them reaching the menu (comment referencing tauri-apps/tauri#9426 in `wry/src/wkwebview/class/wry_web_view.rs`).
-- **Fix (needs the owner's confirmation):** BOB now installs its own menu ("BOB > Quit BOB" Cmd+Q calling `app.exit`, the
-  path that also stops llama-server), and the web page catches a plain Cmd+Q itself and calls `app_quit` in case the
-  web view swallows it. Tray "Quit BOB" and SIGTERM are verified.
+- **First fix:** BOB installs its own menu ("BOB > Quit BOB" Cmd+Q calling `app.exit`, the path that also stops
+  llama-server), and the web page catches a plain Cmd+Q itself and calls `app_quit` in case the web view swallows it.
+  Tray "Quit BOB" and SIGTERM are verified. The owner reported Cmd+Q still did nothing.
+- **Root cause, found 2026-11-23:**
+  1. The menu item exists with the right key equivalent. Read through Accessibility: `Quit BOB`, `AXMenuItemCmdChar = Q`.
+     Clicking it (System Events) quits BOB cleanly.
+  2. An AppKit local key monitor (`quit_key.rs`, which sees every key event before the web view and the menu) logged
+     **no** Cmd key at all while BOB was frontmost. The keys were synthetic (System Events), so this points to the
+     key being filtered before BOB's process; a physical keypress with the monitor's debug log is still to be checked.
+  3. The system event-tap list (`CGGetEventTapList`) shows an active key-down filter from **Vorssaint**
+     (`com.vorssaint.utils`), and its preferences contain `quitProtectionQuitEnabled = 1`. Vorssaint's Quit Protection
+     (added in v3.3.3) blocks a plain Cmd+Q and requires a hold, a double press or an extra modifier, per app.
+  4. BOB's own tap passes every Cmd shortcut (`KeyDecision`, unit-tested).
+  BOB therefore cannot receive the shortcut while Quit Protection is on. **Use the hold or double press Vorssaint
+  asks for, or exclude BOB in Vorssaint > Quit Protection.** The local monitor stays as a third quit path, in case a
+  web view swallows the key.
 
 ## Open spike questions
 1. **TCC attribution of the nested helper.** Partly answered (2026-11-23): `make dev` and `make probe` inherit the

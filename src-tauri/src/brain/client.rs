@@ -321,6 +321,7 @@ mod tests {
             model: Some("m".into()),
             capabilities: kind.default_capabilities(),
             has_api_key: false,
+            share_context: None,
         }
     }
 

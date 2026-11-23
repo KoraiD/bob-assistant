@@ -31,6 +31,11 @@ public struct AXSnapshot {
     public var caretSource: CaretSource?
     /// The focused element's frame in AX coordinates, used to validate caret rects.
     public var elementFrame: Rect?
+    /// Title of the focused window (PC-3). Not read for secure fields.
+    public var windowTitle: String?
+    /// Text after the caret, bounded (PC-3). Not read for secure fields.
+    public var afterCaret: String?
+    public var pid: pid_t = 0
 }
 
 /// Thin wrappers around the Accessibility C API. No force unwraps on AX values (macos-native steering).
@@ -174,7 +179,8 @@ public enum AXReader {
     public static func snapshot(of element: AXUIElement) -> AXSnapshot {
         var bundle = ""
         var name = ""
-        if let p = pid(of: element), let app = NSRunningApplication(processIdentifier: p) {
+        let elementPID = pid(of: element) ?? 0
+        if elementPID != 0, let app = NSRunningApplication(processIdentifier: elementPID) {
             bundle = app.bundleIdentifier ?? ""
             name = app.localizedName ?? ""
         }
@@ -185,14 +191,18 @@ public enum AXReader {
         var snap = AXSnapshot(appBundleId: bundle, appName: name, role: role, subrole: subrole,
                               secure: secure, editable: editable, valueLength: nil, beforeCaret: nil,
                               selectionLen: nil, caret: nil, caretSource: nil, elementFrame: nil)
+        snap.pid = elementPID
         guard !secure, editable else { return snap }
 
+        snap.windowTitle = focusedWindowTitle(pid: elementPID)
         snap.elementFrame = frame(element)
         if let selection = range(element, kAXSelectedTextRangeAttribute) {
             snap.selectionLen = max(selection.length, 0)
             if let value = string(element, kAXValueAttribute) {
                 snap.valueLength = value.utf16.count
                 snap.beforeCaret = TextWindow.beforeCaret(value: value, caretUTF16: selection.location)
+                snap.afterCaret = TextWindow.afterCaret(value: value, caretUTF16: selection.location,
+                                                        selectionUTF16: selection.length)
             }
             let value = string(element, kAXValueAttribute)
             if let (rect, source) = caret(element, selection: selection, value: value, frame: snap.elementFrame, app: bundle) {
@@ -205,6 +215,16 @@ public enum AXReader {
             snap.caretSource = source
         }
         return snap
+    }
+
+    /// Title of the app's focused window (empty titles count as none).
+    static func focusedWindowTitle(pid: pid_t) -> String? {
+        guard pid != 0 else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        guard let window = attribute(app, kAXFocusedWindowAttribute),
+              CFGetTypeID(window) == AXUIElementGetTypeID() else { return nil }
+        let title = string(window as! AXUIElement, kAXTitleAttribute)  // type id checked above
+        return title?.isEmpty == false ? title : nil
     }
 
     /// Chromium and Electron only expose their accessibility tree after being asked (macos-native steering).

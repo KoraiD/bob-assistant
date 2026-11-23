@@ -2,6 +2,7 @@
 
 use super::{ChipEvent, Trace};
 use crate::brain::service::BrainService;
+use crate::context::ContextHub;
 use crate::ghost::engine::{self, EngineConfig, GhostHandle, Sink};
 use crate::protocol::{CoreCommand, NativeEvent, Rect};
 use std::sync::{Arc, Mutex};
@@ -53,13 +54,31 @@ impl TimedRecorder {
 pub struct Harness {
     pub ghost: GhostHandle,
     pub recorder: Arc<TimedRecorder>,
+    pub context: Arc<ContextHub>,
 }
 
 impl Harness {
     pub fn new(brains: Arc<BrainService>, config: EngineConfig) -> Self {
+        Self::with_context(
+            brains,
+            config,
+            Arc::new(ContextHub::in_memory(Default::default(), "")),
+        )
+    }
+
+    /// An engine using `context` (profile, memory, window layers) for the context benchmark.
+    pub fn with_context(
+        brains: Arc<BrainService>,
+        config: EngineConfig,
+        context: Arc<ContextHub>,
+    ) -> Self {
         let recorder = Arc::new(TimedRecorder::default());
-        let ghost = engine::spawn_with(brains, recorder.clone(), config);
-        Self { ghost, recorder }
+        let ghost = engine::spawn_ctx(brains, recorder.clone(), config, None, context.clone());
+        Self {
+            ghost,
+            recorder,
+            context,
+        }
     }
 
     /// Type `trace` in real time and return the chip events, relative to the trace start.
@@ -70,6 +89,11 @@ impl Harness {
             app_name: "bench".into(),
             secure: false,
             editable: true,
+        });
+        self.context.observe(&NativeEvent::ContextState {
+            app_bundle_id: "bench".into(),
+            window_title: super::corpus::window_title(&trace.id).map(str::to_string),
+            after_caret: String::new(),
         });
         tokio::time::sleep(Duration::from_millis(50)).await;
         let start = Instant::now();
@@ -137,6 +161,7 @@ mod tests {
                     chat: true,
                 },
                 has_api_key: false,
+                share_context: None,
             },
             None,
         )

@@ -2,7 +2,7 @@ import { brainsForRole, ghostSummary, quietAppRows, type GhostStatus, draftToCon
 
 const brain = (id: string, ghost: boolean, chat: boolean): BrainView => ({
   id, name: id, kind: "ollama", endpoint: "http://127.0.0.1:11434", model: null,
-  capabilities: { ghost, chat }, has_api_key: false, is_cloud: false,
+  capabilities: { ghost, chat }, has_api_key: false, is_cloud: false, shares_context: true,
 });
 
 describe("brains helpers", () => {

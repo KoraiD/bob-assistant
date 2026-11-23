@@ -81,6 +81,42 @@ few points are not significant at 12 traces.
 Between keystrokes only the new token is evaluated, so the prompt cost drops from 300 ms to 4 ms. This is why the
 window moves in 256-character steps instead of sliding per keystroke.
 
+## Ghost Text context layers (personal-context spec, PC-8)
+`ghost-bench --context none,profile,memory,window,profile+memory+window` runs the same corpus with each layer of
+the Ghost preamble switched on. The fixtures are in `bench::corpus`:
+- a five-line sample profile (name, role, writing style, sign-off);
+- 12 seeded memory phrases, 6 of which recur in the corpus and 6 do not;
+- one window title per trace kind ("Mail: Re: Project update", "Messages: Anna", ...).
+
+There were two runs with different typing seeds (2026 and 7). Hardware and versions match the Task 5 table; the
+model is the default Qwen2.5-1.5B-Instruct, with a 70 ms gate and temperature 0.2.
+
+| Layers | p50 (seed 2026 / 7) | p95 | Chip in pauses | Right word | Saved | Mean right word | Mean saved |
+|---|---|---|---|---|---|---|---|
+| none (default) | 88 / 88 ms | 95 / 96 ms | 98% / 95% | 32% / 32% | 26% / 27% | 32% | 26.5% |
+| profile | 88 / 89 ms | 95 / 97 ms | 98% / 96% | 37% / 32% | 30% / 28% | 34.5% | 29% |
+| memory | 92 / 91 ms | 100 / 100 ms | 93% / 97% | 38% / 43% | 31% / 36% | 40.5% | 33.5% |
+| window | 94 / 96 ms | 102 / 105 ms | 92% / 97% | 38% / 38% | 31% / 31% | 38% | 31% |
+| profile + memory + window | 89 / 96 ms | 97 / 104 ms | 95% / 95% | 43% / 38% | 36% / 35% | 40.5% | 35.5% |
+
+What this shows (12 traces per run; Task 5 found about 7 points of run-to-run noise):
+- **Speed:** every layer stays far inside the budget (p50 ≤ 150 ms, p95 ≤ 300 ms).
+  - Memory and profile cost 0 to 4 ms at p50, because the notes are a stable prefix that the prompt cache keeps.
+  - The window title costs about 7 ms, because it changes with every trace and is re-evaluated once.
+  - Server memory did not change.
+- **Accuracy:**
+  - **Memory** is the only layer that beat the no-context baseline by more than the noise in both runs (+6 and +11
+    points right word, +5 and +9 points saved).
+  - The window title helps a little (+6 points in both runs).
+  - The profile alone is within noise.
+- **Reliability:** pause coverage stayed between 92% and 98% for every layer (baseline 95% to 98%). The dips of up to
+  6 points are within noise. Chip texts were not inspected one by one for leaked note text; the right-word rate did
+  not drop for any layer.
+- **Caveat:** half of the seeded memory phrases appear in the corpus, so the memory gain is what a user whose
+  phrases recur can expect, not a general gain. A corpus from real accepted phrases would be the next step.
+
+**Decision:** pending, owner's call (PC-8). Defaults stay off.
+
 ## Measurements
 First real numbers come from the ignored end-to-end test (`real_llama_server_streams_a_ghost_completion`), not from
 the replay harness (Task 5). Two prompts only, so these are smoke numbers, not p50/p95.

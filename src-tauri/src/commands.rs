@@ -320,11 +320,15 @@ pub async fn ghost_set_enabled(ghost: State<'_, GhostHandle>, enabled: bool) -> 
 #[tauri::command]
 pub async fn ghost_set_quiet(
     ghost: State<'_, GhostHandle>,
+    context: State<'_, Context>,
+    bridge: State<'_, crate::native_ipc::Bridge>,
     bundle_id: String,
     name: String,
     quiet: bool,
 ) -> Result<(), String> {
     ghost.set_quiet(&bundle_id, &name, quiet);
+    // Quiet apps are never captured for screen context either.
+    push_context_mode(&bridge, &context, &ghost);
     Ok(())
 }
 
@@ -361,4 +365,164 @@ pub fn autostart_builtin(app: AppHandle, brains: Brains) {
         }
         changed(&app);
     });
+}
+
+// ---- personal context (spec personal-context) ----
+
+pub type Context = Arc<crate::context::ContextHub>;
+
+/// Tell the helper what it may capture: the chosen scope, never the quiet apps (PC-4, PC-7).
+pub fn push_context_mode(
+    bridge: &crate::native_ipc::Bridge,
+    context: &Context,
+    ghost: &GhostHandle,
+) {
+    let exclude = ghost
+        .settings()
+        .quiet_apps
+        .into_iter()
+        .map(|a| a.bundle_id)
+        .collect();
+    let _ = bridge.send(&crate::protocol::CoreCommand::SetContextMode {
+        scope: context.settings().scope,
+        exclude,
+    });
+}
+
+/// Everything the Personalize tab shows. The profile is the user's own file; visible context is
+/// summarized (sizes only).
+#[derive(Serialize)]
+pub struct ContextView {
+    pub settings: crate::context::ContextSettings,
+    pub profile: String,
+    pub profile_path: Option<String>,
+    pub template: &'static str,
+    pub max_profile_bytes: usize,
+    pub visible: crate::context::VisibleSummary,
+    pub screen_recording: Option<bool>,
+}
+
+#[tauri::command]
+pub async fn context_get(
+    context: State<'_, Context>,
+    bridge: State<'_, crate::native_ipc::Bridge>,
+) -> Result<ContextView, String> {
+    Ok(ContextView {
+        settings: context.settings(),
+        profile: context.profile(),
+        profile_path: context.profile_path().map(|p| p.display().to_string()),
+        template: crate::context::profile::TEMPLATE,
+        max_profile_bytes: crate::context::profile::MAX_BYTES,
+        visible: context.summary(),
+        screen_recording: bridge.status().screen_recording,
+    })
+}
+
+#[tauri::command]
+pub async fn context_set_settings(
+    context: State<'_, Context>,
+    bridge: State<'_, crate::native_ipc::Bridge>,
+    ghost: State<'_, GhostHandle>,
+    settings: crate::context::ContextSettings,
+) -> Result<(), String> {
+    let wants_capture = settings.scope != crate::protocol::ContextScope::Accessibility;
+    context
+        .set_settings(settings)
+        .map_err(|e| format!("cannot save the settings: {e}"))?;
+    push_context_mode(&bridge, &context, &ghost);
+    // Ask for Screen Recording only when the user picked a capture scope and it is not granted yet.
+    if wants_capture && bridge.status().screen_recording != Some(true) {
+        let _ = bridge.send(&crate::protocol::CoreCommand::RequestScreenRecording);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn profile_save(context: State<'_, Context>, text: String) -> Result<(), String> {
+    context.set_profile(&text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn context_request_screen_recording(
+    bridge: State<'_, crate::native_ipc::Bridge>,
+) -> Result<(), String> {
+    bridge
+        .send(&crate::protocol::CoreCommand::RequestScreenRecording)
+        .map_err(|e| format!("native helper is not connected: {e}"))
+}
+
+/// What BOB would add to prompts right now, so the user can see it (shown only on request).
+#[derive(Serialize)]
+pub struct ContextPreview {
+    pub ghost_notes: String,
+    pub chat_system: String,
+}
+
+#[tauri::command]
+pub async fn context_preview(
+    context: State<'_, Context>,
+    ghost: State<'_, GhostHandle>,
+) -> Result<ContextPreview, String> {
+    let memory = ghost
+        .memory()
+        .most_used(crate::context::GHOST_MEMORY_PHRASES);
+    Ok(ContextPreview {
+        ghost_notes: context.ghost_preamble(&memory),
+        chat_system: context.chat_system("(the action you pick, e.g. \"Fix grammar\")", true),
+    })
+}
+
+#[tauri::command]
+pub async fn brain_set_share_context(
+    app: AppHandle,
+    brains: State<'_, Brains>,
+    id: String,
+    share: bool,
+) -> Result<(), String> {
+    brains
+        .set_share_context(&id, share)
+        .await
+        .map_err(|e| e.to_string())?;
+    changed(&app);
+    Ok(())
+}
+
+// ---- Selection Actions ----
+
+#[derive(Serialize)]
+pub struct SelectionView {
+    pub settings: crate::selection::actions::SelectionSettings,
+    /// Menu labels in order, as the user will see them.
+    pub actions: Vec<String>,
+    pub stats: crate::selection::engine::SelectionStats,
+}
+
+#[tauri::command]
+pub async fn selection_get(
+    selection: State<'_, crate::selection::engine::SelectionHandle>,
+    context: State<'_, Context>,
+) -> Result<SelectionView, String> {
+    let settings = selection.settings();
+    let actions = crate::selection::actions::menu(&settings, &context.settings().language)
+        .into_iter()
+        .map(|a| a.label)
+        .collect();
+    Ok(SelectionView {
+        settings,
+        actions,
+        stats: selection.stats(),
+    })
+}
+
+#[tauri::command]
+pub async fn selection_set_settings(
+    selection: State<'_, crate::selection::engine::SelectionHandle>,
+    bridge: State<'_, crate::native_ipc::Bridge>,
+    settings: crate::selection::actions::SelectionSettings,
+) -> Result<(), String> {
+    selection
+        .set_settings(settings)
+        .map_err(|e| format!("cannot save the settings: {e}"))?;
+    let _ = bridge.send(&selection.hotkey_command());
+    Ok(())
 }

@@ -104,3 +104,27 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
 - **Lint catch:** clippy's `field_reassign_with_default` flagged a test that built settings and then mutated a field;
   rewritten with struct-update syntax.
 - **Tests now:** Rust 143 + 2 end-to-end (+3 ignored real-world tests), Swift 54, Vitest 32.
+## 2026-11-23: Cmd+Q root cause, personal context, Task 7 Selection Actions
+- **Cmd+Q, measured instead of guessed:**
+  - The menu item was correct (read back through Accessibility) and clicking it quit BOB.
+  - An AppKit key monitor saw no Cmd keys at all.
+  - `CGGetEventTapList` showed a third-party utility, Vorssaint, with an active key filter, and its preferences had
+    Quit Protection on. The fix is a setting on the owner's Mac, not code. The investigation stays in
+    COMPATIBILITY.md so nobody repeats it.
+- **Owner decisions became a spec first** (`.kiro/specs/personal-context`, PC-1 to PC-10):
+  - Accessibility-only context by default; screen text opt-in.
+  - The profile in a fixed `profile.md` edited in the UI.
+  - A per-brain sharing switch, off for cloud brains.
+  - Ghost Text layers off until measured.
+  - The steering rule "no screen capture in v1" was rewritten to "opt-in only" in the same change, so the agent
+    instructions match the decision.
+- **Protocol v3 without churn:** the new surroundings travel in new `context_state` and `screen_text` events instead of
+  new fields on `text_state`. No existing test had to change. The shared fixtures gained one line per new message.
+- **Benchmark before defaults:** `ghost-bench --context` measures each Ghost layer on the real model. Results and the
+  noise caveat are in PERFORMANCE.md. The owner decides the defaults from those numbers.
+- **Selection Actions design choice found by thinking through data loss:** the spec said "redact before cloud". For a
+  rewrite that would put "[redacted]" into the user's document, so text with secrets is refused for cloud brains instead.
+  The design doc records the change.
+- **A test expectation was wrong, not the code:** `NSPasteboard.string(forType:)` joins all items with newlines. A
+  probe program confirmed it before the test was changed.
+- **Tests now:** Rust 175 + 2 end-to-end (+3 ignored real-world tests), Swift 76, Vitest 48.

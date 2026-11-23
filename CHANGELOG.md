@@ -4,6 +4,21 @@ All notable changes to BOB. Format follows [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+### Added (Task 7, Selection Actions)
+- Select text in any app, press Cmd+Shift+J (configurable), pick an action with the arrow keys, and the result replaces the selection: Fix grammar, Rephrase, Make shorter, Make friendlier, Make professional, Summarize, Translate, and up to 12 of your own actions.
+- Native: Carbon hotkey, selection via Accessibility or Cmd+C (clipboard restored), a non-activating menu panel with streamed preview, and replacement only if the selection is unchanged (Accessibility write, paste fallback).
+- Cloud brains never receive text that looks like it contains a key or password; the action is refused instead of redacted.
+
+### Added (personal context)
+- Personalize tab: `profile.md` editor (Markdown toolbar, preview with GitHub-flavored Markdown and emoji), tone and language, and a preview of exactly what BOB adds to prompts.
+- Visible context: Accessibility only by default (window title, text after the cursor). Opt-in "Active window" or "All screens" reads on-screen text with ScreenCaptureKit and on-device Vision OCR (Screen Recording asked only then; BOB and quiet apps never captured).
+- Per-brain "share personal context" switch: on by default for brains on this Mac, off for cloud brains.
+- Ghost Text context layers (profile, memory, window, screen), all off by default; `ghost-bench --context` measures each.
+- Protocol v3.
+
+### Fixed
+- Cmd+Q: traced to a third-party quit-protection utility (Vorssaint) filtering Cmd+Q before it reaches BOB; documented in COMPATIBILITY. BOB also handles Cmd+Q in an AppKit key monitor.
+
 ### Added (Task 6)
 - Quiet apps: Ghost Text stays silent in terminals, password managers and BOB by default; the Ghost card lists quiet and recently used apps with one switch each. Saved in `ghost-settings.json`, together with Ghost on/off.
 - Accepted-phrase memory: phrases accepted with Tab / Shift+Tab are kept locally in `ghost-memory.json` (bounded, secret-free); the Ghost card shows the count, lists them on demand and can forget all. Not yet used in prompts.

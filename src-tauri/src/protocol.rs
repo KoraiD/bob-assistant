@@ -14,7 +14,10 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Bumped on every incompatible schema change. Both sides refuse to talk on a mismatch (NB-2).
-pub const PROTOCOL_VERSION: u32 = 2;
+/// v3: personal context (`context_state`, `screen_text`, `set_context_mode`, `request_screen_recording`,
+/// `permissions.screen_recording`) and Selection Actions (`selection`, `menu_choice`, `menu_cancel`,
+/// `replace_result`, `show_menu`, `menu_status`, `hide_menu`, `replace_selection`, `set_hotkey`).
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Longest accepted line in bytes. Longer lines are dropped, not buffered without bound.
 pub const MAX_LINE_BYTES: usize = 1 << 20;
@@ -46,6 +49,36 @@ pub enum Key {
     Escape,
 }
 
+/// How much of the screen BOB may read for context (personal-context spec, PC-4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextScope {
+    /// Accessibility only: window title and the focused field's text. No Screen Recording permission.
+    #[default]
+    Accessibility,
+    /// Plus the text visible in the frontmost window (screen capture + on-device OCR).
+    ActiveWindow,
+    /// Plus the text visible on every display.
+    AllScreens,
+}
+
+/// Where the helper read the selection from (SA-2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectionSource {
+    /// `AXSelectedText` of the focused element.
+    Accessibility,
+    /// Cmd+C with the clipboard saved and restored.
+    Copy,
+}
+
+/// A global hotkey: macOS virtual key code plus modifiers ("cmd", "shift", "option", "control").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hotkey {
+    pub key_code: u32,
+    pub modifiers: Vec<String>,
+}
+
 /// Messages sent by the Swift helper to the core.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -57,6 +90,8 @@ pub enum NativeEvent {
     Permissions {
         accessibility: bool,
         microphone: MicStatus,
+        #[serde(default)]
+        screen_recording: bool,
     },
     Focus {
         app_bundle_id: String,
@@ -70,6 +105,42 @@ pub enum NativeEvent {
         before_caret: String,
         selection_len: u32,
         caret: Option<Rect>,
+    },
+    /// Surroundings of the focused field, sent when they change (PC-3): the focused window's title and
+    /// the text after the caret (bounded). Never sent for secure fields.
+    ContextState {
+        app_bundle_id: String,
+        window_title: Option<String>,
+        after_caret: String,
+    },
+    /// Text recognized on screen (PC-4), only when the core enabled a capture scope and Screen
+    /// Recording is granted. `ms` is how long capture + OCR took.
+    ScreenText {
+        scope: ContextScope,
+        app_bundle_id: String,
+        text: String,
+        ms: u32,
+    },
+    /// The Selection Actions hotkey was pressed (SA-1). `text` is empty when nothing is selected or the
+    /// field is secure (never read, SA-10). `anchor` is the selection's bounds when known.
+    Selection {
+        app_bundle_id: String,
+        text: String,
+        secure: bool,
+        source: Option<SelectionSource>,
+        anchor: Option<Rect>,
+    },
+    /// The user picked menu item `index` (Enter or click).
+    MenuChoice {
+        index: u32,
+    },
+    /// The menu was dismissed (Esc, app switch, click elsewhere).
+    MenuCancel,
+    /// Outcome of `replace_selection` (SA-6, SA-7). `method` is "accessibility" or "paste".
+    ReplaceResult {
+        ok: bool,
+        method: Option<String>,
+        error: Option<String>,
     },
     Error {
         message: String,
@@ -107,6 +178,35 @@ pub enum CoreCommand {
         active: bool,
     },
     RequestPermissions,
+    /// Which context the helper may gather. Apps in `exclude` (quiet apps) are never captured.
+    SetContextMode {
+        scope: ContextScope,
+        exclude: Vec<String>,
+    },
+    /// Show macOS's Screen Recording prompt (only when the user picks a capture scope).
+    RequestScreenRecording,
+    /// Show the Selection Actions menu near `anchor` (SA-1). The helper owns navigation (SA-4).
+    ShowMenu {
+        title: String,
+        items: Vec<String>,
+        anchor: Option<Rect>,
+    },
+    /// Replace the menu with a status line: progress, a streamed preview, or an error (SA-5, SA-7).
+    MenuStatus {
+        text: String,
+        busy: bool,
+        error: bool,
+    },
+    HideMenu,
+    /// Replace the selection with `text`, only if it still equals `expected` (SA-6, SA-7).
+    ReplaceSelection {
+        expected: String,
+        text: String,
+    },
+    /// Register the Selection Actions hotkey (replaces the previous one).
+    SetHotkey {
+        hotkey: Hotkey,
+    },
     Quit,
     /// Any `type` this build does not know.
     #[serde(other)]
@@ -125,10 +225,34 @@ impl fmt::Debug for NativeEvent {
             NativeEvent::Permissions {
                 accessibility,
                 microphone,
+                screen_recording,
             } => f
                 .debug_struct("Permissions")
                 .field("accessibility", accessibility)
                 .field("microphone", microphone)
+                .field("screen_recording", screen_recording)
+                .finish(),
+            NativeEvent::ContextState {
+                app_bundle_id,
+                window_title,
+                after_caret,
+            } => f
+                .debug_struct("ContextState")
+                .field("app_bundle_id", app_bundle_id)
+                .field("has_window_title", &window_title.is_some())
+                .field("after_caret_chars", &after_caret.chars().count())
+                .finish(),
+            NativeEvent::ScreenText {
+                scope,
+                app_bundle_id,
+                text,
+                ms,
+            } => f
+                .debug_struct("ScreenText")
+                .field("scope", scope)
+                .field("app_bundle_id", app_bundle_id)
+                .field("text_chars", &text.chars().count())
+                .field("ms", ms)
                 .finish(),
             NativeEvent::Focus {
                 app_bundle_id,
@@ -155,6 +279,29 @@ impl fmt::Debug for NativeEvent {
                 .field("selection_len", selection_len)
                 .field("has_caret", &caret.is_some())
                 .finish(),
+            NativeEvent::Selection {
+                app_bundle_id,
+                text,
+                secure,
+                source,
+                anchor,
+            } => f
+                .debug_struct("Selection")
+                .field("app_bundle_id", app_bundle_id)
+                .field("text_chars", &text.chars().count())
+                .field("secure", secure)
+                .field("source", source)
+                .field("has_anchor", &anchor.is_some())
+                .finish(),
+            NativeEvent::MenuChoice { index } => {
+                f.debug_struct("MenuChoice").field("index", index).finish()
+            }
+            NativeEvent::MenuCancel => f.write_str("MenuCancel"),
+            NativeEvent::ReplaceResult { ok, method, .. } => f
+                .debug_struct("ReplaceResult")
+                .field("ok", ok)
+                .field("method", method)
+                .finish_non_exhaustive(),
             NativeEvent::Error { .. } => f.debug_struct("Error").finish_non_exhaustive(),
             NativeEvent::Key { key } => f.debug_struct("Key").field("key", key).finish(),
             NativeEvent::Unknown => f.write_str("Unknown"),
@@ -329,6 +476,25 @@ mod tests {
         let shown = format!("{ev:?}");
         assert!(!shown.contains("secret"), "{shown}");
         assert!(shown.contains("before_caret_chars"));
+        let ctx = format!(
+            "{:?}",
+            NativeEvent::ContextState {
+                app_bundle_id: "com.example".into(),
+                window_title: Some("Re: secret plans".into()),
+                after_caret: "secret tail".into(),
+            }
+        );
+        assert!(!ctx.contains("secret"), "{ctx}");
+        let screen = format!(
+            "{:?}",
+            NativeEvent::ScreenText {
+                scope: ContextScope::AllScreens,
+                app_bundle_id: "com.example".into(),
+                text: "secret screen".into(),
+                ms: 120,
+            }
+        );
+        assert!(!screen.contains("secret"), "{screen}");
         let err = format!(
             "{:?}",
             NativeEvent::Error {
@@ -405,8 +571,24 @@ mod tests {
             )
                 .prop_map(|(accessibility, microphone)| NativeEvent::Permissions {
                     accessibility,
-                    microphone
+                    microphone,
+                    screen_recording: accessibility,
                 }),
+            (".{0,30}", proptest::option::of(".{0,40}"), "(?s).{0,200}").prop_map(
+                |(app_bundle_id, window_title, after_caret)| NativeEvent::ContextState {
+                    app_bundle_id,
+                    window_title,
+                    after_caret
+                }
+            ),
+            (".{0,30}", "(?s).{0,300}", any::<u32>()).prop_map(|(app_bundle_id, text, ms)| {
+                NativeEvent::ScreenText {
+                    scope: ContextScope::ActiveWindow,
+                    app_bundle_id,
+                    text,
+                    ms,
+                }
+            }),
             (".{0,30}", ".{0,30}", any::<bool>(), any::<bool>()).prop_map(
                 |(app_bundle_id, app_name, secure, editable)| NativeEvent::Focus {
                     app_bundle_id,

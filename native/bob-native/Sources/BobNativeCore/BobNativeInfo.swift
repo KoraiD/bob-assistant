@@ -5,7 +5,7 @@ public enum BobNativeInfo {
 
     /// Wire protocol version. Must equal `PROTOCOL_VERSION` in `src-tauri/src/protocol.rs`.
     /// Bumped whenever the IPC message schema changes incompatibly.
-    public static let protocolVersion = 2
+    public static let protocolVersion = 3
 
     /// One-line banner printed by `bob-native --version`.
     public static func banner() -> String {

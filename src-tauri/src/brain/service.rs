@@ -59,6 +59,8 @@ pub struct BrainView {
     #[serde(flatten)]
     pub config: BrainConfig,
     pub is_cloud: bool,
+    /// Effective personal-context permission (PC-6), after applying the default.
+    pub shares_context: bool,
 }
 
 pub struct BrainService {
@@ -110,6 +112,7 @@ impl BrainService {
                 .iter()
                 .map(|b| BrainView {
                     is_cloud: b.kind != ProviderKind::Builtin && b.is_cloud(),
+                    shares_context: b.shares_context(),
                     config: b.clone(),
                 })
                 .collect(),
@@ -175,6 +178,21 @@ impl BrainService {
         let mut reg = self.registry.lock().await;
         let mut next = reg.clone();
         next.set_role(role, id)?;
+        self.persist(&next).await?;
+        *reg = next;
+        Ok(())
+    }
+
+    /// Allow or forbid personal context for one brain (PC-6). Persisted with the brain.
+    pub async fn set_share_context(&self, id: &str, share: bool) -> Result<(), ServiceError> {
+        let mut reg = self.registry.lock().await;
+        let mut next = reg.clone();
+        let mut config = next
+            .get(id)
+            .cloned()
+            .ok_or_else(|| RegistryError::NotFound(id.into()))?;
+        config.share_context = Some(share);
+        next.update(config)?;
         self.persist(&next).await?;
         *reg = next;
         Ok(())
@@ -368,6 +386,7 @@ mod tests {
             model: Some("gpt-x".into()),
             capabilities: ProviderKind::OpenAiCompatible.default_capabilities(),
             has_api_key: false,
+            share_context: None,
         }
     }
 
@@ -395,6 +414,39 @@ mod tests {
             .unwrap();
         svc.remove("cloud").await.unwrap();
         assert_eq!(svc.secrets.get("cloud").unwrap(), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// PC-6: cloud brains get no personal context unless the user allows it; local brains do by default.
+    #[tokio::test]
+    async fn personal_context_is_off_for_cloud_brains_until_allowed() {
+        let (svc, root) = service("share");
+        svc.upsert(cloud("https://api.example.com"), None)
+            .await
+            .unwrap();
+        let view = |snap: &Snapshot, id: &str| {
+            snap.brains
+                .iter()
+                .find(|b| b.config.id == id)
+                .unwrap()
+                .shares_context
+        };
+        let snap = svc.snapshot().await;
+        assert!(!view(&snap, "cloud"));
+        assert!(view(&snap, BUILTIN_ID));
+        svc.set_share_context("cloud", true).await.unwrap();
+        assert!(view(&svc.snapshot().await, "cloud"));
+        svc.set_share_context(BUILTIN_ID, false).await.unwrap();
+        assert!(!view(&svc.snapshot().await, BUILTIN_ID));
+        // Persisted with the brain.
+        let again = BrainService::new(
+            root.join("config"),
+            root.join("data"),
+            root.join("rt"),
+            Box::new(MemoryStore::default()),
+        );
+        assert!(view(&again.snapshot().await, "cloud"));
+        assert!(svc.set_share_context("missing", true).await.is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 

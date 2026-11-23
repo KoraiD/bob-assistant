@@ -8,9 +8,12 @@ pub mod app_info;
 pub mod bench;
 pub mod brain;
 pub mod commands;
+pub mod context;
 pub mod ghost;
 pub mod native_ipc;
 pub mod protocol;
+mod quit_key;
+pub mod selection;
 pub mod supervisor;
 
 use app_info::AppInfo;
@@ -121,6 +124,8 @@ fn start_native_bridge(
     app: &tauri::App,
     bridge: Bridge,
     ghost: ghost::engine::GhostHandle,
+    context: commands::Context,
+    selection: selection::engine::SelectionHandle,
     ax_item: MenuItem<tauri::Wry>,
     mic_item: MenuItem<tauri::Wry>,
 ) {
@@ -135,8 +140,35 @@ fn start_native_bridge(
 
     let handle = app.handle().clone();
     let serve_bridge = bridge.clone();
+    let cmd_bridge = bridge.clone();
     std::thread::spawn(move || {
         serve_bridge.run(listener, |event, status| {
+            // Surroundings and screen text feed the personal context (never the UI, never logs).
+            if matches!(
+                event,
+                NativeEvent::Focus { .. }
+                    | NativeEvent::ContextState { .. }
+                    | NativeEvent::ScreenText { .. }
+            ) {
+                context.observe(event);
+            }
+            // A (re)connected helper starts in Accessibility-only mode with the default hotkey: tell it
+            // what it may capture and which hotkey the user chose.
+            if matches!(event, NativeEvent::Hello { .. }) {
+                commands::push_context_mode(&cmd_bridge, &context, &ghost);
+                let _ = cmd_bridge.send(&selection.hotkey_command());
+            }
+            // Selection Actions (selected text never reaches the UI or logs).
+            if matches!(
+                event,
+                NativeEvent::Selection { .. }
+                    | NativeEvent::MenuChoice { .. }
+                    | NativeEvent::MenuCancel
+                    | NativeEvent::ReplaceResult { .. }
+                    | NativeEvent::Hello { .. }
+            ) {
+                selection.native(event.clone());
+            }
             // Text, focus and key events drive Ghost Text; they never go to the UI.
             if matches!(
                 event,
@@ -304,12 +336,23 @@ pub fn run() {
             commands::ghost_set_quiet,
             commands::ghost_memory,
             commands::ghost_memory_clear,
+            commands::context_get,
+            commands::context_set_settings,
+            commands::context_request_screen_recording,
+            commands::context_preview,
+            commands::profile_save,
+            commands::brain_set_share_context,
+            commands::selection_get,
+            commands::selection_set_settings,
         ])
         .setup(|app| {
             // Brain service: registry in the config dir, models in the data dir, the sidecar's key and
             // PID files in the per-user 0700 runtime dir next to the helper socket.
             let config_dir = app.path().app_config_dir()?;
             let ghost_dir = config_dir.clone();
+            let context: commands::Context =
+                std::sync::Arc::new(context::ContextHub::load(config_dir.clone()));
+            app.manage(context.clone());
             let data_dir = app.path().app_data_dir()?;
             let runtime_dir = native_ipc::default_socket_path()
                 .parent()
@@ -328,20 +371,34 @@ pub fn run() {
             let bridge = app.state::<Bridge>().inner().clone();
             let sink: std::sync::Arc<dyn ghost::engine::Sink> = std::sync::Arc::new(bridge);
             let ghost = tauri::async_runtime::block_on(async {
-                ghost::engine::spawn_full(
+                ghost::engine::spawn_ctx(
                     brains,
                     sink,
                     ghost::engine::EngineConfig::default(),
                     Some(ghost_dir),
+                    context.clone(),
                 )
             });
             app.manage(ghost.clone());
+            let selection = {
+                let sink: std::sync::Arc<dyn ghost::engine::Sink> =
+                    std::sync::Arc::new(app.state::<Bridge>().inner().clone());
+                let brains = app.state::<commands::Brains>().inner().clone();
+                let dir = app.path().app_config_dir()?;
+                let ctx = context.clone();
+                tauri::async_runtime::block_on(async move {
+                    selection::engine::spawn(brains, ctx, sink, Some(dir))
+                })
+            };
+            app.manage(selection.clone());
             quit_on_signals(app.handle().clone());
 
             log_app_menu(app);
+            let handle = app.handle().clone();
+            quit_key::install(move || handle.exit(0));
             let (ax, mic) = setup_tray(app)?;
             let bridge = app.state::<Bridge>().inner().clone();
-            start_native_bridge(app, bridge, ghost, ax, mic);
+            start_native_bridge(app, bridge, ghost, context, selection, ax, mic);
             Ok(())
         })
         // Closing the window hides it; BOB keeps running from the menu bar.
