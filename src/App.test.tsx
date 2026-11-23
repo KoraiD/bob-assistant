@@ -33,6 +33,7 @@ const DEFAULTS: Record<string, unknown> = {
   orb_get: { state: "idle", message: null },
   models_list: [],
   dictation_get: { settings: {}, models: [], stats: {}, microphone: null },
+  general_get: { show_in_dock: true, open_window_at_launch: true, login_item: "disabled", pause: { paused: false, until: null } },
 };
 function mockCore(overrides: Record<string, unknown> = {}) {
   invoke.mockImplementation(async (cmd: string) => ({ ...DEFAULTS, ...overrides })[cmd]);
@@ -66,9 +67,9 @@ describe("App shell", () => {
     expect(buttons).toHaveLength(PANELS.length);
     buttons.forEach((b, i) => expect(b.textContent?.endsWith(PANELS[i].label)).toBe(true));
     expect(within(nav).getByRole("button", { name: /Overview/ })).toHaveAttribute("aria-current", "page");
-    within(nav).getByRole("button", { name: /About/ }).focus();
+    within(nav).getByRole("button", { name: /Settings/ }).focus();
     await userEvent.keyboard("{Enter}");
-    expect(screen.getByRole("main", { name: "About" })).toBeInTheDocument();
+    expect(screen.getByRole("main", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
   });
 
@@ -89,7 +90,7 @@ describe("theme (UI-2)", () => {
   it("defaults to dark and switches to daylight from About", async () => {
     render(<App />);
     expect(document.documentElement.classList.contains("daylight")).toBe(false);
-    await userEvent.click(screen.getByRole("button", { name: /About/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Settings/ }));
     await userEvent.click(screen.getByRole("radio", { name: "Daylight" }));
     expect(document.documentElement.classList.contains("daylight")).toBe(true);
     expect(localStorage.getItem(THEME_KEY)).toBe("daylight");
@@ -161,7 +162,7 @@ describe("first-run wizard (UI-4)", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: /About/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Settings/ }));
     await userEvent.click(screen.getByRole("button", { name: "Show the welcome tour" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
@@ -169,6 +170,47 @@ describe("first-run wizard (UI-4)", () => {
   it("never opens in the browser preview", () => {
     render(<App />);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("Settings and Mac behavior", () => {
+  beforeEach(() => {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    localStorage.setItem(ONBOARDED_KEY, "1");
+  });
+
+  it("toggles the Dock icon and login item, and pauses BOB", async () => {
+    mockCore();
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /Settings/ }));
+    await userEvent.click(await screen.findByRole("switch", { name: "Show in the Dock" }));
+    expect(invoke).toHaveBeenCalledWith("general_set_dock", { show: false });
+    await userEvent.click(screen.getByRole("switch", { name: "Open at login" }));
+    expect(invoke).toHaveBeenCalledWith("general_set_login", { on: true });
+    await userEvent.click(screen.getByRole("button", { name: "For 1 hour" }));
+    expect(invoke).toHaveBeenCalledWith("pause_start", { how: "hour" });
+  });
+
+  it("shows a paused banner that resumes BOB", async () => {
+    mockCore({ general_get: { show_in_dock: true, login_item: "disabled", pause: { paused: true, until: null } }, pause_resume: { paused: false, until: null } });
+    render(<App />);
+    const banner = await screen.findByTestId("paused-banner");
+    expect(banner).toHaveTextContent("Paused");
+    await userEvent.click(within(banner).getByRole("button", { name: "Resume BOB" }));
+    expect(invoke).toHaveBeenCalledWith("pause_resume");
+    await vi.waitFor(() => expect(screen.queryByTestId("paused-banner")).toBeNull());
+  });
+
+  it("Cmd+number switches panels and open-panel events open Settings", async () => {
+    mockCore();
+    render(<App />);
+    fireEvent.keyDown(window, { key: "5", metaKey: true });
+    expect(screen.getByRole("main", { name: "Brains" })).toBeInTheDocument();
+    await vi.waitFor(() => expect(listeners["open-panel"]).toBeDefined());
+    act(() => listeners["open-panel"]({ payload: "settings" }));
+    expect(screen.getByRole("main", { name: "Settings" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "1", metaKey: true, shiftKey: true });
+    expect(screen.getByRole("main", { name: "Settings" })).toBeInTheDocument();
   });
 });
 

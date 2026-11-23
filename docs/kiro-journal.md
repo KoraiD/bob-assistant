@@ -157,3 +157,18 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
   opt-in screen context). The first fix (a Tailwind arbitrary variant) lost to the utility layer, so a plain
   unlayered rule replaced it.
 - **Tests now:** Rust 194 + 2 end-to-end (+3 ignored), Swift 84, Vitest 104 (incl. 35 token/palette checks and axe audits of every panel).
+## 2026-11-24: Task 10, polish, hardening, research
+- **Measuring found a bug no test had:** the idle CPU measurement showed two BOBs at once: a leftover instance, and
+  a second one started next to it, each with a helper and a 1.4 GB model server. A per-user lock
+  (`File::try_lock`, which the OS releases if BOB crashes) now stops the second copy before it touches the socket.
+- **Idle cost, measured:** about 0.3% CPU for core, helper and model server together (budget 2%). Memory is
+  dominated by the two models (1.3 GB and 0.8 GB).
+- **Security review findings, fixed with tests:** API keys could travel over plain http to a remote server, and the
+  "no proxy" setting meant for local servers also applied to cloud brains. `cargo audit` (new) found 9 advisories,
+  including four in rustls, fixed by compatible updates. `npm audit` found critical advisories in dev-only Vitest 3,
+  fixed by moving to Vitest 5 with no test changes. Both audits now run in CI.
+- **Usability:** a Settings panel (⌘,), pause, menu-bar toggles, ⌘1 to ⌘7, brain editing, confirmed removal,
+  single-phrase forgetting, an autosaving profile, and "start quietly in the menu bar". The last two fixed real
+  problems: switching panels lost unsaved profile edits, and hiding the Dock icon reopened the window at every login.
+- **Research before Task 11:** reviews and feature-request boards of Cotypist, Superwhisper, VoiceInk, Wispr Flow
+  and rewrite tools, summarized with links in docs/RESEARCH.md. The owner chooses from the proposals.

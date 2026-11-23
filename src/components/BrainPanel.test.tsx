@@ -33,6 +33,28 @@ afterEach(() => {
 });
 
 describe("BrainPanel", () => {
+  it("edits a brain and keeps the stored key unless replaced", async () => {
+    render(<BrainPanel />);
+    await userEvent.click(await screen.findByRole("button", { name: "Edit Cloud" }));
+    const form = screen.getByRole("form", { name: "Edit Cloud" });
+    const name = within(form).getByLabelText("Name");
+    await userEvent.clear(name);
+    await userEvent.type(name, "Work cloud");
+    await userEvent.click(within(form).getByRole("button", { name: "Save changes" }));
+    expect(invoke).toHaveBeenCalledWith("brain_upsert", {
+      config: expect.objectContaining({ id: "cloud", name: "Work cloud", endpoint: "https://api.example.com" }),
+      apiKey: null,
+    });
+  });
+
+  it("asks before removing a brain", async () => {
+    render(<BrainPanel />);
+    await userEvent.click(await screen.findByRole("button", { name: "Remove Cloud" }));
+    expect(invoke).not.toHaveBeenCalledWith("brain_remove", expect.anything());
+    await userEvent.click(screen.getByRole("button", { name: "Confirm removing Cloud" }));
+    expect(invoke).toHaveBeenCalledWith("brain_remove", { id: "cloud" });
+  });
+
   it("shows the personal-context switch per brain, off for the cloud brain", async () => {
     render(<BrainPanel />);
     const cloud = await screen.findByRole("checkbox", { name: "Share personal context with Cloud" });

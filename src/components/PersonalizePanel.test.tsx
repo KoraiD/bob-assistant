@@ -44,6 +44,16 @@ afterEach(() => {
 });
 
 describe("PersonalizePanel", () => {
+  it("autosaves after typing stops and when leaving the panel", async () => {
+    const { unmount } = render(<PersonalizePanel />);
+    const area = (await screen.findByLabelText("Profile (Markdown)")) as HTMLTextAreaElement;
+    await userEvent.type(area, "Hi");
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("profile_save", { text: "Hi" }), { timeout: 2000 });
+    await userEvent.type(area, " there");
+    unmount();
+    expect(invoke).toHaveBeenCalledWith("profile_save", { text: "Hi there" });
+  });
+
   it("edits, formats and saves the profile, and previews Markdown with emoji", async () => {
     render(<PersonalizePanel />);
     await userEvent.click(await screen.findByRole("button", { name: "Start from a template" }));
@@ -52,7 +62,7 @@ describe("PersonalizePanel", () => {
     await userEvent.type(area, "I love :jack_o_lantern: season");
     await userEvent.click(screen.getByRole("button", { name: "Bold" }));
     expect(area.value).toContain("**bold text**");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save now" }));
     expect(invoke).toHaveBeenCalledWith("profile_save", { text: area.value });
     expect(await screen.findByRole("status")).toHaveTextContent("Saved");
     await userEvent.click(screen.getByRole("tab", { name: "Preview" }));

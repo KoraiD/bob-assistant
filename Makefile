@@ -3,7 +3,7 @@
 CARGO_MANIFEST := src-tauri/Cargo.toml
 NATIVE_DIR := native/bob-native
 
-.PHONY: help setup dev build whisper native app sidecars probe chip-demo sign-dev test test-rust test-swift test-ui screenshot bench lint fmt check-kiro check clean
+.PHONY: audit help setup dev build whisper native app sidecars probe chip-demo sign-dev test test-rust test-swift test-ui screenshot bench lint fmt check-kiro check clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[35m%-12s\033[0m %s\n", $$1, $$2}'
@@ -58,6 +58,10 @@ screenshot: ## Capture the UI with headless Chrome into bench-results/local/ (vi
 lint: ## Clippy (deny warnings) + TypeScript typecheck
 	cargo clippy --manifest-path $(CARGO_MANIFEST) --all-targets -- -D warnings
 	npm run typecheck
+
+audit: ## Security advisories: Rust crates (cargo-audit) and npm packages
+	cargo audit --file src-tauri/Cargo.lock
+	npm audit
 
 fmt: ## Format Rust code
 	cargo fmt --manifest-path $(CARGO_MANIFEST)

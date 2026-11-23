@@ -5,12 +5,16 @@ import {
   PROVIDERS,
   ROLES,
   api,
+  applyEdit,
   brainsForRole,
   draftToConfig,
+  editFrom,
   formatBytes,
   percent,
   sidecarLabel,
   validateDraft,
+  validateEdit,
+  type BrainEdit,
   type BrainView,
   type Draft,
   type ModelInfo,
@@ -142,9 +146,78 @@ function ModelCatalog({ models, snapshot, refresh }: { models: ModelInfo[]; snap
   );
 }
 
+function EditBrain({ brain, onDone }: { brain: BrainView; onDone: (saved: boolean) => void }) {
+  const [e, setE] = useState<BrainEdit>(() => editFrom(brain));
+  const [errors, setErrors] = useState<string[]>([]);
+  const set = (patch: Partial<BrainEdit>) => setE((cur) => ({ ...cur, ...patch }));
+  const save = async () => {
+    const v = validateEdit(brain, e);
+    setErrors(v);
+    if (v.length) return;
+    try {
+      const { config, apiKey } = applyEdit(brain, e);
+      await api.upsert(config, apiKey);
+      onDone(true);
+    } catch (err) {
+      setErrors([String(err)]);
+    }
+  };
+  const field = "w-full rounded-lg px-2 py-1.5 text-sm";
+  const fieldStyle = { background: "var(--bg)", border: "1px solid var(--border-strong)", color: "var(--text)" };
+  return (
+    <form
+      aria-label={`Edit ${brain.name}`}
+      className="mt-3 grid gap-2 md:grid-cols-2"
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        void save();
+      }}
+      onKeyDown={(ev) => ev.key === "Escape" && onDone(false)}
+    >
+      <label className="text-xs" style={muted}>
+        Name
+        <input className={field} style={fieldStyle} value={e.name} onChange={(ev) => set({ name: ev.target.value })} autoFocus />
+      </label>
+      <label className="text-xs" style={muted}>
+        Endpoint
+        <input className={field} style={fieldStyle} value={e.endpoint} onChange={(ev) => set({ endpoint: ev.target.value })} />
+      </label>
+      <label className="text-xs" style={muted}>
+        Model (optional)
+        <input className={field} style={fieldStyle} value={e.model} onChange={(ev) => set({ model: ev.target.value })} />
+      </label>
+      <label className="text-xs" style={muted}>
+        New API key {brain.has_api_key ? "(leave empty to keep the stored one)" : "(optional)"}
+        <input className={field} style={fieldStyle} type="password" autoComplete="off" value={e.apiKey} onChange={(ev) => set({ apiKey: ev.target.value })} />
+      </label>
+      {brain.has_api_key && (
+        <label className="flex items-center gap-2 text-xs md:col-span-2" style={muted}>
+          <input type="checkbox" checked={e.removeKey} onChange={(ev) => set({ removeKey: ev.target.checked })} />
+          Remove the stored key from the Keychain
+        </label>
+      )}
+      {errors.length > 0 && (
+        <ul role="alert" className="text-sm md:col-span-2" style={{ color: "var(--danger)" }}>
+          {errors.map((x) => (
+            <li key={x}>{x}</li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2 md:col-span-2">
+        <Button primary type="submit">
+          Save changes
+        </Button>
+        <Button onClick={() => onDone(false)}>Cancel</Button>
+      </div>
+    </form>
+  );
+}
+
 function BrainCard({ brain, onChanged }: { brain: BrainView; onChanged: () => void }) {
   const [report, setReport] = useState<TestReport | null>(null);
   const [testing, setTesting] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const test = async () => {
     setTesting(true);
@@ -180,19 +253,42 @@ function BrainCard({ brain, onChanged }: { brain: BrainView; onChanged: () => vo
           <Button onClick={test} disabled={testing}>
             {testing ? "Testing..." : "Test"}
           </Button>
-          {brain.kind !== "builtin" && (
-            <Button
-              aria-label={`Remove ${brain.name}`}
-              onClick={async () => {
-                await api.remove(brain.id);
-                onChanged();
-              }}
-            >
-              Remove
+          {brain.kind !== "builtin" && !editing && (
+            <Button aria-label={`Edit ${brain.name}`} onClick={() => setEditing(true)}>
+              Edit
             </Button>
           )}
+          {brain.kind !== "builtin" &&
+            (confirmRemove ? (
+              <>
+                <Button
+                  aria-label={`Confirm removing ${brain.name}`}
+                  style={{ color: "var(--danger)" }}
+                  onClick={async () => {
+                    await api.remove(brain.id);
+                    onChanged();
+                  }}
+                >
+                  Remove for good
+                </Button>
+                <Button onClick={() => setConfirmRemove(false)}>Keep</Button>
+              </>
+            ) : (
+              <Button aria-label={`Remove ${brain.name}`} onClick={() => setConfirmRemove(true)}>
+                Remove
+              </Button>
+            ))}
         </div>
       </div>
+      {editing && (
+        <EditBrain
+          brain={brain}
+          onDone={(saved) => {
+            setEditing(false);
+            if (saved) onChanged();
+          }}
+        />
+      )}
       <label className="mt-2 flex items-center gap-2 text-xs" style={muted}>
         <input
           type="checkbox"

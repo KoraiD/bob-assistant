@@ -69,6 +69,14 @@ impl Memory {
         self.phrases.clear();
     }
 
+    /// Forget one phrase (case-insensitive, like `record`). Returns true when it was there.
+    pub fn forget(&mut self, text: &str) -> bool {
+        let key = text.trim().to_lowercase();
+        let before = self.phrases.len();
+        self.phrases.retain(|p| p.text.to_lowercase() != key);
+        self.phrases.len() != before
+    }
+
     /// Up to `n` phrases, most used first; ties keep the most recent first.
     pub fn most_used(&self, n: usize) -> Vec<String> {
         let mut v: Vec<&Phrase> = self.phrases.iter().collect();
@@ -148,6 +156,17 @@ mod tests {
             vec!["see you soon".to_string(), "thanks a lot".to_string()]
         );
         assert!(Memory::default().most_used(5).is_empty());
+    }
+
+    #[test]
+    fn single_phrases_can_be_forgotten() {
+        let mut m = Memory::default();
+        m.record("see you soon");
+        m.record("thanks a lot");
+        assert!(m.forget(" SEE YOU SOON "));
+        assert!(!m.forget("never stored"));
+        assert_eq!(m.phrases.len(), 1);
+        assert_eq!(m.phrases[0].text, "thanks a lot");
     }
 
     #[test]

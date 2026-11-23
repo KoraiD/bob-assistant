@@ -148,6 +148,16 @@ function MemoryList({ count, onChanged }: { count: number; onChanged: () => Prom
       setError(String(e));
     }
   };
+  const forget = async (text: string) => {
+    try {
+      setError(null);
+      await api.ghostMemoryForget(text);
+      setMemory((m) => (m ? { phrases: m.phrases.filter((p) => p.text !== text) } : m));
+      await onChanged();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
   const clear = async () => {
     try {
       setError(null);
@@ -180,8 +190,20 @@ function MemoryList({ count, onChanged }: { count: number; onChanged: () => Prom
       {memory && memory.phrases.length > 0 && (
         <ul className="mt-2 max-h-40 space-y-0.5 overflow-auto text-xs" aria-label="Remembered phrases">
           {memory.phrases.map((p) => (
-            <li key={p.text}>
-              {p.text} {p.uses > 1 && <span style={muted}>×{p.uses}</span>}
+            <li key={p.text} className="flex items-center justify-between gap-2">
+              <span>
+                {p.text} {p.uses > 1 && <span style={muted}>×{p.uses}</span>}
+              </span>
+              <button
+                type="button"
+                aria-label={`Forget "${p.text}"`}
+                title="Forget this phrase"
+                onClick={() => void forget(p.text)}
+                className="rounded-full px-2"
+                style={muted}
+              >
+                ✕
+              </button>
             </li>
           ))}
         </ul>

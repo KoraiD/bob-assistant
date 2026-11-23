@@ -54,12 +54,21 @@ pub struct TestReport {
 
 impl HttpBrain {
     pub fn new(config: BrainConfig, api_key: Option<String>) -> Result<Self, BrainError> {
-        url::Url::parse(&config.endpoint)
+        let url = url::Url::parse(&config.endpoint)
             .map_err(|e| BrainError::InvalidEndpoint(e.to_string()))?;
-        let http = reqwest::Client::builder()
-            .connect_timeout(CONNECT_TIMEOUT)
-            // Loopback servers must not go through a system proxy.
-            .no_proxy()
+        let cloud = super::is_cloud_endpoint(&config.endpoint);
+        // An API key is a credential: never send it in clear text over the network.
+        if api_key.is_some() && cloud && url.scheme() != "https" {
+            return Err(BrainError::InvalidEndpoint(
+                "API keys are only sent over https to servers outside this Mac".into(),
+            ));
+        }
+        let mut builder = reqwest::Client::builder().connect_timeout(CONNECT_TIMEOUT);
+        if !cloud {
+            // Servers on this Mac must not go through a system proxy; cloud brains may need one.
+            builder = builder.no_proxy();
+        }
+        let http = builder
             .build()
             .map_err(|e| BrainError::Unreachable(e.to_string()))?;
         Ok(Self {
@@ -573,5 +582,30 @@ mod tests {
             HttpBrain::new(config(ProviderKind::Ollama, "not a url"), None).err(),
             Some(BrainError::InvalidEndpoint(_))
         ));
+        // A key never travels in clear text to a cloud host; local http and cloud https are fine.
+        let key = || Some("k".to_string());
+        assert!(matches!(
+            HttpBrain::new(
+                config(ProviderKind::OpenAiCompatible, "http://api.example.com"),
+                key()
+            )
+            .err(),
+            Some(BrainError::InvalidEndpoint(_))
+        ));
+        assert!(HttpBrain::new(
+            config(ProviderKind::OpenAiCompatible, "https://api.example.com"),
+            key()
+        )
+        .is_ok());
+        assert!(HttpBrain::new(
+            config(ProviderKind::LmStudio, "http://127.0.0.1:1234"),
+            key()
+        )
+        .is_ok());
+        assert!(HttpBrain::new(
+            config(ProviderKind::Ollama, "http://192.168.1.5:11434"),
+            None
+        )
+        .is_ok());
     }
 }

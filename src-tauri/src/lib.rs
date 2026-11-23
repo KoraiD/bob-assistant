@@ -1,11 +1,16 @@
-//! BOB core. Orchestrates engines, brains, settings and the UI.
+//! BOB core (Tauri 2): the app shell, the bridge to the Swift helper and the engines.
 //!
-//! Current scope: app metadata, tray (with permission status), the bridge to the Swift helper and the
-//! Brain layer (registry, providers, built-in llama-server sidecar). Later tasks add the
-//! Ghost/Selection/Dictation engines.
+//! - `native_ipc`, `protocol`, `supervisor`: the helper (Accessibility, overlays, hotkeys, microphone,
+//!   speech recognition) over a private Unix socket.
+//! - `brain`: Bring Your Own Brain (registry, providers, the built-in llama-server, downloads).
+//! - `ghost`, `selection`, `dictation`: the three features; `context`: personal context for prompts.
+//! - `activity` (orb state), `shell` (menu bar, general settings, pause), `quit_key`.
+//!
+//! Privacy rule for every module: log metadata only, never typed text, selections, transcripts or keys.
 
 pub mod activity;
 pub mod app_info;
+pub mod app_settings;
 pub mod bench;
 pub mod brain;
 pub mod commands;
@@ -13,9 +18,11 @@ pub mod context;
 pub mod dictation;
 pub mod ghost;
 pub mod native_ipc;
+pub mod pause;
 pub mod protocol;
 mod quit_key;
 pub mod selection;
+pub mod shell;
 pub mod supervisor;
 
 use app_info::AppInfo;
@@ -25,7 +32,6 @@ use std::sync::Mutex;
 use supervisor::{Backoff, Supervisor};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
-    tray::TrayIconBuilder,
     Emitter, Manager, State, WindowEvent,
 };
 
@@ -62,6 +68,15 @@ fn request_permissions(bridge: State<'_, Bridge>) -> Result<(), String> {
         .map_err(|e| format!("native helper is not connected: {e}"))
 }
 
+/// Start hidden only after the welcome tour has been seen once (a first launch always shows the window).
+/// The tour flag lives in the web view, so the core uses its own marker: any saved settings file.
+fn commands_onboarded(app: &tauri::AppHandle) -> bool {
+    app.path()
+        .app_config_dir()
+        .map(|d| d.join(ghost::engine::SETTINGS_FILE).exists())
+        .unwrap_or(false)
+}
+
 /// Emitted whenever the orb state changes (payload: `activity::OrbView`).
 pub const ORB_EVENT: &str = "orb-state";
 
@@ -86,14 +101,6 @@ fn orb_get(activity: State<'_, std::sync::Arc<activity::Activity>>) -> activity:
     activity.view()
 }
 
-fn show_main_window(app: &tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
-}
-
 /// Human-readable permission labels for the tray (NB-6).
 pub fn accessibility_label(status: &BridgeStatus) -> String {
     let v = match (status.connected, status.accessibility) {
@@ -116,35 +123,6 @@ pub fn microphone_label(status: &BridgeStatus) -> String {
     format!("Microphone: {v}")
 }
 
-fn setup_tray(app: &tauri::App) -> tauri::Result<(MenuItem<tauri::Wry>, MenuItem<tauri::Wry>)> {
-    let initial = BridgeStatus::default();
-    let ax = MenuItem::with_id(
-        app,
-        "ax",
-        accessibility_label(&initial),
-        false,
-        None::<&str>,
-    )?;
-    let mic = MenuItem::with_id(app, "mic", microphone_label(&initial), false, None::<&str>)?;
-    let open = MenuItem::with_id(app, "open", "Open BOB", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit BOB", true, Some("Cmd+Q"))?;
-    let menu = Menu::with_items(app, &[&ax, &mic, &open, &quit])?;
-
-    let mut builder = TrayIconBuilder::with_id("bob-tray")
-        .tooltip("BOB")
-        .menu(&menu)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "open" => show_main_window(app),
-            "quit" => app.exit(0),
-            _ => {}
-        });
-    if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(icon.clone());
-    }
-    builder.build(app)?;
-    Ok((ax, mic))
-}
-
 /// Bind the socket, supervise the helper and forward status changes to the tray and UI.
 /// The engines that consume helper events.
 struct Engines {
@@ -152,6 +130,7 @@ struct Engines {
     context: commands::Context,
     selection: selection::engine::SelectionHandle,
     dictation: dictation::engine::DictationHandle,
+    pause: std::sync::Arc<pause::Pause>,
 }
 
 fn start_native_bridge(
@@ -166,6 +145,7 @@ fn start_native_bridge(
         context,
         selection,
         dictation,
+        pause,
     } = engines;
     let socket = native_ipc::default_socket_path();
     let listener = match native_ipc::bind_socket(&socket) {
@@ -210,6 +190,19 @@ fn start_native_bridge(
                     | NativeEvent::Hello { .. }
             ) {
                 dictation.native(event.clone());
+            }
+            // While BOB is paused, the hotkeys only explain why nothing happens (Ghost is paused itself).
+            if pause.is_paused()
+                && matches!(
+                    event,
+                    NativeEvent::Selection { .. } | NativeEvent::DictationKey { pressed: true }
+                )
+            {
+                let _ = cmd_bridge.send(&CoreCommand::Orb {
+                    state: protocol::OrbState::Error,
+                    text: Some("BOB is paused. Resume it from the menu bar.".into()),
+                });
+                return;
             }
             // Selection Actions (selected text never reaches the UI or logs).
             if matches!(
@@ -264,12 +257,16 @@ fn start_native_bridge(
 /// the model server. Edit items stay predefined so copy/paste keep working in BOB's text fields.
 fn app_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let quit = MenuItem::with_id(app, "app-quit", "Quit BOB", true, Some("CmdOrCtrl+Q"))?;
+    // Mac convention: Settings… with Cmd+, right after About.
+    let settings = MenuItem::with_id(app, "app-settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
     let bob = Submenu::with_items(
         app,
         "BOB",
         true,
         &[
             &PredefinedMenuItem::about(app, Some("About BOB"), None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &settings,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::hide(app, Some("Hide BOB"))?,
             &PredefinedMenuItem::hide_others(app, None)?,
@@ -359,13 +356,32 @@ pub fn run() {
         env_logger::Env::default().default_filter_or("warn,bob_lib=info"),
     )
     .try_init();
+    // One BOB per user: a second copy would take over the helper socket and load a second model.
+    let runtime = native_ipc::default_socket_path()
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(std::env::temp_dir);
+    let _instance = match native_ipc::acquire_instance_lock(&runtime) {
+        Ok(Some(lock)) => Some(lock),
+        Ok(None) => {
+            log::warn!("BOB is already running; this copy exits");
+            return;
+        }
+        Err(e) => {
+            log::warn!("cannot check for another running BOB ({e}); continuing");
+            None
+        }
+    };
     tauri::Builder::default()
         .menu(app_menu)
-        .on_menu_event(|app, event| {
-            if event.id().as_ref() == "app-quit" {
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "app-quit" => {
                 log::info!("quit requested from the app menu");
                 app.exit(0);
             }
+            "app-settings" => shell::open_panel(app, "settings"),
+            _ => {}
         })
         .manage(Bridge::new())
         .invoke_handler(tauri::generate_handler![
@@ -390,6 +406,7 @@ pub fn run() {
             commands::ghost_set_quiet,
             commands::ghost_memory,
             commands::ghost_memory_clear,
+            commands::ghost_memory_forget,
             commands::context_get,
             commands::context_set_settings,
             commands::context_request_screen_recording,
@@ -400,6 +417,12 @@ pub fn run() {
             commands::selection_set_settings,
             commands::dictation_get,
             commands::dictation_set_settings,
+            shell::general_get,
+            shell::general_set_dock,
+            shell::general_set_open_at_launch,
+            shell::general_set_login,
+            shell::pause_start,
+            shell::pause_resume,
         ])
         .setup(|app| {
             // Brain service: registry in the config dir, models in the data dir, the sidecar's key and
@@ -477,13 +500,33 @@ pub fn run() {
             log_app_menu(app);
             let handle = app.handle().clone();
             quit_key::install(move || handle.exit(0));
-            let (ax, mic) = setup_tray(app)?;
+            // General settings: Dock icon now; launch at login is read live from macOS.
+            let general_path = app.path().app_config_dir()?.join(app_settings::FILE);
+            let general = app_settings::AppSettings::load(&general_path);
+            shell::apply_dock(app.handle(), general.show_in_dock, false);
+            if !general.open_window_at_launch && commands_onboarded(app.handle()) {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
+            app.manage(shell::General {
+                path: general_path,
+                settings: Mutex::new(general),
+            });
+            let pause = std::sync::Arc::new(pause::Pause::default());
+            app.manage(pause.clone());
+            shell::build_tray(app, ghost.settings().enabled, dictation.settings().enabled)?;
+            let (ax, mic) = {
+                let items = app.state::<shell::TrayItems>();
+                (items.ax.clone(), items.mic.clone())
+            };
             let bridge = app.state::<Bridge>().inner().clone();
             let engines = Engines {
                 ghost,
                 context,
                 selection,
                 dictation,
+                pause,
             };
             start_native_bridge(app, bridge, engines, ax, mic);
             Ok(())

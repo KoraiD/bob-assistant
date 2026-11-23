@@ -5,7 +5,7 @@ description = "BOB (Bring Your Own Brain): a privacy-first macOS assistant power
 authors = ["BOB contributors"]
 license = "MIT"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.89" # std::fs::File::try_lock (single-instance guard)
 # The app is the default binary; `ghost-bench` is a developer tool (src/bin/ghost-bench.rs).
 default-run = "bob"
 
@@ -32,6 +32,8 @@ keyring = { version = "3.6.3", features = ["apple-native"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["stream", "json", "rustls"] }
 bytes = "1.12.2"
 rand = "0.9"
+# Remember the window's size and position (official Tauri plugin).
+tauri-plugin-window-state = "2.4"
 env_logger = { version = "0.11.12", default-features = false, features = ["auto-color", "humantime"] }
 
 
@@ -40,6 +42,9 @@ env_logger = { version = "0.11.12", default-features = false, features = ["auto-
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent", "NSResponder"] }
 block2 = "0.6"
+# Launch at login through SMAppService (macOS 13+), so BOB shows up in System Settings > Login Items.
+objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSString"] }
 
 [dev-dependencies]
 proptest = "1"

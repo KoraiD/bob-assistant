@@ -215,6 +215,10 @@ export function validateDraft(d: Draft): string[] {
   if (d.kind === "open_ai_compatible" && isCloudUrl(d.endpoint) && !d.apiKey.trim()) {
     errors.push("Cloud endpoints need an API key.");
   }
+  // Same rule as HttpBrain::new: keys never travel in clear text off this Mac.
+  if (d.apiKey.trim() && isCloudUrl(d.endpoint) && d.endpoint.trim().toLowerCase().startsWith("http://")) {
+    errors.push("Use https:// for servers outside this Mac, so the API key is not sent in clear text.");
+  }
   return errors;
 }
 
@@ -243,6 +247,41 @@ export function draftToConfig(d: Draft, takenIds: string[]): BrainConfig {
     capabilities: kindCaps[d.kind],
     has_api_key: false,
   };
+}
+
+/** Editing an existing brain. `apiKey` empty keeps the stored key unless `removeKey`. */
+export interface BrainEdit {
+  name: string;
+  endpoint: string;
+  model: string;
+  apiKey: string;
+  removeKey: boolean;
+}
+
+export function editFrom(b: BrainView): BrainEdit {
+  return { name: b.name, endpoint: b.endpoint, model: b.model ?? "", apiKey: "", removeKey: false };
+}
+
+/** Validation for an edit (same rules as adding; an existing stored key counts as a key). */
+export function validateEdit(b: BrainView, e: BrainEdit): string[] {
+  const keyAfter = e.apiKey.trim() ? "new" : b.has_api_key && !e.removeKey ? "stored" : "";
+  return validateDraft({ name: e.name, kind: b.kind === "builtin" ? "ollama" : b.kind, endpoint: e.endpoint, model: e.model, apiKey: keyAfter });
+}
+
+/** The config and key argument for `brain_upsert`: key null = unchanged, "" = delete, else the new key. */
+export function applyEdit(b: BrainView, e: BrainEdit): { config: BrainConfig; apiKey: string | null } {
+  const config: BrainConfig = {
+    id: b.id,
+    name: e.name.trim(),
+    kind: b.kind,
+    endpoint: e.endpoint.trim(),
+    model: e.model.trim() || null,
+    capabilities: b.capabilities,
+    has_api_key: b.has_api_key,
+    share_context: b.share_context ?? null,
+  };
+  const apiKey = e.apiKey.trim() ? e.apiKey.trim() : e.removeKey ? "" : null;
+  return { config, apiKey };
 }
 
 export function sidecarLabel(s: SidecarState): string {
@@ -278,6 +317,7 @@ export const api = {
     invoke<void>("ghost_set_quiet", { bundleId: app.bundle_id, name: app.name, quiet }),
   ghostMemory: () => invoke<GhostMemory>("ghost_memory"),
   ghostMemoryClear: () => invoke<void>("ghost_memory_clear"),
+  ghostMemoryForget: (text: string) => invoke<boolean>("ghost_memory_forget", { text }),
   setShareContext: (id: string, share: boolean) => invoke<void>("brain_set_share_context", { id, share }),
 };
 

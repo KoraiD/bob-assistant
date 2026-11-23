@@ -49,6 +49,25 @@ fn current_uid() -> u32 {
         .unwrap_or(0)
 }
 
+/// Single-instance guard: an exclusive lock on `bob.lock` in the private (0700) runtime directory. Returns
+/// `None` when another BOB holds it. The lock lives as long as the returned file and is released by the OS
+/// if BOB crashes, so a stale lock can never block a restart. Without it, a second instance would
+/// replace the first one's helper socket and start a second model server.
+pub fn acquire_instance_lock(dir: &Path) -> io::Result<Option<std::fs::File>> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("bob.lock"))?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(e)) => Err(e),
+    }
+}
+
 /// Bind the listening socket: create the parent directory with mode 0700, remove a stale socket,
 /// then restrict the socket file to 0600 (NB-1).
 pub fn bind_socket(path: &Path) -> io::Result<UnixListener> {
@@ -414,5 +433,22 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .starts_with("bob-"));
+    }
+
+    #[test]
+    fn only_one_instance_can_hold_the_lock_and_it_is_released_on_drop() {
+        let dir = std::env::temp_dir().join(format!("bob-lock-{}", rand::random::<u32>()));
+        let first = acquire_instance_lock(&dir).unwrap();
+        assert!(first.is_some());
+        assert!(
+            acquire_instance_lock(&dir).unwrap().is_none(),
+            "a second instance must not start"
+        );
+        drop(first);
+        assert!(
+            acquire_instance_lock(&dir).unwrap().is_some(),
+            "the lock is released with the file"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

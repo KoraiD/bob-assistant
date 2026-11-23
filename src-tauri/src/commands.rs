@@ -343,6 +343,14 @@ pub async fn ghost_memory(ghost: State<'_, GhostHandle>) -> Result<Memory, Strin
 }
 
 #[tauri::command]
+pub async fn ghost_memory_forget(
+    ghost: State<'_, GhostHandle>,
+    text: String,
+) -> Result<bool, String> {
+    Ok(ghost.forget_phrase(&text))
+}
+
+#[tauri::command]
 pub async fn ghost_memory_clear(ghost: State<'_, GhostHandle>) -> Result<(), String> {
     ghost.clear_memory();
     Ok(())

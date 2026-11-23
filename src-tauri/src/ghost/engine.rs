@@ -78,6 +78,8 @@ pub enum Input {
     },
     /// Enable or disable Ghost Text (the UI toggle / role "Off").
     SetEnabled(bool),
+    /// "Pause BOB" (menu bar): like disabled, but temporary and never saved.
+    SetPaused(bool),
     /// Quiet apps changed: re-check the current app.
     SettingsChanged,
 }
@@ -193,6 +195,11 @@ impl GhostHandle {
         let _ = self.tx.send(Input::SetEnabled(on));
     }
 
+    /// Pause or resume Ghost Text without touching the saved on/off setting.
+    pub fn set_paused(&self, paused: bool) {
+        let _ = self.tx.send(Input::SetPaused(paused));
+    }
+
     /// Make BOB quiet (or not) in an app (persisted). Takes effect at the next text event.
     pub fn set_quiet(&self, bundle_id: &str, name: &str, quiet: bool) {
         self.shared
@@ -221,6 +228,15 @@ impl GhostHandle {
         if self.shared.memory.lock().expect("memory").record(text) {
             self.shared.save_memory();
         }
+    }
+
+    /// Forget one phrase (persisted).
+    pub fn forget_phrase(&self, text: &str) -> bool {
+        let removed = self.shared.memory.lock().expect("memory").forget(text);
+        if removed {
+            self.shared.save_memory();
+        }
+        removed
     }
 
     /// Forget every accepted phrase (persisted).
@@ -293,6 +309,7 @@ pub fn spawn_ctx(
         shared: shared.clone(),
         context,
         enabled,
+        paused: false,
         ctx: None,
         chip: None,
         generation: 0,
@@ -315,6 +332,8 @@ struct Engine {
     /// Personal context (profile, memory, window, screen); used only when a Ghost layer is on.
     context: Arc<ContextHub>,
     enabled: bool,
+    /// Temporarily off ("Pause BOB"); not persisted.
+    paused: bool,
     ctx: Option<Context>,
     chip: Option<Chip>,
     generation: u64,
@@ -367,6 +386,13 @@ impl Engine {
 
     fn handle(&mut self, input: Input) {
         match input {
+            Input::SetPaused(paused) => {
+                self.paused = paused;
+                if paused {
+                    self.cancel();
+                    self.hide();
+                }
+            }
             Input::SetEnabled(on) => {
                 self.enabled = on;
                 if !on {
@@ -417,7 +443,7 @@ impl Engine {
                 text,
             } => {
                 let current = self.ctx.as_ref().is_some_and(|c| c.before == before);
-                if generation != self.generation || !current || !self.enabled {
+                if generation != self.generation || !current || !self.enabled || self.paused {
                     return; // stale
                 }
                 let Some(caret) = self.ctx.as_ref().map(|c| c.caret) else {
@@ -473,7 +499,8 @@ impl Engine {
         // Quiet zones (GT-3, GT-4): secure fields, no caret position, an active selection.
         // Plus apps on the quiet list (terminals, password managers, BOB, user choices).
         let quiet = self.is_quiet(&app);
-        let Some(caret) = caret.filter(|_| !secure && selection_len == 0 && self.enabled && !quiet)
+        let Some(caret) = caret
+            .filter(|_| !secure && selection_len == 0 && self.enabled && !self.paused && !quiet)
         else {
             self.hide();
             self.cancel();

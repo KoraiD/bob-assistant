@@ -1,5 +1,4 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { AboutPanel } from "./components/AboutPanel";
 import { BrainPanel } from "./components/BrainPanel";
 import { DictationCard } from "./components/DictationCard";
 import { GhostCard } from "./components/GhostCard";
@@ -8,8 +7,11 @@ import { Orb } from "./components/Orb";
 import { PermissionsCard } from "./components/PermissionsCard";
 import { PersonalizePanel } from "./components/PersonalizePanel";
 import { SelectionCard } from "./components/SelectionCard";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { BROWSER_APP_INFO, getAppInfo, isTauri, type AppInfo } from "./lib/appInfo";
+import { generalApi, OPEN_PANEL_EVENT, pauseLabel, SHELL_EVENT, type PauseView } from "./lib/general";
 import { useOrb } from "./lib/orb";
+import { useTauriEvent } from "./lib/useTauriEvent";
 import { useTheme } from "./lib/theme";
 
 /** The three capabilities, in priority order (see .kiro/steering/product.md). */
@@ -25,7 +27,7 @@ export function formatBuild(info: AppInfo): string {
   return `BOB ${info.version} · ${info.platform} ${info.arch}`;
 }
 
-export type Panel = "overview" | "ghost" | "selection" | "dictation" | "brains" | "personalize" | "about";
+export type Panel = "overview" | "ghost" | "selection" | "dictation" | "brains" | "personalize" | "settings";
 
 /** UI-1: one panel per capability plus Brains, Personalize and About. */
 export const PANELS: { id: Panel; label: string; icon: string }[] = [
@@ -35,7 +37,7 @@ export const PANELS: { id: Panel; label: string; icon: string }[] = [
   { id: "dictation", label: "Voice Dictation", icon: "🎙️" },
   { id: "brains", label: "Brains", icon: "🧠" },
   { id: "personalize", label: "Personalize", icon: "🪄" },
-  { id: "about", label: "About", icon: "🕯️" },
+  { id: "settings", label: "Settings", icon: "🕯️" },
 ];
 
 function Overview({ go }: { go: (p: Panel) => void }) {
@@ -77,6 +79,27 @@ export default function App() {
   const [theme, setTheme] = useTheme();
   const [tour, setTour] = useState(() => isTauri() && !isOnboarded());
   const orb = useOrb();
+  const [pause, setPause] = useState<PauseView>({ paused: false, until: null });
+  const refreshPause = () => {
+    if (isTauri()) void generalApi.get().then((g) => setPause(g.pause)).catch(() => {});
+  };
+  useEffect(refreshPause, []);
+  useTauriEvent(SHELL_EVENT, refreshPause);
+  // Cmd+, from the app menu or "Settings…" in the menu bar.
+  useTauriEvent<string>(OPEN_PANEL_EVENT, (p) => PANELS.some((x) => x.id === p) && setPanel(p as Panel));
+  // Cmd+1 ... Cmd+7 switch panels, like tabs in Mac apps.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= PANELS.length) {
+        e.preventDefault();
+        setPanel(PANELS[n - 1].id);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -94,7 +117,7 @@ export default function App() {
     dictation: <DictationCard />,
     brains: <BrainPanel />,
     personalize: <PersonalizePanel />,
-    about: <AboutPanel build={formatBuild(info)} theme={theme} onTheme={setTheme} onTour={() => setTour(true)} />,
+    settings: <SettingsPanel build={formatBuild(info)} theme={theme} onTheme={setTheme} onTour={() => setTour(true)} />,
   };
 
   return (
@@ -107,6 +130,19 @@ export default function App() {
           </p>
         </header>
         <Orb view={orb} size={48} />
+        {pause.paused && (
+          <div className="rounded-xl p-3 text-xs" style={{ background: "var(--accent-2-soft)", color: "var(--accent-2)" }} data-testid="paused-banner">
+            <p className="mb-2 font-medium">{pauseLabel(pause)}</p>
+            <button
+              type="button"
+              onClick={() => void generalApi.resume().then(setPause)}
+              className="rounded-full px-3 py-1 font-medium"
+              style={{ background: "var(--accent)", color: "var(--accent-fg)" }}
+            >
+              Resume BOB
+            </button>
+          </div>
+        )}
         <nav aria-label="Sections">
           <ul className="space-y-1">
             {PANELS.map((p) => (
@@ -115,6 +151,7 @@ export default function App() {
                   type="button"
                   aria-current={panel === p.id ? "page" : undefined}
                   onClick={() => setPanel(p.id)}
+                  title={`${p.label} (⌘${PANELS.indexOf(p) + 1})`}
                   className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm"
                   style={panel === p.id ? { background: "var(--accent-soft)", color: "var(--accent)" } : { color: "var(--text)" }}
                 >

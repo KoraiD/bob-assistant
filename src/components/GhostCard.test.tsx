@@ -38,6 +38,10 @@ beforeEach(() => {
         return snapshot;
       case "ghost_memory":
         return memory;
+      case "ghost_memory_forget":
+        memory = { phrases: memory.phrases.filter((p) => p.text !== args!.text) };
+        status = { ...status, memory_count: memory.phrases.length };
+        return true;
       case "ghost_memory_clear":
         memory = { phrases: [] };
         status = { ...status, memory_count: 0 };
@@ -78,6 +82,9 @@ describe("GhostCard", () => {
     await userEvent.click(summary);
     expect(await screen.findByText("as soon as I can")).toBeInTheDocument();
     expect(screen.getByText("×3")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: 'Forget "lazy dog"' }));
+    expect(invoke).toHaveBeenCalledWith("ghost_memory_forget", { text: "lazy dog" });
+    await waitFor(() => expect(screen.queryByText("lazy dog")).not.toBeInTheDocument());
     await userEvent.click(screen.getByRole("button", { name: "Forget all" }));
     expect(invoke).toHaveBeenCalledWith("ghost_memory_clear");
     expect(await screen.findByText("Nothing remembered yet.")).toBeInTheDocument();

@@ -4,6 +4,21 @@ All notable changes to BOB. Format follows [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+### Added (Task 10, polish and hardening)
+- Settings panel (⌘,): open at login (macOS Login Items), Dock icon on/off, open the window at launch, pause, theme, keyboard shortcuts.
+- Pause BOB for an hour, until tomorrow morning or until resumed, from the menu bar or Settings; a sidebar banner resumes it.
+- Menu bar: Ghost Text and Voice Dictation toggles, pause and resume, Settings.
+- ⌘1 to ⌘7 switch panels; the window remembers its size and position.
+- Edit a brain (name, endpoint, model, key) and confirm before removing one; forget a single remembered phrase.
+- The profile autosaves (800 ms after typing stops, and when leaving the panel).
+- `make audit` and a CI job for RustSec and npm advisories; docs/SECURITY.md.
+
+### Fixed
+- Two BOB instances could run at once (two helpers, two model servers, a contested socket); now one per user.
+- API keys could be sent over plain http to a server outside this Mac; now refused, with a clear message in the form.
+- Cloud brains ignored the system proxy; only local brains bypass it now.
+- Dependency advisories: rustls, rustls-webpki, quinn-proto, quinn-udp, cookie updated; Vitest 3 to 5.
+
 ### Added (Task 9, haunted UI)
 - Sidebar navigation with a panel per feature (Overview, Ghost Text, Selection Actions, Voice Dictation, Brains, Personalize, About).
 - A live orb in the sidebar (floating, listening, thinking, haunting, needs a hand), driven by the core; the tray tooltip follows it.

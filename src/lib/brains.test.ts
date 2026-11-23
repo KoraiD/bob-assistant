@@ -1,4 +1,4 @@
-import { brainsForRole, ghostSummary, quietAppRows, type GhostStatus, draftToConfig, formatBytes, isCloudUrl, percent, slugify, uniqueId, validateDraft, type BrainView, type Draft } from "./brains";
+import { applyEdit, editFrom, validateEdit, brainsForRole, ghostSummary, quietAppRows, type GhostStatus, draftToConfig, formatBytes, isCloudUrl, percent, slugify, uniqueId, validateDraft, type BrainView, type Draft } from "./brains";
 
 const brain = (id: string, ghost: boolean, chat: boolean): BrainView => ({
   id, name: id, kind: "ollama", endpoint: "http://127.0.0.1:11434", model: null,
@@ -86,5 +86,30 @@ describe("quietAppRows", () => {
   });
   it("is empty when nothing is known", () => {
     expect(quietAppRows({ quiet_apps: [], recent_apps: [] })).toEqual([]);
+  });
+});
+
+describe("validateDraft https rule", () => {
+  it("refuses an API key over plain http to a server outside this Mac", () => {
+    const d = { name: "X", kind: "open_ai_compatible" as const, endpoint: "http://api.example.com", model: "", apiKey: "k" };
+    expect(validateDraft(d).join(" ")).toMatch(/https/);
+    expect(validateDraft({ ...d, endpoint: "https://api.example.com" })).toEqual([]);
+    expect(validateDraft({ ...d, kind: "lm_studio", endpoint: "http://127.0.0.1:1234" })).toEqual([]);
+  });
+});
+
+describe("brain edits", () => {
+  const cloud: BrainView = { ...brain("c", false, true), kind: "open_ai_compatible", endpoint: "https://api.x.com", has_api_key: true, is_cloud: true };
+  it("keeps, replaces or removes the stored key", () => {
+    const e = editFrom(cloud);
+    expect(applyEdit(cloud, e).apiKey).toBeNull();
+    expect(applyEdit(cloud, { ...e, apiKey: " new " }).apiKey).toBe("new");
+    expect(applyEdit(cloud, { ...e, removeKey: true }).apiKey).toBe("");
+  });
+  it("a stored key satisfies the cloud key rule, removing it does not", () => {
+    const e = editFrom(cloud);
+    expect(validateEdit(cloud, e)).toEqual([]);
+    expect(validateEdit(cloud, { ...e, removeKey: true }).join(" ")).toMatch(/API key/);
+    expect(validateEdit(cloud, { ...e, name: " " }).join(" ")).toMatch(/name/);
   });
 });

@@ -235,16 +235,33 @@ function ProfileEditor({ view, onSaved }: { view: ContextView; onSaved: () => Pr
     });
   };
 
-  const save = async () => {
+  const save = async (value: string = text) => {
     try {
-      await contextApi.saveProfile(text);
-      setSaved(text);
+      await contextApi.saveProfile(value);
+      setSaved(value);
       setStatus("Saved");
       await onSaved();
     } catch (e) {
       setStatus(String(e));
     }
   };
+
+  // Autosave like Mac apps: 800 ms after typing stops, and when leaving the panel with unsaved edits.
+  const latest = useRef({ text, dirty, tooLong });
+  latest.current = { text, dirty, tooLong };
+  useEffect(() => {
+    if (!dirty || tooLong) return;
+    const t = setTimeout(() => void save(text), 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+  useEffect(
+    () => () => {
+      const l = latest.current;
+      if (l.dirty && !l.tooLong) void contextApi.saveProfile(l.text).catch(() => {});
+    },
+    [],
+  );
 
   return (
     <Card title="Your profile" label="Profile">
@@ -326,7 +343,7 @@ function ProfileEditor({ view, onSaved }: { view: ContextView; onSaved: () => Pr
       )}
       <div className="mt-2 flex items-center gap-3 text-xs">
         <SmallButton onClick={() => void save()} disabled={!dirty || tooLong} style={dirty && !tooLong ? { background: "var(--accent)", color: "var(--accent-fg)" } : undefined}>
-          Save
+          {dirty ? "Save now" : "Saved"}
         </SmallButton>
         {dirty && <SmallButton onClick={() => setText(saved)}>Discard changes</SmallButton>}
         <span style={tooLong ? { color: "var(--danger)" } : muted} data-testid="profile-size">
