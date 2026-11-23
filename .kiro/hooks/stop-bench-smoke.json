@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "End of turn: Ghost benchmark smoke test",
+      "trigger": "Stop",
+      "description": "Runs the fast oracle replay through the real Ghost engine (about 3 s once compiled) so latency and scoring regressions surface immediately. Full model benchmarks run with `make bench`.",
+      "action": {
+        "type": "command",
+        "command": "cargo test --manifest-path src-tauri/Cargo.toml --quiet bench:: 2>&1 | tail -3",
+        "timeout": 300
+      }
+    }
+  ]
+}

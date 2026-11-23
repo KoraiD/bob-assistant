@@ -3,7 +3,7 @@
 CARGO_MANIFEST := src-tauri/Cargo.toml
 NATIVE_DIR := native/bob-native
 
-.PHONY: help setup dev build native app sidecars probe chip-demo sign-dev test test-rust test-swift test-ui screenshot lint fmt check-kiro check clean
+.PHONY: help setup dev build native app sidecars probe chip-demo sign-dev test test-rust test-swift test-ui screenshot bench lint fmt check-kiro check clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[35m%-12s\033[0m %s\n", $$1, $$2}'
@@ -45,6 +45,9 @@ test-swift: ## Swift package tests
 
 test-ui: ## Frontend tests
 	npm test
+
+bench: ## Ghost Text benchmark with the real model (about 3 min per model/setting; MODELS="id ..." to override)
+	cargo run --release --manifest-path $(CARGO_MANIFEST) --bin ghost-bench -- $(foreach m,$(or $(MODELS),qwen2.5-1.5b-instruct-q4km),--model $(m))
 
 screenshot: ## Capture the UI with headless Chrome into bench-results/local/ (visual review)
 	bash scripts/screenshot.sh
