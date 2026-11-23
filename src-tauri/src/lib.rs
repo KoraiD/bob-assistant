@@ -226,6 +226,7 @@ pub fn run() {
         })
         // Closing the window hides it; BOB keeps running from the menu bar.
         .on_window_event(|window, event| {
+            log::debug!("window event: {event:?}");
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
@@ -234,6 +235,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building BOB")
         .run(|app, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                log::info!("run event: {event:?}");
+            }
             // Stop the built-in model server before the process exits (it would otherwise keep a model
             // in memory). A crash is covered by the PID file check at the next start.
             if let tauri::RunEvent::Exit = event {
