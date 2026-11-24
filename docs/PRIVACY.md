@@ -36,6 +36,12 @@ feature that changes the answer.
 | Clipboard (Selection Actions fallback) | borrowed for Cmd+C / Cmd+V when an app hides its selection from Accessibility, then restored item by item | not stored |
 | Audio (Dictation) | recorded only while you hold the dictation key, kept in memory inside BOB's helper and transcribed there by whisper.cpp; a recording is at most 5 minutes | never written to disk, never sent |
 | Transcripts | typed at the cursor; sent to the Dictation brain only when you pick a cleanup preset (and only with personal context if that brain is allowed) | not stored, never logged |
+| Last dictation (for "Type Last Dictation Again") | in memory only, forgotten after two minutes or when BOB quits | no |
+| Voice edit | the selection is read with Accessibility when you start dictating over it; selection and spoken instruction go to the Selection brain, with the same cloud and secret rules as Selection Actions | not stored |
+| Dictation vocabulary and replacements | local `dictation-settings.json`; the vocabulary is given to whisper on this Mac only | yes, locally |
+| Usage statistics | local `usage.json`: per-day counts (words accepted, words dictated, rewrites, speech milliseconds), at most 400 days, never any text; Statistics > Clear | yes, locally |
+| Running apps (quiet-apps picker) | bundle id and name, read when you open the list | not stored |
+| Open at login | macOS Login Items, or `~/Library/LaunchAgents/dev.bob.assistant.login.plist` when macOS refuses the login item; removed when you turn it off | yes, by macOS |
 | Transcripts, typed text, selections | never logged | no |
 | API keys | macOS Keychain | yes |
 

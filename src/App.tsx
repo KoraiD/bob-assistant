@@ -8,6 +8,7 @@ import { PermissionsCard } from "./components/PermissionsCard";
 import { PersonalizePanel } from "./components/PersonalizePanel";
 import { SelectionCard } from "./components/SelectionCard";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { StatsPanel } from "./components/StatsPanel";
 import { BROWSER_APP_INFO, getAppInfo, isTauri, type AppInfo } from "./lib/appInfo";
 import { generalApi, OPEN_PANEL_EVENT, pauseLabel, SHELL_EVENT, type PauseView } from "./lib/general";
 import { useOrb } from "./lib/orb";
@@ -27,9 +28,9 @@ export function formatBuild(info: AppInfo): string {
   return `BOB ${info.version} · ${info.platform} ${info.arch}`;
 }
 
-export type Panel = "overview" | "ghost" | "selection" | "dictation" | "brains" | "personalize" | "settings";
+export type Panel = "overview" | "ghost" | "selection" | "dictation" | "brains" | "personalize" | "stats" | "settings";
 
-/** UI-1: one panel per capability plus Brains, Personalize and About. */
+/** UI-1: one panel per capability plus Brains, Personalize, Statistics and Settings. */
 export const PANELS: { id: Panel; label: string; icon: string }[] = [
   { id: "overview", label: "Overview", icon: "🏚️" },
   { id: "ghost", label: "Ghost Text", icon: "👻" },
@@ -37,6 +38,7 @@ export const PANELS: { id: Panel; label: string; icon: string }[] = [
   { id: "dictation", label: "Voice Dictation", icon: "🎙️" },
   { id: "brains", label: "Brains", icon: "🧠" },
   { id: "personalize", label: "Personalize", icon: "🪄" },
+  { id: "stats", label: "Statistics", icon: "📈" },
   { id: "settings", label: "Settings", icon: "🕯️" },
 ];
 
@@ -87,7 +89,7 @@ export default function App() {
   useTauriEvent(SHELL_EVENT, refreshPause);
   // Cmd+, from the app menu or "Settings…" in the menu bar.
   useTauriEvent<string>(OPEN_PANEL_EVENT, (p) => PANELS.some((x) => x.id === p) && setPanel(p as Panel));
-  // Cmd+1 ... Cmd+7 switch panels, like tabs in Mac apps.
+  // Cmd+1 ... Cmd+8 switch panels, like tabs in Mac apps.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
@@ -117,6 +119,7 @@ export default function App() {
     dictation: <DictationCard />,
     brains: <BrainPanel />,
     personalize: <PersonalizePanel />,
+    stats: <StatsPanel />,
     settings: <SettingsPanel build={formatBuild(info)} theme={theme} onTheme={setTheme} onTour={() => setTour(true)} />,
   };
 

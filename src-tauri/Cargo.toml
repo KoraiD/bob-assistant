@@ -40,11 +40,11 @@ env_logger = { version = "0.11.12", default-features = false, features = ["auto-
 # AppKit access for the Cmd+Q key monitor (already in the tree through Tauri; same versions).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent", "NSResponder"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent", "NSResponder", "NSRunningApplication", "NSWorkspace"] }
 block2 = "0.6"
 # Launch at login through SMAppService (macOS 13+), so BOB shows up in System Settings > Login Items.
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSError", "NSString", "NSArray"] }
 
 [dev-dependencies]
 proptest = "1"

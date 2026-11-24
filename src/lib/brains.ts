@@ -318,6 +318,9 @@ export const api = {
   ghostMemory: () => invoke<GhostMemory>("ghost_memory"),
   ghostMemoryClear: () => invoke<void>("ghost_memory_clear"),
   ghostMemoryForget: (text: string) => invoke<boolean>("ghost_memory_forget", { text }),
+  ghostMemoryAdd: (text: string) => invoke<boolean>("ghost_memory_add", { text }),
+  ghostMemoryEdit: (old: string, next: string) => invoke<boolean>("ghost_memory_edit", { old, new: next }),
+  runningApps: () => invoke<AppRef[]>("running_apps"),
   setShareContext: (id: string, share: boolean) => invoke<void>("brain_set_share_context", { id, share }),
 };
 

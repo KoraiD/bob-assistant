@@ -2,17 +2,19 @@
 //! cleanup on the dictation brain and inserts the result. Transcripts are never logged (VD-8).
 
 use super::machine::{self, Config, Input, Orb, Output, State};
-use super::settings::{DictationSettings, SETTINGS_FILE};
+use super::settings::{apply_replacements, vocabulary_prompt, DictationSettings, SETTINGS_FILE};
 use crate::brain::models;
 use crate::brain::registry::Role;
 use crate::brain::service::BrainService;
 use crate::brain::ChatRequest;
-use crate::context::ContextHub;
+use crate::context::{typography, ContextHub};
 use crate::ghost::engine::Sink;
 use crate::protocol::{CoreCommand, Hotkey, NativeEvent, OrbState};
+use crate::selection::engine::SelectionHandle;
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -22,6 +24,10 @@ const CLEANUP_TIMEOUT: Duration = Duration::from_secs(20);
 const TRANSCRIBE_TIMEOUT: Duration = Duration::from_secs(120);
 const DONE_HIDE: Duration = Duration::from_millis(900);
 const ERROR_HIDE: Duration = Duration::from_millis(3500);
+/// How long the last dictation stays in memory for "Type last dictation" (proposal 4).
+pub const LAST_KEEP: Duration = Duration::from_secs(120);
+/// How often the idle unload is checked (proposal 11).
+const IDLE_CHECK: Duration = Duration::from_secs(30);
 
 pub const MIC_HELP: &str =
     "BOB needs the microphone: System Settings > Privacy & Security > Microphone > BOB.";
@@ -40,6 +46,10 @@ pub struct DictationStats {
     pub last_release_to_insert_ms: Option<u64>,
     pub model_loaded: bool,
     pub model_error: Option<String>,
+    /// The model was unloaded after the idle timeout; the next press loads it again.
+    pub idle_unloaded: bool,
+    /// A last dictation is still in memory (it is forgotten after two minutes).
+    pub last_available: bool,
 }
 
 struct Shared {
@@ -47,6 +57,43 @@ struct Shared {
     stats: Mutex<DictationStats>,
     storage: Option<PathBuf>,
     models_dir: PathBuf,
+    unloaded: AtomicBool,
+    /// The last inserted dictation, kept in memory only, for [`LAST_KEEP`].
+    last: Mutex<Option<(String, Instant)>>,
+}
+
+impl Shared {
+    fn settings(&self) -> DictationSettings {
+        self.settings.lock().expect("dictation settings").clone()
+    }
+
+    fn last(&self) -> Option<String> {
+        let mut last = self.last.lock().expect("last dictation");
+        if last
+            .as_ref()
+            .is_some_and(|(_, at)| at.elapsed() > LAST_KEEP)
+        {
+            *last = None;
+        }
+        last.as_ref().map(|(t, _)| t.clone())
+    }
+
+    fn command(&self) -> CoreCommand {
+        let s = self.settings();
+        CoreCommand::SetDictation {
+            hotkey: s.enabled.then(|| Hotkey {
+                key_code: s.hotkey.key_code,
+                modifiers: s.hotkey.modifiers.clone(),
+            }),
+            model_path: if s.enabled && !self.unloaded.load(Ordering::SeqCst) {
+                model_path(&self.models_dir, &s).map(|p| p.display().to_string())
+            } else {
+                None
+            },
+            language: s.language.clone(),
+            prompt: vocabulary_prompt(&s.vocabulary),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -70,6 +117,10 @@ impl DictationHandle {
 
     pub fn set_settings(&self, s: DictationSettings) -> std::io::Result<DictationSettings> {
         let s = s.sanitized();
+        if s.unload_after_min == 0 || !s.enabled {
+            // Loaded again with the next helper configuration.
+            self.shared.unloaded.store(false, Ordering::SeqCst);
+        }
         *self.shared.settings.lock().expect("dictation settings") = s.clone();
         if let Some(dir) = &self.shared.storage {
             s.save(&dir.join(SETTINGS_FILE))?;
@@ -78,7 +129,24 @@ impl DictationHandle {
     }
 
     pub fn stats(&self) -> DictationStats {
-        self.shared.stats.lock().expect("dictation stats").clone()
+        let mut st = self.shared.stats.lock().expect("dictation stats").clone();
+        st.idle_unloaded = self.shared.unloaded.load(Ordering::SeqCst);
+        st.last_available = self.shared.last().is_some();
+        st
+    }
+
+    /// The last dictation while it is still in memory (two minutes).
+    pub fn last_dictation(&self) -> Option<String> {
+        self.shared.last()
+    }
+
+    /// Type the last dictation again at the caret. False when there is none.
+    pub fn paste_last(&self) -> bool {
+        let available = self.shared.last().is_some();
+        if available {
+            let _ = self.tx.send(In::PasteLast);
+        }
+        available
     }
 
     /// Path of the chosen model when it is installed.
@@ -88,19 +156,7 @@ impl DictationHandle {
 
     /// The helper configuration for the current settings (sent after every handshake and change).
     pub fn command(&self) -> CoreCommand {
-        let s = self.settings();
-        CoreCommand::SetDictation {
-            hotkey: s.enabled.then(|| Hotkey {
-                key_code: s.hotkey.key_code,
-                modifiers: s.hotkey.modifiers.clone(),
-            }),
-            model_path: if s.enabled {
-                self.model_path().map(|p| p.display().to_string())
-            } else {
-                None
-            },
-            language: s.language.clone(),
-        }
+        self.shared.command()
     }
 }
 
@@ -123,6 +179,8 @@ enum In {
     HideOrb {
         generation: u64,
     },
+    PasteLast,
+    IdleCheck,
 }
 
 pub fn spawn(
@@ -131,6 +189,7 @@ pub fn spawn(
     sink: Arc<dyn Sink>,
     storage: Option<PathBuf>,
     models_dir: PathBuf,
+    selection: Option<SelectionHandle>,
 ) -> DictationHandle {
     let settings = storage
         .as_ref()
@@ -141,6 +200,8 @@ pub fn spawn(
         stats: Mutex::new(DictationStats::default()),
         storage,
         models_dir,
+        unloaded: AtomicBool::new(false),
+        last: Mutex::new(None),
     });
     let (tx, rx) = mpsc::unbounded_channel();
     let engine = Engine {
@@ -157,8 +218,22 @@ pub fn spawn(
         cleanup: None,
         secure: false,
         last_char: None,
+        selection,
+        pending_selection: None,
+        last_used: Instant::now(),
     };
     tokio::spawn(engine.run(rx));
+    let idle_tx = tx.clone();
+    tokio::spawn(async move {
+        let mut t = tokio::time::interval(IDLE_CHECK);
+        t.tick().await;
+        loop {
+            t.tick().await;
+            if idle_tx.send(In::IdleCheck).is_err() {
+                break;
+            }
+        }
+    });
     DictationHandle { tx, shared }
 }
 
@@ -179,6 +254,11 @@ struct Engine {
     secure: bool,
     /// Last character before the caret, to decide whether the inserted text needs a leading space.
     last_char: Option<char>,
+    selection: Option<SelectionHandle>,
+    /// Text selected when this recording started: the transcript becomes an instruction for it (voice edit).
+    pending_selection: Option<String>,
+    /// Last press or insertion, for the idle unload.
+    last_used: Instant,
 }
 
 impl Engine {
@@ -197,18 +277,14 @@ impl Engine {
     }
 
     fn feed(&mut self, input: Input) {
-        let cleanup = self
-            .shared
-            .settings
-            .lock()
-            .expect("dictation settings")
-            .cleanup;
-        let (next, outputs) = machine::step(
-            &self.state,
-            input,
-            Config::default(),
-            cleanup.task().is_some(),
-        );
+        let s = self.shared.settings();
+        let cfg = Config {
+            tap_to_toggle: s.tap_to_toggle,
+            ..Config::default()
+        };
+        // A voice-edit instruction is used as spoken; the selection brain does the rewriting.
+        let cleanup = s.cleanup.task().is_some() && self.pending_selection.is_none();
+        let (next, outputs) = machine::step(&self.state, input, cfg, cleanup);
         self.state = next;
         for o in outputs {
             self.apply(o);
@@ -218,6 +294,16 @@ impl Engine {
     fn handle(&mut self, i: In) {
         match i {
             In::Native(NativeEvent::DictationKey { pressed: true }) => {
+                if matches!(self.state, State::Latched { .. }) {
+                    self.released_at = Some(Instant::now());
+                    self.feed(Input::Press {
+                        at_ms: self.now_ms(),
+                    });
+                    if matches!(self.state, State::Idle) {
+                        self.stats(|s| s.discarded += 1);
+                    }
+                    return;
+                }
                 if !matches!(self.state, State::Idle) {
                     return;
                 }
@@ -229,7 +315,13 @@ impl Engine {
                     self.stats(|s| s.last_error = Some(MODEL_HELP.into()));
                     return self.orb(OrbState::Error, Some(MODEL_HELP.into()));
                 }
+                self.last_used = Instant::now();
+                if self.shared.unloaded.swap(false, Ordering::SeqCst) {
+                    // Reload; the helper's whisper queue is serial, so this recording waits for it.
+                    self.sink.send(self.shared.command());
+                }
                 self.generation += 1;
+                self.pending_selection = None;
                 self.feed(Input::Press {
                     at_ms: self.now_ms(),
                 });
@@ -290,6 +382,13 @@ impl Engine {
                 self.secure = secure;
                 self.last_char = before_caret.chars().last();
             }
+            In::Native(NativeEvent::DictationSelection { text, .. }) => {
+                if matches!(self.state, State::Recording { .. } | State::Latched { .. })
+                    && self.selection.is_some()
+                {
+                    self.pending_selection = Some(text);
+                }
+            }
             In::Native(NativeEvent::Hello { .. }) => {
                 // A restarted helper is not recording: whatever was in flight is lost.
                 if !matches!(self.state, State::Idle) {
@@ -314,6 +413,28 @@ impl Engine {
                     self.feed(Input::Failed {
                         reason: "transcription took too long".into(),
                     });
+                }
+            }
+            In::PasteLast => {
+                if let Some(text) = self.shared.last() {
+                    if self.secure {
+                        return self.orb(OrbState::Error, Some(SECURE_HELP.into()));
+                    }
+                    let text = with_spacing(self.last_char, &text);
+                    self.sink.send(CoreCommand::InsertText { text });
+                }
+            }
+            In::IdleCheck => {
+                let s = self.shared.settings();
+                let minutes = u64::from(s.unload_after_min);
+                if minutes > 0
+                    && s.enabled
+                    && matches!(self.state, State::Idle)
+                    && self.last_used.elapsed() >= Duration::from_secs(minutes * 60)
+                    && model_path(&self.shared.models_dir, &s).is_some()
+                    && !self.shared.unloaded.swap(true, Ordering::SeqCst)
+                {
+                    self.sink.send(self.shared.command());
                 }
             }
             In::HideOrb { generation } => {
@@ -408,10 +529,36 @@ impl Engine {
                 }));
             }
             Output::Insert(text) => {
+                self.last_used = Instant::now();
+                if let Some(selected) = self.pending_selection.take() {
+                    if let Some(sel) = &self.selection {
+                        self.released_at = None;
+                        self.stats(|s| s.dictations += 1);
+                        sel.voice_edit(selected, text);
+                        return;
+                    }
+                }
                 if self.secure {
                     self.stats(|s| s.last_error = Some(SECURE_HELP.into()));
                     return self.orb(OrbState::Error, Some(SECURE_HELP.into()));
                 }
+                let settings = self.shared.settings();
+                let text = apply_replacements(&text, &settings.replacements);
+                let text = typography::apply(&text, self.context.settings().quotes, self.last_char);
+                *self.shared.last.lock().expect("last dictation") =
+                    Some((text.clone(), Instant::now()));
+                let audio_ms = self
+                    .shared
+                    .stats
+                    .lock()
+                    .expect("dictation stats")
+                    .last_audio_ms;
+                let words = crate::usage::words(&text);
+                crate::usage::record(|d| {
+                    d.dictations += 1;
+                    d.dictated_words += words;
+                    d.dictated_ms += u64::from(audio_ms.unwrap_or(0));
+                });
                 let text = with_spacing(self.last_char, &text);
                 let ms = self
                     .released_at
@@ -505,7 +652,15 @@ mod tests {
         ));
         let ctx = Arc::new(ContextHub::in_memory(Default::default(), ""));
         let rec = Arc::new(Recorder::default());
-        let h = spawn(svc, ctx, rec.clone(), Some(root.join("c")), models_dir);
+        let sel = crate::selection::engine::spawn(svc.clone(), ctx.clone(), rec.clone(), None);
+        let h = spawn(
+            svc,
+            ctx,
+            rec.clone(),
+            Some(root.join("c")),
+            models_dir,
+            Some(sel),
+        );
         (h, rec, root)
     }
 
@@ -575,6 +730,11 @@ mod tests {
     #[tokio::test]
     async fn taps_are_discarded_and_secure_fields_and_missing_models_never_record() {
         let (h, rec, _root) = setup(true);
+        h.set_settings(DictationSettings {
+            tap_to_toggle: false,
+            ..Default::default()
+        })
+        .unwrap();
         h.native(key(true));
         h.native(key(false));
         settle(30).await;
@@ -651,6 +811,118 @@ mod tests {
         assert!(rec.take().contains(&CoreCommand::InsertText {
             text: "um so this is it".into()
         }));
+    }
+
+    fn transcript(text: &str) -> NativeEvent {
+        NativeEvent::Transcript {
+            text: text.into(),
+            language: None,
+            speech: true,
+            audio_ms: 1000,
+            transcribe_ms: 100,
+        }
+    }
+
+    fn inserted(cmds: &[CoreCommand]) -> Vec<String> {
+        cmds.iter()
+            .filter_map(|c| match c {
+                CoreCommand::InsertText { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_tap_latches_and_the_next_press_transcribes() {
+        let (h, rec, _root) = setup(true);
+        h.native(key(true));
+        h.native(key(false));
+        settle(30).await;
+        let cmds = rec.take();
+        assert!(cmds.contains(&CoreCommand::StartRecording));
+        assert!(!cmds
+            .iter()
+            .any(|c| matches!(c, CoreCommand::StopRecording { .. })));
+        settle(300).await;
+        h.native(key(true));
+        h.native(key(false));
+        settle(30).await;
+        assert!(rec
+            .take()
+            .contains(&CoreCommand::StopRecording { transcribe: true }));
+        h.native(transcript("hands free"));
+        settle(30).await;
+        assert_eq!(inserted(&rec.take()), vec!["hands free".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn replacements_apply_and_the_last_dictation_can_be_typed_again() {
+        let (h, rec, _root) = setup(true);
+        h.set_settings(DictationSettings {
+            replacements: vec![super::super::settings::Replacement {
+                from: "my email".into(),
+                to: "me@example.com".into(),
+            }],
+            vocabulary: vec!["Kiroween".into()],
+            ..Default::default()
+        })
+        .unwrap();
+        let CoreCommand::SetDictation { prompt, .. } = h.command() else {
+            panic!()
+        };
+        assert!(prompt.unwrap().contains("Kiroween"));
+        assert!(!h.paste_last(), "nothing to paste yet");
+        h.native(key(true));
+        settle(300).await;
+        h.native(key(false));
+        h.native(transcript("send it to my email"));
+        settle(30).await;
+        assert_eq!(
+            inserted(&rec.take()),
+            vec!["send it to me@example.com".to_string()]
+        );
+        assert!(h.stats().last_available);
+        assert!(h.paste_last());
+        settle(30).await;
+        assert_eq!(
+            inserted(&rec.take()),
+            vec!["send it to me@example.com".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn speaking_over_a_selection_is_a_voice_edit_not_an_insertion() {
+        let (h, rec, _root) = setup(true);
+        h.native(key(true));
+        h.native(NativeEvent::DictationSelection {
+            app_bundle_id: "com.apple.TextEdit".into(),
+            text: "teh text".into(),
+        });
+        settle(300).await;
+        h.native(key(false));
+        h.native(transcript("fix the typos"));
+        settle(100).await;
+        let cmds = rec.take();
+        assert!(inserted(&cmds).is_empty(), "{cmds:?}");
+        // No selection brain in the test: the selection engine explains instead of inserting.
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            CoreCommand::MenuStatus { error: true, text, .. } if text.contains("No brain")
+        )));
+        // The next plain dictation inserts as usual.
+        h.native(key(true));
+        settle(300).await;
+        h.native(key(false));
+        h.native(transcript("plain"));
+        settle(30).await;
+        assert_eq!(inserted(&rec.take()), vec!["plain".to_string()]);
+    }
+
+    #[test]
+    fn voice_edit_instructions_are_bounded() {
+        let a = crate::selection::engine::voice_action(&"x".repeat(5000));
+        assert!(a.instruction.len() < 1300);
+        assert!(a.sets_language);
     }
 
     #[test]

@@ -239,6 +239,15 @@ impl GhostHandle {
         removed
     }
 
+    /// Edit one phrase (persisted). False when it is missing or the new text would not be kept.
+    pub fn edit_phrase(&self, old: &str, new: &str) -> bool {
+        let changed = self.shared.memory.lock().expect("memory").edit(old, new);
+        if changed {
+            self.shared.save_memory();
+        }
+        changed
+    }
+
     /// Forget every accepted phrase (persisted).
     pub fn clear_memory(&self) {
         self.shared.memory.lock().expect("memory").clear();
@@ -463,8 +472,15 @@ impl Engine {
                                 s.first_chip_ms.pop_front();
                             }
                         });
+                        crate::usage::record(|d| d.ghost_shown += 1);
                     }
                 }
+                // Writing style: quotes in the chip match what the user chose (prefix-stable while streaming).
+                let text = crate::context::typography::apply(
+                    &text,
+                    self.context.settings().quotes,
+                    before.chars().last(),
+                );
                 self.show(
                     Chip {
                         text: text.clone(),
@@ -575,12 +591,22 @@ impl Engine {
             Key::Tab => {
                 let (word, _) = chip::accept_word(&visible);
                 self.stat(|s| s.accepted_words += 1);
+                let n = crate::usage::words(&word);
+                crate::usage::record(|d| {
+                    d.ghost_accepts += 1;
+                    d.ghost_words += n;
+                });
                 self.remember_phrase(&word);
                 // The chip stays; the text event caused by the insertion advances it (typing-through).
                 self.sink.send(CoreCommand::InsertText { text: word });
             }
             Key::ShiftTab => {
                 self.stat(|s| s.accepted_all += 1);
+                let n = crate::usage::words(&visible);
+                crate::usage::record(|d| {
+                    d.ghost_accepts += 1;
+                    d.ghost_words += n;
+                });
                 self.remember_phrase(&visible);
                 self.sink.send(CoreCommand::InsertText { text: visible });
             }

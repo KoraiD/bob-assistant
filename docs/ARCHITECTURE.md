@@ -71,7 +71,13 @@ flowchart LR
 | Cmd+Q key monitor | `src-tauri/src/quit_key.rs` | done |
 | Dictation state machine (P1, P2), settings, engine with cleanup presets | `src-tauri/src/dictation/` | done; property tests and engine tests |
 | Hold-to-talk hotkey, microphone capture (16 kHz mono, memory only), speech gate, whisper transcriber, orb | `HotkeyCenter.swift`, `AudioRecorder.swift`, `Transcriber.swift`, `OrbPanel.swift` | done; speech gate, layout and a golden `say` transcription tested |
-| Dictation card (on/off, hotkey, language, cleanup, speech models, timings) | `src/components/DictationCard.tsx` | done |
+| Dictation card (on/off, hotkey, language, cleanup, speech models, timings, vocabulary, replacements, tap-to-toggle, idle unload, last dictation) | `src/components/DictationCard.tsx` | done |
+| Voice edit: speech over a selection becomes an instruction for the Selection brain | `HelperRuntime.swift` (`dictation_selection`), `dictation/engine.rs`, `selection/engine.rs` (`voice_edit`) | done; engine tests |
+| Writing style: quote style for everything BOB types, US/UK spelling for brains | `src-tauri/src/context/typography.rs` | done; property test (only quotes change, idempotent) |
+| Usage statistics (counts only) and the Statistics panel | `src-tauri/src/usage.rs`, `src/components/StatsPanel.tsx` | done |
+| This Mac: chip and RAM for the model recommendation, running apps for the quiet-apps picker | `src-tauri/src/system.rs` | done |
+| Open at login: SMAppService, LaunchAgent fallback | `src-tauri/src/app_settings.rs` | done; plist test, ignored real round trip |
+| Quiet-apps and phrases editors, interactive ghost | `src/components/{GhostLists,GhostMark}.tsx` | done |
 
 ## Decisions log
 | Date | Decision | Reason |
@@ -96,6 +102,12 @@ flowchart LR
 | 2026-11-23 | Default speech model large-v3-turbo Q5_0; base as the light option | measured on fixtures (PERFORMANCE.md): turbo was exact in English and Hungarian at 258 to 308 ms warm; base is 20 to 80 ms but mangles Hungarian |
 | 2026-11-23 | Full 30 s encoder window (`audio_ctx` = 0) | a shortened window was 2 to 5 times faster but added a word error in English and a hallucinated repeat in Hungarian |
 | 2026-11-23 | Free the whisper model before every helper exit | ggml's Metal backend asserts in a static destructor when model buffers are alive at `exit`, so every quit produced a crash report; reproduced and verified fixed |
+| 2026-11-24 | Voice edit as a separate `dictation_selection` event, read with Accessibility at recording start | adding a field to `transcript` would mix two concerns; the clipboard fallback is not used while a key is held (Cmd+C would collide with the held modifier) |
+| 2026-11-24 | Vocabulary as whisper's `initial_prompt` ("Glossary: a, b.") | whisper.cpp's supported biasing mechanism; bounded to 600 characters so it never crowds the context |
+| 2026-11-24 | Tap-to-toggle in the pure machine (`Latched` state) | the 250 ms "tap" that used to be discarded now latches recording; P1 still holds with the toggle on and off |
+| 2026-11-24 | Idle unload sends `set_dictation` with no model; the next press reloads | the helper's whisper queue is serial, so a recording made during the reload is transcribed after it, with no new protocol |
+| 2026-11-24 | Open at login falls back to a LaunchAgent plist (`/usr/bin/open` the bundle) | `SMAppService.mainApp` reports "not found" for this development build (logged at startup); the plist works for any build and is removed when the switch is turned off |
+| 2026-11-24 | Usage is a process-wide recorder saved at most every 30 s and at exit | engines count without new plumbing; counts only, never text |
 | 2026-11-23 | Dictation state machine in Rust, audio in Swift | the core owns timing rules (250 ms minimum hold, 5-minute cap) as a pure, property-tested machine; the helper only records, gates silence and transcribes |
 
 ## Ghost Text pipeline

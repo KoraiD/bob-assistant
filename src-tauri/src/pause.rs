@@ -50,8 +50,33 @@ pub fn until_tomorrow_morning(now: u64, utc_offset: i64) -> u64 {
     (next_morning_local - utc_offset) as u64
 }
 
-/// The local UTC offset from the system's `date` (no extra crate; falls back to UTC).
+/// The local UTC offset, read once per run (a DST switch applies after a restart).
 fn local_utc_offset() -> i64 {
+    static OFFSET: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *OFFSET.get_or_init(read_utc_offset)
+}
+
+/// Local calendar date `days_ago` days before today, as "YYYY-MM-DD".
+pub fn local_date(days_ago: i64) -> String {
+    date_for(now_secs() as i64 + local_utc_offset() - days_ago * 86_400)
+}
+
+/// "YYYY-MM-DD" for local seconds since the epoch (civil-from-days, proleptic Gregorian).
+pub fn date_for(local_secs: i64) -> String {
+    let z = local_secs.div_euclid(86_400) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// The local UTC offset from the system's `date` (no extra crate; falls back to UTC).
+fn read_utc_offset() -> i64 {
     std::process::Command::new("/bin/date")
         .arg("+%z")
         .output()
@@ -131,6 +156,15 @@ mod tests {
         *p.state.lock().unwrap() = Some(Some(now_secs() - 1));
         assert!(!p.is_paused());
         assert_eq!(*p.state.lock().unwrap(), None);
+    }
+
+    #[test]
+    fn dates_are_civil_dates() {
+        assert_eq!(date_for(0), "1970-01-01");
+        assert_eq!(date_for(1_795_478_400), "2026-11-24");
+        assert_eq!(date_for(951_782_400), "2000-02-29");
+        assert_eq!(date_for(-86_400), "1969-12-31");
+        assert_eq!(local_date(0).len(), 10);
     }
 
     #[test]

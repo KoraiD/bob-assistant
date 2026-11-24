@@ -11,6 +11,29 @@ export interface DictationSettings {
   language: string;
   hotkey: HotkeySetting;
   cleanup: Cleanup;
+  tap_to_toggle: boolean;
+  vocabulary: string[];
+  replacements: Replacement[];
+  /** 0 keeps the speech model loaded. */
+  unload_after_min: number;
+}
+export interface Replacement {
+  from: string;
+  to: string;
+}
+export const MAX_WORDS = 200;
+export const MAX_REPLACEMENTS = 200;
+export const UNLOAD_CHOICES: { minutes: number; label: string }[] = [
+  { minutes: 0, label: "Keep it loaded (fastest)" },
+  { minutes: 5, label: "After 5 idle minutes" },
+  { minutes: 15, label: "After 15 idle minutes" },
+  { minutes: 60, label: "After an idle hour" },
+];
+/** Add `word` to the vocabulary unless it is empty or already there (case-insensitive). */
+export function addWord(list: string[], word: string): string[] {
+  const w = word.trim().replace(/\s+/g, " ");
+  if (!w || list.some((x) => x.toLowerCase() === w.toLowerCase()) || list.length >= MAX_WORDS) return list;
+  return [...list, w];
 }
 
 export interface DictationStats {
@@ -23,6 +46,8 @@ export interface DictationStats {
   last_release_to_insert_ms: number | null;
   model_loaded: boolean;
   model_error: string | null;
+  idle_unloaded: boolean;
+  last_available: boolean;
 }
 
 export interface DictationView {
@@ -69,11 +94,16 @@ export function dictationSummary(v: DictationView, hotkeyLabel: string): string 
   if (!model?.installed) return "Download the speech model below to start";
   if (v.microphone === "denied") return "Allow the microphone in System Settings > Privacy & Security > Microphone";
   if (v.stats.model_error) return `The speech model did not load: ${v.stats.model_error}`;
+  if (v.stats.idle_unloaded) return `Resting to save memory. Press ${hotkeyLabel} and BOB loads the model again.`;
   if (!v.stats.model_loaded) return "Loading the speech model...";
-  return `Hold ${hotkeyLabel}, speak, release. Text appears at your cursor.`;
+  return v.settings.tap_to_toggle
+    ? `Hold ${hotkeyLabel} and speak, or tap it to start and tap again to stop. Text appears at your cursor.`
+    : `Hold ${hotkeyLabel}, speak, release. Text appears at your cursor.`;
 }
 
 export const dictationApi = {
   get: () => invoke<DictationView>("dictation_get"),
   setSettings: (settings: DictationSettings) => invoke<void>("dictation_set_settings", { settings }),
+  last: () => invoke<string | null>("dictation_last"),
+  pasteLast: () => invoke<boolean>("dictation_paste_last"),
 };

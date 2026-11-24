@@ -10,7 +10,7 @@ export function Orb({ view, size = 56 }: { view: OrbView; size?: number }) {
     <div className="flex items-center gap-3" data-testid="orb" data-state={view.state}>
       <div className={`orb orb-${view.state}`} style={{ width: size + 16, height: size + 16 }}>
         <span className="orb-ring" aria-hidden="true" />
-        <GhostMark size={size} float={view.state === "idle" || view.state === "haunting"} />
+        <GhostMark size={size} float={view.state === "idle" || view.state === "haunting"} interactive />
       </div>
       <p role="status" aria-live="polite" className="text-xs" style={{ color: view.state === "error" ? "var(--accent-2)" : "var(--text-muted)" }}>
         {orbLabel(view)}

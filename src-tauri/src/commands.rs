@@ -350,6 +350,23 @@ pub async fn ghost_memory_forget(
     Ok(ghost.forget_phrase(&text))
 }
 
+/// Add a phrase by hand (Ghost card). False when it would not be kept (too short or secret-like).
+#[tauri::command]
+pub async fn ghost_memory_add(ghost: State<'_, GhostHandle>, text: String) -> Result<bool, String> {
+    let before = ghost.memory();
+    ghost.remember(&text);
+    Ok(ghost.memory() != before)
+}
+
+#[tauri::command]
+pub async fn ghost_memory_edit(
+    ghost: State<'_, GhostHandle>,
+    old: String,
+    new: String,
+) -> Result<bool, String> {
+    Ok(ghost.edit_phrase(&old, &new))
+}
+
 #[tauri::command]
 pub async fn ghost_memory_clear(ghost: State<'_, GhostHandle>) -> Result<(), String> {
     ghost.clear_memory();
@@ -585,4 +602,45 @@ pub async fn dictation_set_settings(
         .map_err(|e| format!("cannot save the settings: {e}"))?;
     push_dictation(&app);
     Ok(())
+}
+
+/// The last dictation while it is still in memory (two minutes), for "Copy last dictation".
+#[tauri::command]
+pub async fn dictation_last(
+    dictation: State<'_, crate::dictation::engine::DictationHandle>,
+) -> Result<Option<String>, String> {
+    Ok(dictation.last_dictation())
+}
+
+/// Type the last dictation again at the caret (menu bar). False when there is none.
+#[tauri::command]
+pub async fn dictation_paste_last(
+    dictation: State<'_, crate::dictation::engine::DictationHandle>,
+) -> Result<bool, String> {
+    Ok(dictation.paste_last())
+}
+
+// ---- Statistics, this Mac ----
+
+#[tauri::command]
+pub async fn usage_get() -> Result<crate::usage::UsageView, String> {
+    Ok(crate::usage::view())
+}
+
+#[tauri::command]
+pub async fn usage_clear() -> Result<(), String> {
+    crate::usage::clear();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn system_info() -> Result<crate::system::SystemInfo, String> {
+    tauri::async_runtime::spawn_blocking(crate::system::info)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn running_apps() -> Result<Vec<crate::system::RunningApp>, String> {
+    Ok(crate::system::running_apps())
 }

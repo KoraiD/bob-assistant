@@ -13,6 +13,7 @@
 //! the user allows it for that brain (PC-6; off by default for cloud brains). Nothing here is logged.
 
 pub mod profile;
+pub mod typography;
 
 use crate::ghost::redact;
 use crate::protocol::{ContextScope, NativeEvent};
@@ -87,6 +88,10 @@ pub struct ContextSettings {
     /// Empty: answer in the language of the text. Otherwise a language name, e.g. "English".
     pub language: String,
     pub ghost: GhostLayers,
+    /// Quote style for everything BOB types (Ghost Text, dictation, rewrites).
+    pub quotes: typography::Quotes,
+    /// US or UK spelling for what brains write (Selection Actions, dictation cleanup).
+    pub spelling: typography::Spelling,
 }
 
 impl ContextSettings {
@@ -372,6 +377,14 @@ impl ContextHub {
         if let Some(t) = s.tone.instruction() {
             style.push(t.to_string());
         }
+        if let Some(t) = s.spelling.instruction() {
+            style.push(t.to_string());
+        }
+        match s.quotes {
+            typography::Quotes::Straight => style.push("Use straight quotes (\" and ').".into()),
+            typography::Quotes::Curly => style.push("Use typographic quotes (“ ” ‘ ’).".into()),
+            typography::Quotes::Keep => {}
+        }
         let lang = s.sanitized_language();
         if language_rule {
             style.push(if lang.is_empty() {
@@ -625,6 +638,8 @@ mod tests {
                 memory: true,
                 ..Default::default()
             },
+            quotes: typography::Quotes::Curly,
+            spelling: typography::Spelling::Uk,
         };
         h.set_settings(s.clone()).unwrap();
         h.set_profile("# Me").unwrap();

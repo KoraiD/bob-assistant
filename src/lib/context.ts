@@ -3,6 +3,18 @@ import { invoke } from "@tauri-apps/api/core";
 // Mirrors src-tauri/src/context/mod.rs and commands.rs (serde snake_case).
 export type ContextScope = "accessibility" | "active_window" | "all_screens";
 export type Tone = "natural" | "friendly" | "professional" | "concise";
+export type Quotes = "keep" | "straight" | "curly";
+export type Spelling = "any" | "us" | "uk";
+export const QUOTES: { id: Quotes; label: string }[] = [
+  { id: "keep", label: "As written" },
+  { id: "straight", label: "Straight \"quotes\" and 'apostrophes'" },
+  { id: "curly", label: "Curly “quotes” and ’apostrophes’" },
+];
+export const SPELLINGS: { id: Spelling; label: string }[] = [
+  { id: "any", label: "No preference" },
+  { id: "us", label: "American (color, organize)" },
+  { id: "uk", label: "British (colour, organise)" },
+];
 
 export interface GhostLayers {
   profile: boolean;
@@ -16,6 +28,8 @@ export interface ContextSettings {
   tone: Tone;
   language: string;
   ghost: GhostLayers;
+  quotes: Quotes;
+  spelling: Spelling;
 }
 
 export interface VisibleSummary {

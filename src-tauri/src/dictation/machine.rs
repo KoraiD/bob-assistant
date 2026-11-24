@@ -9,6 +9,8 @@ pub struct Config {
     pub min_hold_ms: u64,
     /// VD-11: recordings stop at this length.
     pub max_ms: u64,
+    /// Proposal 3: a quick tap latches recording on; the next press stops it.
+    pub tap_to_toggle: bool,
 }
 
 impl Default for Config {
@@ -16,6 +18,7 @@ impl Default for Config {
         Self {
             min_hold_ms: 250,
             max_ms: 300_000,
+            tap_to_toggle: false,
         }
     }
 }
@@ -24,6 +27,10 @@ impl Default for Config {
 pub enum State {
     Idle,
     Recording {
+        started_ms: u64,
+    },
+    /// Hands-free recording after a quick tap (tap-to-toggle); the next press stops it.
+    Latched {
         started_ms: u64,
     },
     Transcribing,
@@ -90,6 +97,27 @@ pub fn step(state: &State, input: Input, cfg: Config, cleanup: bool) -> (State, 
             vec![StartRecording, Orb(self::Orb::Listening)],
         ),
         (State::Recording { started_ms }, Release { at_ms }) => {
+            if at_ms.saturating_sub(*started_ms) < cfg.min_hold_ms && cfg.tap_to_toggle {
+                (
+                    State::Latched {
+                        started_ms: *started_ms,
+                    },
+                    vec![],
+                )
+            } else if at_ms.saturating_sub(*started_ms) < cfg.min_hold_ms {
+                (
+                    State::Idle,
+                    vec![StopRecording { transcribe: false }, Orb(self::Orb::Hidden)],
+                )
+            } else {
+                (
+                    State::Transcribing,
+                    vec![StopRecording { transcribe: true }, Orb(self::Orb::Thinking)],
+                )
+            }
+        }
+        // A second press ends a latched recording (a near-instant double tap is still discarded).
+        (State::Latched { started_ms }, Press { at_ms }) => {
             if at_ms.saturating_sub(*started_ms) < cfg.min_hold_ms {
                 (
                     State::Idle,
@@ -102,7 +130,7 @@ pub fn step(state: &State, input: Input, cfg: Config, cleanup: bool) -> (State, 
                 )
             }
         }
-        (State::Recording { started_ms }, Tick { at_ms })
+        (State::Recording { started_ms } | State::Latched { started_ms }, Tick { at_ms })
             if at_ms.saturating_sub(*started_ms) >= cfg.max_ms =>
         {
             (
@@ -128,7 +156,7 @@ pub fn step(state: &State, input: Input, cfg: Config, cleanup: bool) -> (State, 
             };
             (State::Idle, vec![Insert(text), Orb(self::Orb::Done)])
         }
-        (State::Recording { .. }, Failed { reason }) => (
+        (State::Recording { .. } | State::Latched { .. }, Failed { reason }) => (
             State::Idle,
             vec![
                 StopRecording { transcribe: false },
@@ -252,6 +280,50 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_tap_latches_when_toggle_is_on_and_the_next_press_stops() {
+        let cfg = Config {
+            tap_to_toggle: true,
+            ..Config::default()
+        };
+        let mut state = State::Idle;
+        let mut out = vec![];
+        for i in [
+            Input::Press { at_ms: 0 },
+            Input::Release { at_ms: 120 },
+            Input::Release { at_ms: 130 },
+            Input::Press { at_ms: 4_000 },
+            Input::Release { at_ms: 4_100 },
+            Input::Transcript {
+                text: "Hands free.".into(),
+                speech: true,
+            },
+        ] {
+            let (s, o) = step(&state, i, cfg, false);
+            if out.is_empty() && o.is_empty() {
+                assert!(matches!(s, State::Latched { .. }) || s == State::Idle);
+            }
+            state = s;
+            out.extend(o);
+        }
+        assert_eq!(state, State::Idle);
+        assert_eq!(
+            out.iter()
+                .filter(|o| matches!(o, Output::StopRecording { transcribe: true }))
+                .count(),
+            1
+        );
+        assert!(out.contains(&Output::Insert("Hands free.".into())));
+        // A long hold still behaves as push-to-talk.
+        let (s, _) = step(
+            &State::Recording { started_ms: 0 },
+            Input::Release { at_ms: 900 },
+            cfg,
+            false,
+        );
+        assert_eq!(s, State::Transcribing);
+    }
+
     fn arb_input() -> impl Strategy<Value = (u8, u64, bool, bool)> {
         (0u8..7, 0u64..400_000, any::<bool>(), any::<bool>())
     }
@@ -263,8 +335,8 @@ mod tests {
         /// - every start is matched by exactly one stop, and
         /// - after the results arrive the machine is Idle.
         #[test]
-        fn p1_holds_cap_and_termination(raw in proptest::collection::vec(arb_input(), 0..60), cleanup in any::<bool>()) {
-            let cfg = Config::default();
+        fn p1_holds_cap_and_termination(raw in proptest::collection::vec(arb_input(), 0..60), cleanup in any::<bool>(), toggle in any::<bool>()) {
+            let cfg = Config { tap_to_toggle: toggle, ..Config::default() };
             let mut state = State::Idle;
             let mut now = 0u64;
             let mut last_hold: Option<u64> = None;
@@ -281,10 +353,13 @@ mod tests {
                     _ => Input::Tick { at_ms: now + cfg.max_ms },
                 };
                 let mut cap_hit = false;
-                if let (State::Recording { started_ms }, Input::Tick { at_ms }) = (&state, &input) {
+                if let (State::Recording { started_ms } | State::Latched { started_ms }, Input::Tick { at_ms }) = (&state, &input) {
                     if at_ms - started_ms >= cfg.max_ms { last_hold = Some(at_ms - started_ms); cap_hit = true; }
                 }
                 if let (State::Recording { started_ms }, Input::Release { at_ms }) = (&state, &input) {
+                    last_hold = Some(at_ms - started_ms);
+                }
+                if let (State::Latched { started_ms }, Input::Press { at_ms }) = (&state, &input) {
                     last_hold = Some(at_ms - started_ms);
                 }
                 let (next, out) = step(&state, input, cfg, cleanup);
@@ -300,12 +375,15 @@ mod tests {
                     }
                 }
                 if cap_hit {
-                    prop_assert!(!matches!(next, State::Recording { .. }), "recording continued past the cap");
+                    prop_assert!(!matches!(next, State::Recording { .. } | State::Latched { .. }), "recording continued past the cap");
                 }
                 state = next;
             }
             prop_assert!(stops <= starts && starts <= stops + 1);
-            // Drain: release, a transcript and a cleanup result always bring it home.
+            // Drain: release (or a second press when latched), a transcript and a cleanup result always bring it home.
+            if matches!(state, State::Latched { .. }) {
+                state = step(&state, Input::Press { at_ms: now + cfg.max_ms }, cfg, cleanup).0;
+            }
             for input in [
                 Input::Release { at_ms: now + cfg.min_hold_ms },
                 Input::Transcript { text: "done".into(), speech: true },

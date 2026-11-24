@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { isTauri } from "../lib/appInfo";
 import { api, formatBytes, percent, type ProgressEvent } from "../lib/brains";
-import { CLEANUPS, DICTATION_HOTKEYS, dictationApi, dictationSummary, LANGUAGES, type DictationSettings, type DictationView } from "../lib/dictation";
+import {
+  addWord,
+  CLEANUPS,
+  DICTATION_HOTKEYS,
+  dictationApi,
+  dictationSummary,
+  LANGUAGES,
+  MAX_REPLACEMENTS,
+  UNLOAD_CHOICES,
+  type DictationSettings,
+  type DictationView,
+  type Replacement,
+} from "../lib/dictation";
 import { hotkeyPreset } from "../lib/selection";
 import { useTauriEvent } from "../lib/useTauriEvent";
 
@@ -88,7 +100,7 @@ export function DictationCard() {
 
       <div className="mt-4 flex flex-wrap gap-4 text-sm">
         <label className="flex items-center gap-2">
-          Hold to talk
+          Hotkey
           <select aria-label="Dictation hotkey" value={presetFor(s.hotkey)?.id ?? "custom"} onChange={(e) => {
             const p = DICTATION_HOTKEYS.find((h) => h.id === e.currentTarget.value);
             if (p) void save({ hotkey: p.hotkey });
@@ -121,6 +133,27 @@ export function DictationCard() {
           Uses the Dictation brain (Brains tab). If it is not ready, BOB types what you said unchanged.
         </p>
       )}
+      <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={s.tap_to_toggle} onChange={(e) => void save({ tap_to_toggle: e.currentTarget.checked })} aria-label="Tap to start and stop" />
+          Tap to start, tap again to stop
+        </label>
+        <label className="flex items-center gap-2">
+          Free the model's memory
+          <select aria-label="Unload the speech model" value={s.unload_after_min} onChange={(e) => void save({ unload_after_min: Number(e.currentTarget.value) })} className="rounded-lg px-2 py-1" style={field}>
+            {UNLOAD_CHOICES.map((c) => (
+              <option key={c.minutes} value={c.minutes}>{c.label}</option>
+            ))}
+            {!UNLOAD_CHOICES.some((c) => c.minutes === s.unload_after_min) && <option value={s.unload_after_min}>After {s.unload_after_min} idle minutes</option>}
+          </select>
+        </label>
+      </div>
+      <p className="mt-2 text-xs" style={muted} data-testid="voice-edit-hint">
+        Voice edit: select text first, then hold {preset?.label ?? "the hotkey"} and say what to change, for example “make this friendlier” or “translate to German”. Uses the Selection Actions brain.
+      </p>
+      {st.last_available && <LastDictation onError={setError} />}
+      <Vocabulary words={s.vocabulary} onSave={(vocabulary) => save({ vocabulary })} />
+      <Replacements rules={s.replacements} onSave={(replacements) => save({ replacements })} />
 
       <ul className="mt-4 space-y-2" aria-label="Speech models">
         {view.models.map((m) => {
@@ -171,5 +204,122 @@ export function DictationCard() {
         Speech is recognized on this Mac by whisper.cpp. Audio is never saved or sent anywhere. Never types into password fields.
       </p>
     </section>
+  );
+}
+
+/** Copy the last dictation (kept in memory for two minutes) in case it landed in the wrong place. */
+function LastDictation({ onError }: { onError: (e: string) => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      const text = await dictationApi.last();
+      if (!text) return onError("The last dictation is gone (BOB keeps it for two minutes).");
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      onError(String(e));
+    }
+  };
+  return (
+    <p className="mt-2 flex items-center gap-2 text-xs" style={muted}>
+      <button type="button" onClick={() => void copy()} className="rounded-full px-3 py-0.5" style={field}>
+        {copied ? "Copied" : "Copy last dictation"}
+      </button>
+      Or choose Type Last Dictation Again in the menu bar. Forgotten after two minutes.
+    </p>
+  );
+}
+
+/** Names and terms whisper should expect. Saved on every change. */
+function Vocabulary({ words, onSave }: { words: string[]; onSave: (w: string[]) => Promise<void> }) {
+  const [draft, setDraft] = useState("");
+  const add = async () => {
+    const next = draft
+      .split(",")
+      .reduce((list, w) => addWord(list, w), words);
+    setDraft("");
+    if (next !== words) await onSave(next);
+  };
+  return (
+    <details className="mt-4" data-testid="vocabulary">
+      <summary className="cursor-pointer text-sm">
+        Vocabulary <span style={muted}>({words.length})</span>
+      </summary>
+      <p className="mt-2 text-xs" style={muted}>
+        Names and terms BOB should recognize, like “Kiroween” or a colleague's name. Separate several with commas.
+      </p>
+      {words.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Vocabulary">
+          {words.map((w) => (
+            <li key={w} className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs" style={field}>
+              {w}
+              <button type="button" aria-label={`Remove ${w}`} onClick={() => void onSave(words.filter((x) => x !== w))} style={muted}>
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className="mt-2 flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void add();
+        }}
+      >
+        <input aria-label="New word" placeholder="Add a word or name" value={draft} maxLength={400} onChange={(e) => setDraft(e.currentTarget.value)} className="min-w-0 flex-1 rounded-lg px-2 py-1 text-sm" style={field} />
+        <button type="submit" disabled={!draft.trim()} className="rounded-full px-3 text-xs disabled:opacity-50" style={field}>
+          Add
+        </button>
+      </form>
+    </details>
+  );
+}
+
+/** "Say this, type that" rules, edited as rows and saved together. */
+function Replacements({ rules, onSave }: { rules: Replacement[]; onSave: (r: Replacement[]) => Promise<void> }) {
+  const [drafts, setDrafts] = useState<Replacement[] | null>(null);
+  const rows = drafts ?? rules;
+  const edit = (i: number, patch: Partial<Replacement>) => setDrafts(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const save = async () => {
+    await onSave(rows.filter((r) => r.from.trim()));
+    setDrafts(null);
+  };
+  return (
+    <details className="mt-3" data-testid="replacements">
+      <summary className="cursor-pointer text-sm">
+        Text replacements <span style={muted}>({rules.length})</span>
+      </summary>
+      <p className="mt-2 text-xs" style={muted}>
+        When you say the words on the left, BOB types the text on the right, for example “my email” → your address.
+      </p>
+      <ul className="mt-2 space-y-2">
+        {rows.map((r, i) => (
+          <li key={i} className="flex flex-wrap items-center gap-2">
+            <input aria-label={`Replacement ${i + 1}: when I say`} placeholder="When I say" value={r.from} maxLength={64} onChange={(e) => edit(i, { from: e.currentTarget.value })} className="w-40 rounded-lg px-2 py-1 text-sm" style={field} />
+            <span aria-hidden style={muted}>→</span>
+            <input aria-label={`Replacement ${i + 1}: type`} placeholder="Type this" value={r.to} maxLength={500} onChange={(e) => edit(i, { to: e.currentTarget.value })} className="min-w-48 flex-1 rounded-lg px-2 py-1 text-sm" style={field} />
+            <button type="button" aria-label={`Remove replacement ${i + 1}`} onClick={() => setDrafts(rows.filter((_, j) => j !== i))} className="rounded-full px-3 text-xs" style={field}>
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 flex items-center gap-2 text-xs">
+        <button type="button" disabled={rows.length >= MAX_REPLACEMENTS} onClick={() => setDrafts([...rows, { from: "", to: "" }])} className="rounded-full px-3 py-1 disabled:opacity-50" style={field}>
+          Add replacement
+        </button>
+        <button
+          type="button"
+          disabled={drafts === null}
+          onClick={() => void save()}
+          className="rounded-full px-3 py-1 disabled:opacity-50"
+          style={drafts ? { background: "var(--accent)", color: "var(--accent-fg)" } : field}
+        >
+          Save replacements
+        </button>
+      </div>
+    </details>
   );
 }

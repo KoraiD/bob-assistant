@@ -12,7 +12,7 @@ let view: ContextView;
 
 beforeEach(() => {
   view = {
-    settings: { scope: "accessibility", tone: "natural", language: "", ghost: { profile: false, memory: false, window: false, screen: false } },
+    settings: { scope: "accessibility", tone: "natural", language: "", ghost: { profile: false, memory: false, window: false, screen: false }, quotes: "keep", spelling: "any" },
     profile: "",
     profile_path: "/Users/me/Library/Application Support/dev.bob.assistant/profile.md",
     template: "# About me ✍️\n",

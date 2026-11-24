@@ -8,7 +8,9 @@ import {
   byteLength,
   contextApi,
   ghostLayers,
+  QUOTES,
   SCOPES,
+  SPELLINGS,
   TONES,
   type ContextPreview,
   type ContextSettings,
@@ -147,9 +149,41 @@ export function PersonalizePanel() {
             </select>
           </label>
           <LanguageField value={s.language} onCommit={(language) => void update({ language })} />
+          <label className="flex items-center gap-2">
+            Spelling
+            <select
+              aria-label="Spelling"
+              value={s.spelling}
+              onChange={(e) => void update({ spelling: e.currentTarget.value as ContextSettings["spelling"] })}
+              className="rounded-lg px-2 py-1"
+              style={{ background: "var(--surface-raised)", border: "1px solid var(--border)" }}
+            >
+              {SPELLINGS.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2">
+            Quotes
+            <select
+              aria-label="Quotes"
+              value={s.quotes}
+              onChange={(e) => void update({ quotes: e.currentTarget.value as ContextSettings["quotes"] })}
+              className="rounded-lg px-2 py-1"
+              style={{ background: "var(--surface-raised)", border: "1px solid var(--border)" }}
+            >
+              {QUOTES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         <p className="mt-2 text-xs" style={muted}>
-          Used by Selection Actions and Dictation cleanup.
+          Tone, language and spelling guide Selection Actions and Dictation cleanup. The quote style applies to everything BOB types: Ghost Text, dictation and rewrites.
         </p>
       </Card>
 

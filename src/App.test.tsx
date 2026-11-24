@@ -57,7 +57,7 @@ describe("App shell", () => {
 
   it("exposes an accessible name for the ghost mark", () => {
     render(<App />);
-    expect(screen.getAllByRole("img", { name: /friendly ghost/i }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /friendly ghost/i })).toBeInTheDocument();
   });
 
   it("has a sidebar with every panel (UI-1) and switches panels by keyboard", async () => {

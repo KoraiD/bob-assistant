@@ -90,10 +90,39 @@ impl SelectionHandle {
     pub fn stats(&self) -> SelectionStats {
         self.shared.stats.lock().expect("selection stats").clone()
     }
+
+    /// Voice edit (proposal 1): apply a spoken `instruction` to the selected `text` and replace it.
+    pub fn voice_edit(&self, text: String, instruction: String) {
+        let _ = self.tx.send(Input::VoiceEdit { text, instruction });
+    }
+}
+
+/// The action for a spoken instruction. The instruction may name a language ("in German"), so the
+/// "answer in" rule is left out.
+pub fn voice_action(instruction: &str) -> Action {
+    let instruction: String = instruction
+        .trim()
+        .chars()
+        .take(actions::MAX_INSTRUCTION_CHARS)
+        .collect();
+    Action {
+        label: "Voice edit".into(),
+        progress: "Applying your instruction".into(),
+        instruction: format!(
+            "Task (spoken by the user): {instruction}\nApply this instruction to the user's text. If the \
+             instruction is not about editing the text, make the smallest sensible edit, or return the text unchanged."
+        ),
+        sets_language: true,
+        summary: false,
+    }
 }
 
 enum Input {
     Native(NativeEvent),
+    VoiceEdit {
+        text: String,
+        instruction: String,
+    },
     Preview {
         generation: u64,
         text: String,
@@ -115,9 +144,18 @@ struct Capture {
 
 enum State {
     Idle,
-    Menu { capture: Capture, menu: Vec<Action> },
-    Running { capture: Capture, action: Action },
-    Replacing,
+    Menu {
+        capture: Capture,
+        menu: Vec<Action>,
+    },
+    Running {
+        capture: Capture,
+        action: Action,
+        voice: bool,
+    },
+    Replacing {
+        voice: bool,
+    },
 }
 
 pub fn spawn(
@@ -196,6 +234,7 @@ impl Engine {
     }
 
     fn fail(&mut self, message: &str) {
+        crate::usage::record(|d| d.rewrite_failures += 1);
         self.stats(|s| {
             s.failed += 1;
             s.last_error = Some(message.to_string());
@@ -219,11 +258,18 @@ impl Engine {
                 self.state = State::Idle;
             }
             Input::Native(NativeEvent::ReplaceResult { ok, error, .. }) => {
-                if !matches!(self.state, State::Replacing) {
+                let State::Replacing { voice } = self.state else {
                     return;
-                }
+                };
                 if ok {
                     self.stats(|s| s.replaced += 1);
+                    crate::usage::record(|d| {
+                        if voice {
+                            d.voice_edits += 1
+                        } else {
+                            d.rewrites += 1
+                        }
+                    });
                     self.state = State::Idle;
                     self.status("Done. Cmd+Z undoes it.", false, false, Some(DONE_HIDE));
                 } else {
@@ -238,6 +284,7 @@ impl Engine {
                 self.state = State::Idle;
             }
             Input::Native(_) => {}
+            Input::VoiceEdit { text, instruction } => self.on_voice_edit(text, instruction),
             Input::Preview { generation, text } => {
                 if generation != self.generation {
                     return;
@@ -261,7 +308,7 @@ impl Engine {
                     return;
                 }
                 self.task = None;
-                let State::Running { capture, .. } =
+                let State::Running { capture, voice, .. } =
                     std::mem::replace(&mut self.state, State::Idle)
                 else {
                     return;
@@ -269,7 +316,12 @@ impl Engine {
                 match result {
                     Err(e) => self.fail(&e),
                     Ok(raw) => {
-                        let text = clean::clean(&raw, &capture.text);
+                        let quotes = self.context.settings().quotes;
+                        let text = crate::context::typography::apply(
+                            &clean::clean(&raw, &capture.text),
+                            quotes,
+                            None,
+                        );
                         if text.trim().is_empty() {
                             return self.fail("The brain returned no text.");
                         }
@@ -283,7 +335,7 @@ impl Engine {
                                 Some(DONE_HIDE),
                             );
                         }
-                        self.state = State::Replacing;
+                        self.state = State::Replacing { voice };
                         self.sink.send(CoreCommand::ReplaceSelection {
                             expected: capture.text,
                             text,
@@ -357,6 +409,37 @@ impl Engine {
         let Some(action) = menu.get(index).cloned() else {
             return;
         };
+        self.start(capture, action, false);
+    }
+
+    fn on_voice_edit(&mut self, text: String, instruction: String) {
+        self.cancel();
+        self.generation += 1;
+        self.state = State::Idle;
+        if instruction.trim().is_empty() {
+            return self.status(
+                "I didn't catch an instruction, so nothing changed.",
+                false,
+                true,
+                Some(ERROR_HIDE),
+            );
+        }
+        if text.trim().is_empty() {
+            return;
+        }
+        let n = text.chars().count();
+        if n > MAX_CHARS {
+            return self.status(
+                &format!("That selection is too long ({n} characters; the limit is {MAX_CHARS})."),
+                false,
+                true,
+                Some(ERROR_HIDE),
+            );
+        }
+        self.start(Capture { text }, voice_action(&instruction), true);
+    }
+
+    fn start(&mut self, capture: Capture, action: Action, voice: bool) {
         self.generation += 1;
         let generation = self.generation;
         self.stats(|s| s.runs += 1);
@@ -378,7 +461,11 @@ impl Engine {
                 ms: started.elapsed().as_millis() as u64,
             });
         }));
-        self.state = State::Running { capture, action };
+        self.state = State::Running {
+            capture,
+            action,
+            voice,
+        };
     }
 }
 

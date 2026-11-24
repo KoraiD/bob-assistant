@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import type { GhostMemory, GhostStatus, Snapshot } from "../lib/brains";
@@ -42,6 +42,18 @@ beforeEach(() => {
         memory = { phrases: memory.phrases.filter((p) => p.text !== args!.text) };
         status = { ...status, memory_count: memory.phrases.length };
         return true;
+      case "running_apps":
+        return [{ bundle_id: "com.apple.Safari", name: "Safari" }, { bundle_id: "com.googlecode.iterm2", name: "iTerm" }];
+      case "ghost_memory_add": {
+        const text = String(args!.text).trim();
+        if (text.length < 2) return false;
+        memory = { phrases: [{ text, uses: 1 }, ...memory.phrases] };
+        status = { ...status, memory_count: memory.phrases.length };
+        return true;
+      }
+      case "ghost_memory_edit":
+        memory = { phrases: memory.phrases.map((p) => (p.text === args!.old ? { ...p, text: String(args!.new) } : p)) };
+        return true;
       case "ghost_memory_clear":
         memory = { phrases: [] };
         status = { ...status, memory_count: 0 };
@@ -65,29 +77,61 @@ afterEach(() => {
 });
 
 describe("GhostCard", () => {
-  it("lists quiet and recent apps and silences an app", async () => {
+  it("removes a quiet app, adds one from running and recent apps, or by bundle id", async () => {
     render(<GhostCard />);
-    const notes = await screen.findByRole("switch", { name: "Quiet in Notes" });
-    expect(notes).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByRole("switch", { name: "Quiet in iTerm" })).toHaveAttribute("aria-checked", "true");
-    await userEvent.click(notes);
-    expect(invoke).toHaveBeenCalledWith("ghost_set_quiet", { bundleId: "com.apple.Notes", name: "Notes", quiet: true });
-    await waitFor(() => expect(screen.getByRole("switch", { name: "Quiet in Notes" })).toHaveAttribute("aria-checked", "true"));
+    await userEvent.click(await screen.findByText("Quiet apps"));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("running_apps"));
+    expect(screen.getByRole("list", { name: "Quiet apps" })).toHaveTextContent("iTerm");
+    // Running and recent apps that are not quiet yet are offered.
+    const add = await screen.findByRole("button", { name: "Quiet in Safari" });
+    expect(screen.getByRole("button", { name: "Quiet in Notes" })).toBeInTheDocument();
+    await userEvent.click(add);
+    expect(invoke).toHaveBeenCalledWith("ghost_set_quiet", { bundleId: "com.apple.Safari", name: "Safari", quiet: true });
+    await waitFor(() => expect(screen.getByRole("list", { name: "Quiet apps" })).toHaveTextContent("Safari"));
+    // Search narrows both lists.
+    await userEvent.type(screen.getByLabelText("Search apps"), "term");
+    expect(screen.getByRole("list", { name: "Quiet apps" })).not.toHaveTextContent("Safari");
+    expect(screen.queryByRole("button", { name: "Quiet in Notes" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Let Ghost Text haunt iTerm again" }));
+    expect(invoke).toHaveBeenCalledWith("ghost_set_quiet", { bundleId: "com.googlecode.iterm2", name: "iTerm", quiet: false });
+    // A typed bundle id is checked before it is sent.
+    await userEvent.type(screen.getByLabelText("Bundle id"), "not a bundle{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("com.company.App");
+    await userEvent.clear(screen.getByLabelText("Bundle id"));
+    await userEvent.type(screen.getByLabelText("Bundle id"), "com.example.Secret{Enter}");
+    expect(invoke).toHaveBeenCalledWith("ghost_set_quiet", { bundleId: "com.example.Secret", name: "", quiet: true });
   });
 
-  it("fetches memory only when opened, and forgets it on request", async () => {
+  it("fetches memory only when opened; adds, edits, forgets and clears with confirmation", async () => {
     render(<GhostCard />);
     const summary = await screen.findByText("Remembered phrases");
     expect(invoke).not.toHaveBeenCalledWith("ghost_memory");
     await userEvent.click(summary);
     expect(await screen.findByText("as soon as I can")).toBeInTheDocument();
     expect(screen.getByText("×3")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: 'Forget "lazy dog"' }));
-    expect(invoke).toHaveBeenCalledWith("ghost_memory_forget", { text: "lazy dog" });
-    await waitFor(() => expect(screen.queryByText("lazy dog")).not.toBeInTheDocument());
-    await userEvent.click(screen.getByRole("button", { name: "Forget all" }));
+
+    await userEvent.type(screen.getByLabelText("New phrase"), "Best regards{Enter}");
+    expect(invoke).toHaveBeenCalledWith("ghost_memory_add", { text: "Best regards" });
+    expect(await screen.findByText("Best regards")).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("New phrase"), "x{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("at least two letters");
+
+    await userEvent.click(screen.getByRole("button", { name: 'Edit "lazy dog"' }));
+    const input = screen.getByRole("textbox", { name: 'Edit "lazy dog"' });
+    await userEvent.clear(input);
+    await userEvent.type(input, "lazy fox{Enter}");
+    expect(invoke).toHaveBeenCalledWith("ghost_memory_edit", { old: "lazy dog", new: "lazy fox" });
+    expect(await screen.findByText("lazy fox")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: 'Forget "lazy fox"' }));
+    expect(invoke).toHaveBeenCalledWith("ghost_memory_forget", { text: "lazy fox" });
+    await waitFor(() => expect(screen.queryByText("lazy fox")).not.toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: "Forget all…" }));
+    expect(invoke).not.toHaveBeenCalledWith("ghost_memory_clear");
+    await userEvent.click(within(screen.getByRole("group", { name: "Confirm forgetting" })).getByRole("button", { name: "Forget all" }));
     expect(invoke).toHaveBeenCalledWith("ghost_memory_clear");
     expect(await screen.findByText("Nothing remembered yet.")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Forget all" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Forget all…" })).not.toBeInTheDocument());
   });
 });

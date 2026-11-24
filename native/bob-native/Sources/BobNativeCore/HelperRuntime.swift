@@ -30,6 +30,8 @@ public final class HelperRuntime: @unchecked Sendable {
     private let transcriber = Transcriber()
     private var dictationModel: String?
     private var dictationLanguage = ""
+    /// Vocabulary hint passed to whisper (custom words).
+    private var dictationPrompt: String?
     /// Last known caret (AX coordinates), to place the orb.
     private var lastCaret: Rect?
     private var client: SocketClient?
@@ -123,7 +125,8 @@ public final class HelperRuntime: @unchecked Sendable {
             SelectionIO.replace(expected: expected, text: text, pid: selectionPID) { [weak self] ok, method, error in
                 try? self?.client?.send(NativeEvent.replaceResult(ok: ok, method: method, error: error))
             }
-        case let .setDictation(hotkey, modelPath, language):
+        case let .setDictation(hotkey, modelPath, language, prompt):
+            dictationPrompt = prompt
             configureDictation(hotkey: hotkey, modelPath: modelPath, language: language)
         case .startRecording:
             startRecording()
@@ -224,6 +227,16 @@ public final class HelperRuntime: @unchecked Sendable {
                 DispatchQueue.main.async { self?.sendPermissions() }
             }
         }
+        // Voice edit: if text is selected (Accessibility only, never the clipboard while a key is held),
+        // the spoken words become an instruction for it. The replacement goes to this app.
+        if let element = AXReader.focusedElement(),
+           AXReader.string(element, kAXSubroleAttribute) != (kAXSecureTextFieldSubrole as String),
+           let selected = AXReader.string(element, kAXSelectedTextAttribute), !selected.isEmpty,
+           let front = NSWorkspace.shared.frontmostApplication {
+            selectionPID = front.processIdentifier
+            try? client?.send(NativeEvent.dictationSelection(appBundleId: front.bundleIdentifier ?? "",
+                                                            text: String(selected.prefix(SelectionIO.maxChars + 1))))
+        }
         do {
             try recorder.start()
         } catch let failure as AudioRecorder.Failure {
@@ -242,7 +255,7 @@ public final class HelperRuntime: @unchecked Sendable {
             return
         }
         let language = dictationLanguage.isEmpty ? nil : dictationLanguage
-        transcriber.transcribe(samples, language: language) { [weak self] result in
+        transcriber.transcribe(samples, language: language, prompt: dictationPrompt) { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
                 case let .success(r):

@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 pub const SETTINGS_FILE: &str = "dictation-settings.json";
+pub const MAX_WORDS: usize = 200;
+pub const MAX_WORD_CHARS: usize = 64;
+pub const MAX_REPLACEMENTS: usize = 200;
 pub const DEFAULT_MODEL: &str = "whisper-large-v3-turbo-q5";
 
 /// Optional brain pass over the transcript (VD-6). Off by default: whisper already punctuates, and a
@@ -55,6 +58,78 @@ pub struct DictationSettings {
     /// Hold-to-talk hotkey. Default Option+Space (spec VD-1); `kVK_Space` is 49.
     pub hotkey: HotkeySetting,
     pub cleanup: Cleanup,
+    /// A quick tap starts recording and a second tap stops it (hold still works as push-to-talk).
+    pub tap_to_toggle: bool,
+    /// Names and terms whisper should expect (passed as a vocabulary hint).
+    pub vocabulary: Vec<String>,
+    /// Applied to every transcript before typing, whole words, case-insensitive ("brb" -> "be right back").
+    pub replacements: Vec<Replacement>,
+    /// Free the speech model's memory after this many idle minutes (0 = keep it loaded).
+    pub unload_after_min: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Replacement {
+    pub from: String,
+    pub to: String,
+}
+
+/// whisper's vocabulary hint for `words` (None when empty). Bounded so the prompt stays short.
+pub fn vocabulary_prompt(words: &[String]) -> Option<String> {
+    let list: Vec<&str> = words
+        .iter()
+        .map(String::as_str)
+        .filter(|w| !w.is_empty())
+        .collect();
+    if list.is_empty() {
+        return None;
+    }
+    let mut out = String::from("Glossary: ");
+    for (i, w) in list.iter().enumerate() {
+        if out.len() + w.len() > 600 {
+            break;
+        }
+        if i > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(w);
+    }
+    out.push('.');
+    Some(out)
+}
+
+/// Apply replacements: each `from` matches as a whole word or phrase, case-insensitively; longer phrases
+/// first, so "see you soon" wins over "see". A replacement is never re-applied to its own output.
+pub fn apply_replacements(text: &str, rules: &[Replacement]) -> String {
+    let mut rules: Vec<&Replacement> = rules.iter().filter(|r| !r.from.trim().is_empty()).collect();
+    rules.sort_by_key(|r| std::cmp::Reverse(r.from.trim().chars().count()));
+    let chars: Vec<char> = text.chars().collect();
+    let lower: Vec<char> = text.to_lowercase().chars().collect();
+    if lower.len() != chars.len() {
+        return text.to_string(); // a case mapping changed the length (rare scripts): leave the text alone
+    }
+    let is_word = |c: char| c.is_alphanumeric() || c == '\'';
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    'outer: while i < chars.len() {
+        if i == 0 || !is_word(chars[i - 1]) {
+            for r in &rules {
+                let from: Vec<char> = r.from.trim().to_lowercase().chars().collect();
+                let end = i + from.len();
+                if end <= chars.len()
+                    && lower[i..end] == from[..]
+                    && (end == chars.len() || !is_word(chars[end]))
+                {
+                    out.push_str(&r.to);
+                    i = end;
+                    continue 'outer;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
 }
 
 impl Default for DictationSettings {
@@ -68,6 +143,10 @@ impl Default for DictationSettings {
                 modifiers: vec!["option".into()],
             },
             cleanup: Cleanup::None,
+            tap_to_toggle: true,
+            vocabulary: vec![],
+            replacements: vec![],
+            unload_after_min: 0,
         }
     }
 }
@@ -109,6 +188,33 @@ impl DictationSettings {
             } else {
                 String::new()
             };
+        let one_line = |s: &str, max: usize| -> String {
+            s.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(max)
+                .collect()
+        };
+        let mut seen = std::collections::HashSet::new();
+        self.vocabulary = self
+            .vocabulary
+            .iter()
+            .map(|w| one_line(w, MAX_WORD_CHARS))
+            .filter(|w| !w.is_empty() && seen.insert(w.to_lowercase()))
+            .take(MAX_WORDS)
+            .collect();
+        self.replacements = self
+            .replacements
+            .iter()
+            .map(|r| Replacement {
+                from: one_line(&r.from, MAX_WORD_CHARS),
+                to: r.to.trim().chars().take(500).collect(),
+            })
+            .filter(|r| !r.from.is_empty())
+            .take(MAX_REPLACEMENTS)
+            .collect();
+        self.unload_after_min = self.unload_after_min.min(24 * 60);
         self
     }
 }
@@ -160,6 +266,64 @@ mod tests {
         std::fs::write(&p, "{bad").unwrap();
         assert_eq!(DictationSettings::load(&p), DictationSettings::default());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn r(from: &str, to: &str) -> Replacement {
+        Replacement {
+            from: from.into(),
+            to: to.into(),
+        }
+    }
+
+    #[test]
+    fn replacements_match_whole_words_case_insensitively_longest_first() {
+        let rules = [
+            r("brb", "be right back"),
+            r("see", "SEE"),
+            r("see you soon", "cu"),
+        ];
+        assert_eq!(
+            apply_replacements("BRB, see you soon!", &rules),
+            "be right back, cu!"
+        );
+        assert_eq!(apply_replacements("seed the brbx", &rules), "seed the brbx");
+        assert_eq!(apply_replacements("I see.", &rules), "I SEE.");
+        assert_eq!(
+            apply_replacements("brb brb", &[r("brb", "brb now")]),
+            "brb now brb now"
+        );
+        assert_eq!(apply_replacements("x", &[r("  ", "y")]), "x");
+    }
+
+    #[test]
+    fn vocabulary_becomes_a_bounded_whisper_hint_and_settings_are_cleaned() {
+        assert_eq!(vocabulary_prompt(&[]), None);
+        assert_eq!(
+            vocabulary_prompt(&["Kiroween".into(), "Dávid".into()]).as_deref(),
+            Some("Glossary: Kiroween, Dávid.")
+        );
+        let many: Vec<String> = (0..300).map(|i| format!("word{i}")).collect();
+        assert!(vocabulary_prompt(&many).unwrap().len() <= 620);
+        let s = DictationSettings {
+            vocabulary: vec![" Kiro\nween ".into(), "kiro ween".into(), "".into()],
+            replacements: vec![r(" ", "x"), r(" brb ", "be right back")],
+            unload_after_min: 99_999,
+            ..Default::default()
+        }
+        .sanitized();
+        assert_eq!(s.vocabulary, vec!["Kiro ween".to_string()]);
+        assert_eq!(s.replacements, vec![r("brb", "be right back")]);
+        assert_eq!(s.unload_after_min, 1440);
+        assert!(DictationSettings::default().tap_to_toggle);
+    }
+
+    proptest::proptest! {
+        /// Without matching rules nothing changes.
+        #[test]
+        fn replacements_never_touch_unmatched_text(text in "\\PC{0,80}") {
+            proptest::prop_assert_eq!(apply_replacements(&text, &[]), text.clone());
+            proptest::prop_assert_eq!(apply_replacements(&text, &[r("zzqqxx", "y")]), text);
+        }
     }
 
     #[test]

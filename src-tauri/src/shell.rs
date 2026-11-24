@@ -105,6 +105,13 @@ pub fn build_tray(app: &tauri::App, ghost_on: bool, dictation_on: bool) -> tauri
         None::<&str>,
     )?;
     let resume = MenuItem::with_id(app, "resume", "Resume BOB", false, None::<&str>)?;
+    let paste_last = MenuItem::with_id(
+        app,
+        "paste-last",
+        "Type Last Dictation Again",
+        true,
+        None::<&str>,
+    )?;
     let open = MenuItem::with_id(app, "open", "Open BOB", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit BOB", true, Some("Cmd+Q"))?;
@@ -117,6 +124,7 @@ pub fn build_tray(app: &tauri::App, ghost_on: bool, dictation_on: bool) -> tauri
             &sep()?,
             &ghost,
             &dictation,
+            &paste_last,
             &sep()?,
             &pause_hour,
             &pause_tomorrow,
@@ -166,6 +174,13 @@ fn on_tray_menu(app: &AppHandle, id: &str) {
                 crate::commands::push_dictation(app);
             }
             changed(app);
+        }
+        "paste-last" => {
+            if let Some(d) = app.try_state::<DictationHandle>() {
+                if !d.paste_last() {
+                    log::info!("no recent dictation to type again");
+                }
+            }
         }
         "pause-hour" => {
             set_pause(app, Some(PauseFor::Hour));

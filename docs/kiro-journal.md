@@ -177,3 +177,18 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
   calls in one struct literal keep the first guard alive until the end of the statement. The fix locks once, a
   regression test runs the view on a thread with a 2 s timeout, and a scan found no other statement locking the same
   mutex twice.
+## 2026-11-24: Task 11, features from the research
+- **Owner picked eight proposals** from docs/RESEARCH.md plus four requests (quiet-apps and phrases editors, open at
+  login, statistics, a mouse-reactive ghost). Everything landed in one pass with tests first where the logic is pure.
+- **Voice edit reused two engines:** the helper notices a selection when recording starts and sends a separate
+  event; the dictation engine hands the transcript to the Selection engine as an instruction. No new brain code, and
+  the selection-unchanged guard for replacement still applies.
+- **Tap to toggle changed the state machine, not the engine:** one new `Latched` state. The P1 property test now runs
+  with the toggle on and off, which is what made the change safe.
+- **Open at login, verified instead of assumed:** the startup log showed `SMAppService` reports "not found" for this
+  build, which is why the switch had no effect. A LaunchAgent fallback fixed it; an ignored test writes and removes
+  the real plist, run once on this Mac.
+- **Trust boundary found while building the quiet-apps editor:** typing a bundle id by hand meant arbitrary strings
+  could reach `ghost-settings.json`. The core now validates them, with a test.
+- **Tests now:** Rust 222 + 2 end-to-end (+4 ignored), Swift 84, Vitest 122 (axe audits of all eight panels).
+

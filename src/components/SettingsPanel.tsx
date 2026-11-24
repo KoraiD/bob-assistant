@@ -138,7 +138,7 @@ export function SettingsPanel({ build, theme, onTheme, onTour }: { build: string
           <li><kbd>Tab</kbd> / <kbd>⇧Tab</kbd> / <kbd>Esc</kbd>: take a word / take all / dismiss a suggestion</li>
           <li><kbd>⌘⇧J</kbd>: Selection Actions (change it in Selection Actions)</li>
           <li><kbd>⌥Space</kbd> (hold): Voice Dictation (change it in Voice Dictation)</li>
-          <li><kbd>⌘1</kbd> to <kbd>⌘7</kbd>: switch panels · <kbd>⌘,</kbd>: Settings</li>
+          <li><kbd>⌘1</kbd> to <kbd>⌘8</kbd>: switch panels · <kbd>⌘,</kbd>: Settings</li>
         </ul>
       </section>
 
@@ -154,7 +154,7 @@ export function SettingsPanel({ build, theme, onTheme, onTour }: { build: string
 
       <section aria-label="About BOB" className="soft-card panel-in flex items-center gap-5 p-5">
         <div className="shrink-0">
-          <GhostMark size={56} float />
+          <GhostMark size={56} float interactive />
         </div>
         <div>
           <h2 className="text-lg font-medium">BOB: Bring Your Own Brain</h2>

@@ -3,6 +3,22 @@
 All notable changes to BOB. Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
 ## [Unreleased]
+### Added (Task 11, from user research)
+- Voice edit: select text, hold ⌥Space and say what to change ("make this friendlier", "translate to German"); the Selection brain rewrites the selection (⌘Z undoes it).
+- Dictation vocabulary (names and terms whisper should expect) and text replacements ("my email" → your address).
+- Tap to toggle: a quick tap of the dictation hotkey starts hands-free recording, the next press stops it. Holding still works.
+- Last dictation kept in memory for two minutes: Type Last Dictation Again (menu bar) and Copy last dictation (card).
+- Optional idle unload of the speech model (5, 15 or 60 minutes) to free about 0.9 GB; the next press reloads it.
+- Writing style: straight or curly quotes for everything BOB types; American or British spelling for brains.
+- Statistics panel (⌘7): words BOB typed for you today, this week and overall, time saved, a 14-day chart, Ghost acceptance rate, dictation and rewrite counts. Counts only, clearable.
+- The welcome tour recommends models for your Mac (chip and memory).
+- Quiet apps editor: search, one-click add from running and recent apps, add by bundle id, remove. Phrases editor: add, edit inline, delete, search, forget all with confirmation.
+- The sidebar ghost follows the mouse with its eyes, blushes and wiggles on hover, and bounces and talks when clicked (reduced motion respected).
+### Fixed
+- Open at login did nothing in builds macOS does not register as login items; BOB now falls back to a LaunchAgent.
+- Hand-typed quiet-app bundle ids are validated in the core (letters, digits, `.`, `-`, `_`; at most 255 characters).
+### Changed
+- Settings moved to ⌘8 (⌘, still opens it).
 
 ### Added (Task 10, polish and hardening)
 - Settings panel (⌘,): open at login (macOS Login Items), Dock icon on/off, open the window at launch, pause, theme, keyboard shortcuts.

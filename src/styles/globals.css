@@ -115,11 +115,90 @@
   animation: panel-in 240ms ease-out both;
 }
 
+/* The interactive ghost: hover wiggle and blush, click bounce, blink, and a speech bubble. */
+.ghost-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  line-height: 0;
+}
+.ghost-blush {
+  transition: opacity 200ms ease;
+}
+.ghost-blink {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scaleY(0.12);
+}
+@keyframes ghost-wiggle {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-6deg);
+  }
+  75% {
+    transform: rotate(6deg);
+  }
+}
+@keyframes ghost-bounce {
+  0% {
+    transform: translateY(0) scale(1, 1);
+  }
+  30% {
+    transform: translateY(-10px) scale(0.94, 1.08);
+  }
+  55% {
+    transform: translateY(0) scale(1.08, 0.92);
+  }
+  75% {
+    transform: translateY(-3px) scale(0.98, 1.02);
+  }
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+}
+.ghost-wiggle {
+  animation: ghost-wiggle 600ms ease-in-out infinite;
+  filter: drop-shadow(var(--glow));
+}
+.ghost-bounce {
+  animation: ghost-bounce 520ms ease-out;
+  filter: drop-shadow(var(--glow));
+}
+.ghost-bubble-anchor {
+  position: absolute;
+  left: 78%;
+  bottom: 88%;
+  z-index: 30;
+  pointer-events: none;
+}
+.ghost-bubble {
+  display: block;
+  white-space: nowrap;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px 12px 12px 3px;
+  box-shadow: var(--shadow-card);
+  animation: panel-in 180ms ease-out both;
+}
+
 /* Respect the OS reduced-motion setting everywhere. */
 @media (prefers-reduced-motion: reduce) {
   .ghost-float,
-  .panel-in {
+  .panel-in,
+  .ghost-wiggle,
+  .ghost-bounce,
+  .ghost-bubble {
     animation: none;
+  }
+  .ghost-blink {
+    transform: none;
   }
 }
 

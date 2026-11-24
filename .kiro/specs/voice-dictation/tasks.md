@@ -10,3 +10,12 @@ Plan task 8. Tick a box in the same commit as the code.
 - [x] 8. Latency measurement recorded in `docs/PERFORMANCE.md` (_VD-10_): model timings on fixtures; release-to-insert is shown in the card
   - [ ] 8.1 Owner check: real dictation in TextEdit, Mail, Chrome; release-to-insert numbers; an M3 measurement
 - [x] 9. Docs and journal
+## Task 11 additions (owner-chosen proposals, docs/RESEARCH.md)
+- [x] 10. Voice edit over a selection: `dictation_selection` event, `SelectionHandle::voice_edit`, cleanup skipped (engine test)
+- [x] 11. Vocabulary as whisper prompt and text replacements (unit tests for prompt bounds and whole-word replacement)
+- [x] 12. Tap to toggle: `Latched` state, P1 extended to both modes
+- [x] 13. Last dictation kept two minutes; menu bar and card
+- [x] 14. Optional idle unload and reload on press
+- [x] 15. Usage counts for Statistics
+  - [ ] 15.1 Owner check: voice edit in TextEdit and Mail; tap-to-toggle feel; vocabulary on a name whisper usually misses
+

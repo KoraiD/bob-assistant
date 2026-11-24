@@ -124,11 +124,14 @@ public final class ActionMenuPanel: NSPanel {
 
     /// Replace the rows with a status line (wrapping), e.g. "Fixing grammar…" or a streamed preview.
     public func showStatus(_ text: String, busy: Bool, error: Bool) {
+        // Voice edits show a status without a menu first: place the panel before showing it.
+        let needsPlacement = !isVisible
         isMenuVisible = false
         clear()
         let color = error ? Palette.pumpkin : NSColor.white.withAlphaComponent(busy ? 0.75 : 0.95)
         stack.addArrangedSubview(label("👻 BOB", size: 11, color: Palette.ectoplasm.withAlphaComponent(0.85)))
         stack.addArrangedSubview(label(text, color: color, wraps: true))
+        if needsPlacement { place(near: nil) }
         resizeToFit()
         orderFrontRegardless()
     }

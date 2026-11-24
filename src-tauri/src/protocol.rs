@@ -168,6 +168,12 @@ pub enum NativeEvent {
         audio_ms: u32,
         transcribe_ms: u32,
     },
+    /// Text was selected when dictation started (voice edit): the spoken words become an instruction for
+    /// this text instead of being typed. Never sent for secure fields.
+    DictationSelection {
+        app_bundle_id: String,
+        text: String,
+    },
     /// Recording or transcription failed; `reason` is "microphone", "no_model" or a short message.
     DictationError {
         reason: String,
@@ -248,6 +254,9 @@ pub enum CoreCommand {
         hotkey: Option<Hotkey>,
         model_path: Option<String>,
         language: String,
+        /// Vocabulary hint for whisper ("Glossary: ..."), from the user's custom words.
+        #[serde(default)]
+        prompt: Option<String>,
     },
     StartRecording,
     /// Stop recording; transcribe only when `transcribe` (a too-short hold is discarded, VD-4).
@@ -371,6 +380,14 @@ impl fmt::Debug for NativeEvent {
                 .field("speech", speech)
                 .field("audio_ms", audio_ms)
                 .field("transcribe_ms", transcribe_ms)
+                .finish(),
+            NativeEvent::DictationSelection {
+                app_bundle_id,
+                text,
+            } => f
+                .debug_struct("DictationSelection")
+                .field("app_bundle_id", app_bundle_id)
+                .field("text_chars", &text.chars().count())
                 .finish(),
             NativeEvent::DictationError { reason } => f
                 .debug_struct("DictationError")

@@ -83,6 +83,7 @@ public enum NativeEvent: Equatable, Sendable {
     case replaceResult(ok: Bool, method: String?, error: String?)
     case dictationKey(pressed: Bool)
     case transcript(text: String, language: String?, speech: Bool, audioMs: Int, transcribeMs: Int)
+    case dictationSelection(appBundleId: String, text: String)
     case dictationError(reason: String)
     case dictationStatus(modelLoaded: Bool, error: String?)
     case error(message: String)
@@ -107,7 +108,7 @@ public enum CoreCommand: Equatable, Sendable {
     case hideMenu
     case replaceSelection(expected: String, text: String)
     case setHotkey(Hotkey)
-    case setDictation(hotkey: Hotkey?, modelPath: String?, language: String)
+    case setDictation(hotkey: Hotkey?, modelPath: String?, language: String, prompt: String?)
     case startRecording
     case stopRecording(transcribe: Bool)
     case orb(state: OrbState, text: String?)
@@ -178,6 +179,9 @@ extension NativeEvent: Codable {
                                speech: try c.decode(Bool.self, forKey: Keys("speech")),
                                audioMs: try c.decode(Int.self, forKey: Keys("audio_ms")),
                                transcribeMs: try c.decode(Int.self, forKey: Keys("transcribe_ms")))
+        case "dictation_selection":
+            self = .dictationSelection(appBundleId: try c.decode(String.self, forKey: Keys("app_bundle_id")),
+                                       text: try c.decode(String.self, forKey: Keys("text")))
         case "dictation_error":
             self = .dictationError(reason: try c.decode(String.self, forKey: Keys("reason")))
         case "dictation_status":
@@ -255,6 +259,10 @@ extension NativeEvent: Codable {
             try c.encode(speech, forKey: Keys("speech"))
             try c.encode(audioMs, forKey: Keys("audio_ms"))
             try c.encode(transcribeMs, forKey: Keys("transcribe_ms"))
+        case let .dictationSelection(appBundleId, text):
+            try c.encode("dictation_selection", forKey: Keys("type"))
+            try c.encode(appBundleId, forKey: Keys("app_bundle_id"))
+            try c.encode(text, forKey: Keys("text"))
         case let .dictationError(reason):
             try c.encode("dictation_error", forKey: Keys("type"))
             try c.encode(reason, forKey: Keys("reason"))
@@ -310,7 +318,8 @@ extension CoreCommand: Codable {
         case "set_dictation":
             self = .setDictation(hotkey: try c.decodeIfPresent(Hotkey.self, forKey: Keys("hotkey")),
                                  modelPath: try c.decodeIfPresent(String.self, forKey: Keys("model_path")),
-                                 language: try c.decode(String.self, forKey: Keys("language")))
+                                 language: try c.decode(String.self, forKey: Keys("language")),
+                                 prompt: try c.decodeIfPresent(String.self, forKey: Keys("prompt")))
         case "start_recording": self = .startRecording
         case "stop_recording": self = .stopRecording(transcribe: try c.decode(Bool.self, forKey: Keys("transcribe")))
         case "orb":
@@ -365,11 +374,12 @@ extension CoreCommand: Codable {
         case let .setHotkey(hotkey):
             try c.encode("set_hotkey", forKey: Keys("type"))
             try c.encode(hotkey, forKey: Keys("hotkey"))
-        case let .setDictation(hotkey, modelPath, language):
+        case let .setDictation(hotkey, modelPath, language, prompt):
             try c.encode("set_dictation", forKey: Keys("type"))
             try c.encode(hotkey, forKey: Keys("hotkey"))
             try c.encode(modelPath, forKey: Keys("model_path"))
             try c.encode(language, forKey: Keys("language"))
+            try c.encode(prompt, forKey: Keys("prompt"))
         case .startRecording: try c.encode("start_recording", forKey: Keys("type"))
         case let .stopRecording(transcribe):
             try c.encode("stop_recording", forKey: Keys("type"))

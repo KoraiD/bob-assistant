@@ -77,6 +77,42 @@ impl Memory {
         self.phrases.len() != before
     }
 
+    /// Change a phrase in place (keeps its position and use count). False when `old` is missing or `new`
+    /// would not be kept (too short, or looks like a secret). A duplicate of `new` elsewhere is merged.
+    pub fn edit(&mut self, old: &str, new: &str) -> bool {
+        let Some(t) = normalize(new) else {
+            return false;
+        };
+        let key = old.trim().to_lowercase();
+        let Some(i) = self
+            .phrases
+            .iter()
+            .position(|p| p.text.to_lowercase() == key)
+        else {
+            return false;
+        };
+        let new_key = t.to_lowercase();
+        let mut uses = self.phrases[i].uses;
+        let mut j = 0;
+        self.phrases.retain(|p| {
+            let keep = j == i || p.text.to_lowercase() != new_key;
+            if !keep {
+                uses = uses.saturating_add(p.uses);
+            }
+            j += 1;
+            keep
+        });
+        if let Some(p) = self
+            .phrases
+            .iter_mut()
+            .find(|p| p.text.to_lowercase() == key)
+        {
+            p.text = t;
+            p.uses = uses;
+        }
+        true
+    }
+
     /// Up to `n` phrases, most used first; ties keep the most recent first.
     pub fn most_used(&self, n: usize) -> Vec<String> {
         let mut v: Vec<&Phrase> = self.phrases.iter().collect();
@@ -116,6 +152,25 @@ impl Memory {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn editing_keeps_position_merges_duplicates_and_refuses_secrets() {
+        let mut m = Memory::default();
+        for t in ["Best regards", "Kind regards", "see you soon"] {
+            m.record(t);
+        }
+        m.record("Kind regards");
+        // Most recent first: Kind regards (2), see you soon, Best regards.
+        assert!(m.edit("see you soon", "See you soon!"));
+        assert_eq!(m.phrases[1].text, "See you soon!");
+        assert!(m.edit("best regards", "Kind regards"));
+        assert_eq!(m.phrases.len(), 2);
+        let kind = m.phrases.iter().find(|p| p.text == "Kind regards").unwrap();
+        assert_eq!(kind.uses, 3);
+        assert!(!m.edit("missing", "anything"));
+        assert!(!m.edit("Kind regards", "x"));
+        assert!(!m.edit("Kind regards", &format!("sk-{}", "Ab1".repeat(12))));
+    }
 
     #[test]
     fn records_most_recent_first_and_counts_reuse() {

@@ -24,6 +24,8 @@ mod quit_key;
 pub mod selection;
 pub mod shell;
 pub mod supervisor;
+pub mod system;
+pub mod usage;
 
 use app_info::AppInfo;
 use native_ipc::{Bridge, BridgeStatus};
@@ -407,6 +409,8 @@ pub fn run() {
             commands::ghost_memory,
             commands::ghost_memory_clear,
             commands::ghost_memory_forget,
+            commands::ghost_memory_add,
+            commands::ghost_memory_edit,
             commands::context_get,
             commands::context_set_settings,
             commands::context_request_screen_recording,
@@ -417,6 +421,12 @@ pub fn run() {
             commands::selection_set_settings,
             commands::dictation_get,
             commands::dictation_set_settings,
+            commands::dictation_last,
+            commands::dictation_paste_last,
+            commands::usage_get,
+            commands::usage_clear,
+            commands::system_info,
+            commands::running_apps,
             shell::general_get,
             shell::general_set_dock,
             shell::general_set_open_at_launch,
@@ -429,6 +439,9 @@ pub fn run() {
             // PID files in the per-user 0700 runtime dir next to the helper socket.
             let config_dir = app.path().app_config_dir()?;
             let ghost_dir = config_dir.clone();
+            usage::init(config_dir.join(usage::FILE));
+            #[cfg(target_os = "macos")]
+            log::info!("{}", app_settings::describe_login_item());
             let context: commands::Context =
                 std::sync::Arc::new(context::ContextHub::load(config_dir.clone()));
             app.manage(context.clone());
@@ -490,8 +503,9 @@ pub fn run() {
                 let dir = app.path().app_config_dir()?;
                 let models_dir = brains.models_dir().to_path_buf();
                 let ctx = context.clone();
+                let sel = selection.clone();
                 tauri::async_runtime::block_on(async move {
-                    dictation::engine::spawn(brains, ctx, sink, Some(dir), models_dir)
+                    dictation::engine::spawn(brains, ctx, sink, Some(dir), models_dir, Some(sel))
                 })
             };
             app.manage(dictation.clone());
@@ -551,6 +565,7 @@ pub fn run() {
             // Stop the built-in model server before the process exits (it would otherwise keep a model
             // in memory). A crash is covered by the PID file check at the next start.
             if let tauri::RunEvent::Exit = event {
+                usage::flush();
                 if let Some(brains) = app.try_state::<commands::Brains>() {
                     let brains = brains.inner().clone();
                     tauri::async_runtime::block_on(brains.stop_builtin());
@@ -574,6 +589,11 @@ mod tests {
             include_str!("../../src/lib/appInfo.ts"),
             include_str!("../../src/lib/nativeStatus.ts"),
             include_str!("../../src/lib/brains.ts"),
+            include_str!("../../src/lib/dictation.ts"),
+            include_str!("../../src/lib/usage.ts"),
+            include_str!("../../src/lib/general.ts"),
+            include_str!("../../src/lib/context.ts"),
+            include_str!("../../src/lib/selection.ts"),
         ];
         let mut checked = 0;
         for src in ui {

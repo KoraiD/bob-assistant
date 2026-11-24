@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { api, formatBytes, percent, type ModelInfo, type ProgressEvent } from "../lib/brains";
 import { dictationApi } from "../lib/dictation";
 import { accessibilityState, getNativeStatus, microphoneState, onNativeStatus, requestPermissions, DISCONNECTED, type NativeStatus } from "../lib/nativeStatus";
+import { usageApi, type SystemInfo } from "../lib/usage";
 import { useTauriEvent } from "../lib/useTauriEvent";
 import { GhostMark } from "./GhostMark";
 
@@ -38,6 +39,15 @@ function Check({ ok, label, detail }: { ok: boolean; label: string; detail: stri
   );
 }
 
+/** "Recommended for your Mac (Apple M3, 16 GB)" with the reason. */
+function ForYourMac({ info }: { info: SystemInfo | null }) {
+  if (!info) return null;
+  return (
+    <p className="mt-3 rounded-xl p-3 text-xs" style={{ background: "var(--accent-soft)" }} data-testid="wizard-recommendation">
+      <b>Recommended for your Mac</b> ({info.chip}, {info.ram_gb} GB): {info.recommendation.note}
+    </p>
+  );
+}
 /** One downloadable model row with progress. */
 function ModelRow({ model, progress, onDownload }: { model: ModelInfo | undefined; progress?: ProgressEvent; onDownload: () => void }) {
   if (!model) return null;
@@ -73,6 +83,7 @@ export function OnboardingWizard({ onClose }: { onClose: () => void }) {
   const [speech, setSpeech] = useState<ModelInfo[]>([]);
   const [progress, setProgress] = useState<Record<string, ProgressEvent>>({});
   const [error, setError] = useState<string | null>(null);
+  const [system, setSystem] = useState<SystemInfo | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
 
   const refresh = useCallback(async () => {
@@ -80,6 +91,7 @@ export function OnboardingWizard({ onClose }: { onClose: () => void }) {
     try {
       setModels(await api.models());
       setSpeech((await dictationApi.get()).models);
+      setSystem(await usageApi.system());
     } catch {
       /* outside the app */
     }
@@ -108,8 +120,19 @@ export function OnboardingWizard({ onClose }: { onClose: () => void }) {
   const next = () => (index === STEPS.length - 1 ? finish() : setStep(STEPS[index + 1]));
   const back = () => index > 0 && setStep(STEPS[index - 1]);
   const download = (id: string) => void api.download(id).catch((e) => setError(String(e)));
-  const brain = models[0];
-  const voice = speech[0];
+  const rec = system?.recommendation;
+  const brains = rec ? rec.brain_models.map((id) => models.find((m) => m.id === id)).filter((m): m is ModelInfo => !!m) : models.slice(0, 1);
+  const voice = speech.find((m) => m.id === rec?.speech_model) ?? speech[0];
+  /** Download the speech model and make it the one dictation uses. */
+  const downloadVoice = async (id: string) => {
+    download(id);
+    try {
+      const v = await dictationApi.get();
+      if (v.settings.model !== id) await dictationApi.setSettings({ ...v.settings, model: id });
+    } catch (e) {
+      setError(String(e));
+    }
+  };
 
   const pages: Record<Step, { title: string; body: ReactNode }> = {
     welcome: {
@@ -149,8 +172,11 @@ export function OnboardingWizard({ onClose }: { onClose: () => void }) {
       body: (
         <>
           <p className="text-sm" style={muted}>My own brain is a small open model that runs on this Mac (best result in my benchmark, about 1.4 GB of memory). You can also connect Ollama, LM Studio or a cloud brain later in Brains.</p>
-          <div className="mt-4">
-            <ModelRow model={brain} progress={brain && progress[brain.id]} onDownload={() => brain && download(brain.id)} />
+          <ForYourMac info={system} />
+          <div className="mt-4 space-y-2">
+            {brains.map((b) => (
+              <ModelRow key={b.id} model={b} progress={progress[b.id]} onDownload={() => download(b.id)} />
+            ))}
           </div>
         </>
       ),
@@ -159,9 +185,9 @@ export function OnboardingWizard({ onClose }: { onClose: () => void }) {
       title: "Teach me to listen",
       body: (
         <>
-          <p className="text-sm" style={muted}>Speech is recognized on this Mac by whisper. This model understands many languages and needs about a third of a second for a short sentence.</p>
+          <p className="text-sm" style={muted}>Speech is recognized on this Mac by whisper.{voice ? ` ${voice.name}: ${voice.role}.` : ""}{rec && voice?.id === rec.speech_model ? " Picked for your Mac." : ""}</p>
           <div className="mt-4">
-            <ModelRow model={voice} progress={voice && progress[voice.id]} onDownload={() => voice && download(voice.id)} />
+            <ModelRow model={voice} progress={voice && progress[voice.id]} onDownload={() => voice && void downloadVoice(voice.id)} />
           </div>
         </>
       ),

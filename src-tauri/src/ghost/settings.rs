@@ -27,6 +27,9 @@ pub const DEFAULT_QUIET: &[(&str, &str)] = &[
     ("dev.bob.assistant", "BOB"),
 ];
 
+/// Upper bound on the quiet list.
+pub const MAX_QUIET_APPS: usize = 500;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuietApp {
     pub bundle_id: String,
@@ -60,12 +63,27 @@ impl GhostSettings {
     }
 
     /// Add or remove an app from the quiet list. Bundle ids are unique in the list.
+    /// Add or remove a quiet app. Bundle ids typed by hand are checked: letters, digits, `.`, `-` and `_`
+    /// only, at most 255 characters; anything else is ignored. Names become one line of at most 80 chars.
     pub fn set_quiet(&mut self, bundle_id: &str, name: &str, quiet: bool) {
+        let bundle_id = bundle_id.trim();
         self.quiet_apps.retain(|a| a.bundle_id != bundle_id);
-        if quiet && !bundle_id.trim().is_empty() {
+        let valid = !bundle_id.is_empty()
+            && bundle_id.len() <= 255
+            && bundle_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c));
+        if quiet && valid && self.quiet_apps.len() < MAX_QUIET_APPS {
+            let name: String = name
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(80)
+                .collect();
             self.quiet_apps.push(QuietApp {
                 bundle_id: bundle_id.into(),
-                name: name.into(),
+                name,
             });
         }
     }
@@ -98,6 +116,25 @@ impl GhostSettings {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn hand_typed_bundle_ids_are_checked() {
+        let mut g = GhostSettings::default();
+        let n = g.quiet_apps.len();
+        g.set_quiet(" com.example.Notes ", "  My\nNotes ", true);
+        assert_eq!(g.quiet_apps.len(), n + 1);
+        let added = g.quiet_apps.last().unwrap();
+        assert_eq!(
+            (added.bundle_id.as_str(), added.name.as_str()),
+            ("com.example.Notes", "My Notes")
+        );
+        for bad in ["", "com.example/../x", "rm -rf", "a\u{0}b"] {
+            g.set_quiet(bad, "x", true);
+        }
+        assert_eq!(g.quiet_apps.len(), n + 1);
+        g.set_quiet("com.example.Notes", "", false);
+        assert_eq!(g.quiet_apps.len(), n);
+    }
 
     #[test]
     fn terminals_password_managers_and_bob_are_quiet_by_default() {
