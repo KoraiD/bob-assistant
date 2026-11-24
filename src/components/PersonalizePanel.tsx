@@ -8,15 +8,25 @@ import {
   byteLength,
   contextApi,
   ghostLayers,
+  LANGUAGES,
+  languageName,
+  MAX_MODE_INSTRUCTIONS,
+  MAX_PREFERRED,
+  MAX_STYLE_NOTES,
   QUOTES,
   SCOPES,
   SPELLINGS,
   TONES,
+  type AppMode,
   type ContextPreview,
   type ContextSettings,
   type ContextView,
   type Format,
+  type Tone,
 } from "../lib/context";
+import { api, type AppRef } from "../lib/brains";
+import { suggestions } from "./GhostLists";
+import { Toggle } from "./ui";
 
 const muted = { color: "var(--text-muted)" } as const;
 
@@ -185,6 +195,8 @@ export function PersonalizePanel() {
         <p className="mt-2 text-xs" style={muted}>
           Tone, language and spelling guide Selection Actions and Dictation cleanup. The quote style applies to everything BOB types: Ghost Text, dictation and rewrites.
         </p>
+        <PreferredLanguages value={s.languages} onChange={(languages) => void update({ languages })} />
+        <StyleNotes value={s.style_notes} onCommit={(style_notes) => void update({ style_notes })} />
       </Card>
 
       <Card title="Ghost Text context (experimental)" label="Ghost Text context">
@@ -193,18 +205,235 @@ export function PersonalizePanel() {
         </p>
         <div className="space-y-2 text-sm">
           <label className="flex items-center gap-2">
-            <input type="checkbox" checked={s.ghost.memory} onChange={(e) => void update({ ghost: ghostLayers(e.currentTarget.checked, false) })} />
+            <input type="checkbox" checked={s.ghost.memory} onChange={(e) => void update({ ghost: ghostLayers(e.currentTarget.checked, false, s.ghost) })} />
             Use my remembered phrases
           </label>
           <label className="ml-6 flex items-center gap-2" style={s.ghost.memory ? undefined : muted}>
-            <input type="checkbox" disabled={!s.ghost.memory} checked={s.ghost.window} onChange={(e) => void update({ ghost: ghostLayers(true, e.currentTarget.checked) })} />
+            <input type="checkbox" disabled={!s.ghost.memory} checked={s.ghost.window} onChange={(e) => void update({ ghost: ghostLayers(true, e.currentTarget.checked, s.ghost) })} />
             Also use the window title (about 7 ms more)
           </label>
+          <label className="flex items-center gap-2" style={s.languages.length ? undefined : muted}>
+            <input
+              type="checkbox"
+              disabled={s.languages.length === 0}
+              checked={s.ghost.language_hint}
+              onChange={(e) => void update({ ghost: { ...s.ghost, language_hint: e.currentTarget.checked } })}
+            />
+            Tell the brain which languages I write in {s.languages.length === 0 && "(pick them under Writing style)"}
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={s.ghost.clipboard} onChange={(e) => void update({ ghost: { ...s.ghost, clipboard: e.currentTarget.checked } })} />
+            Use text I copied in the last two minutes
+          </label>
+          {s.ghost.clipboard && (
+            <p className="ml-6 text-xs" style={muted}>
+              BOB checks the clipboard once a second for changes, reads only plain text, and skips items password managers mark as private, copies in quiet apps and its own copies.
+              Also given to Selection Actions brains you allow personal context.
+            </p>
+          )}
         </div>
+        <p className="mt-2 text-xs" style={muted}>
+          Suggestions in a language you do not write are always dropped (for example a Vietnamese suggestion after a Hungarian “Hát.”).
+        </p>
       </Card>
+
+      <AppModesCard settings={s} onChange={(app_modes) => void update({ app_modes })} />
 
       <PreviewCard />
     </div>
+  );
+}
+
+/** The languages the user writes in, most used first. */
+function PreferredLanguages({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const left = LANGUAGES.filter((l) => !value.includes(l.code));
+  return (
+    <div className="mt-4">
+      <div className="text-sm font-medium">Languages I write in</div>
+      <p className="text-xs" style={muted}>
+        Ghost Text drops suggestions in other languages; rewrites keep to these. Most used first, up to {MAX_PREFERRED}.
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5" role="list" aria-label="Languages I write in">
+        {value.map((code, i) => (
+          <span key={code} role="listitem" className="flex items-center gap-1 rounded-md px-2 py-0.5 text-xs" style={{ background: "var(--surface-raised)", border: "1px solid var(--border-strong)" }}>
+            {languageName(code)}
+            {i > 0 && (
+              <button type="button" aria-label={`Move ${languageName(code)} up`} title="Move up" onClick={() => onChange([...value.slice(0, i - 1), code, value[i - 1], ...value.slice(i + 1)])} style={muted}>
+                ↑
+              </button>
+            )}
+            <button type="button" aria-label={`Remove ${languageName(code)}`} onClick={() => onChange(value.filter((c) => c !== code))} style={muted}>
+              ✕
+            </button>
+          </span>
+        ))}
+        {value.length < MAX_PREFERRED && (
+          <select
+            aria-label="Add a language"
+            value=""
+            onChange={(e) => e.currentTarget.value && onChange([...value, e.currentTarget.value])}
+            className="mac-field text-xs"
+          >
+            <option value="">Add…</option>
+            {left.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StyleNotes({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return (
+    <label className="mt-4 block">
+      <span className="text-sm font-medium">Style notes</span>
+      <span className="block text-xs" style={muted}>
+        For rewrites and dictation cleanup, for example “short sentences, no emoji, sign as Dávid”.
+      </span>
+      <textarea
+        aria-label="Style notes"
+        value={draft}
+        maxLength={MAX_STYLE_NOTES}
+        rows={2}
+        onChange={(e) => setDraft(e.currentTarget.value)}
+        onBlur={() => draft !== value && onCommit(draft.trim())}
+        className="mac-field mt-1 w-full"
+      />
+    </label>
+  );
+}
+
+/** Per-app modes: tone, language and instructions per app, plus Ghost Text on or off there (the quiet list). */
+function AppModesCard({ settings, onChange }: { settings: ContextSettings; onChange: (m: AppMode[]) => void }) {
+  const [apps, setApps] = useState<AppRef[]>([]);
+  const [quiet, setQuiet] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState<string | null>(null);
+  const reload = useCallback(async () => {
+    try {
+      const [running, g] = await Promise.all([api.runningApps(), api.ghostStatus()]);
+      setApps(suggestions(g, running));
+      setQuiet(new Set(g.quiet_apps.map((a) => a.bundle_id)));
+    } catch {
+      /* outside the app */
+    }
+  }, []);
+  useEffect(() => void reload(), [reload]);
+  const modes = settings.app_modes;
+  const edit = (id: string, patch: Partial<AppMode>) => onChange(modes.map((m) => (m.bundle_id === id ? { ...m, ...patch } : m)));
+  const add = (a: AppRef) => {
+    onChange([...modes, { bundle_id: a.bundle_id, name: a.name, tone: null, language: "", instructions: "" }]);
+    setOpen(a.bundle_id);
+  };
+  const candidates = apps.filter((a) => !modes.some((m) => m.bundle_id === a.bundle_id));
+  return (
+    <Card title="Per-app modes" label="Per-app modes">
+      <p className="mb-2 text-xs" style={muted}>
+        A different tone, language or instructions for Selection Actions and dictation cleanup in one app, for example casual in Slack and formal in Mail.
+      </p>
+      <ul className="space-y-2" aria-label="App modes">
+        {modes.map((m) => (
+          <li key={m.bundle_id} className="rounded-lg p-2" style={{ background: "var(--surface-raised)" }}>
+            <div className="flex items-center gap-2">
+              <button type="button" className="min-w-0 flex-1 truncate text-left text-sm font-medium" aria-expanded={open === m.bundle_id} onClick={() => setOpen(open === m.bundle_id ? null : m.bundle_id)}>
+                {m.name || m.bundle_id}
+                <span className="ml-2 text-xs font-normal" style={muted}>
+                  {[m.tone && TONES.find((t) => t.id === m.tone)?.label, m.language && languageName(m.language), m.instructions && "instructions"].filter(Boolean).join(" · ") || "default style"}
+                </span>
+              </button>
+              <label className="flex items-center gap-1.5 text-xs">
+                Ghost Text
+                <Toggle
+                  label={`Ghost Text in ${m.name || m.bundle_id}`}
+                  on={!quiet.has(m.bundle_id)}
+                  onChange={(on) => void api.ghostSetQuiet({ bundle_id: m.bundle_id, name: m.name }, !on).then(reload)}
+                />
+              </label>
+              <button type="button" aria-label={`Remove the mode for ${m.name || m.bundle_id}`} onClick={() => onChange(modes.filter((x) => x.bundle_id !== m.bundle_id))} style={muted}>
+                ✕
+              </button>
+            </div>
+            {open === m.bundle_id && (
+              <div className="mt-2 grid gap-2 text-sm">
+                <div className="flex flex-wrap gap-3">
+                  <label className="flex items-center gap-2">
+                    Tone
+                    <select aria-label={`Tone in ${m.name}`} value={m.tone ?? ""} onChange={(e) => edit(m.bundle_id, { tone: (e.currentTarget.value || null) as Tone | null })} className="mac-field">
+                      <option value="">Same as everywhere</option>
+                      {TONES.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2">
+                    Answer in
+                    <select aria-label={`Language in ${m.name}`} value={m.language} onChange={(e) => edit(m.bundle_id, { language: e.currentTarget.value })} className="mac-field">
+                      <option value="">Same as everywhere</option>
+                      {LANGUAGES.map((l) => (
+                        <option key={l.code} value={l.code}>
+                          {l.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <ModeInstructions value={m.instructions} name={m.name} onCommit={(instructions) => edit(m.bundle_id, { instructions })} />
+              </div>
+            )}
+          </li>
+        ))}
+        {modes.length === 0 && (
+          <li className="text-xs" style={muted}>
+            No app modes yet.
+          </li>
+        )}
+      </ul>
+      {candidates.length > 0 && (
+        <label className="mt-3 flex items-center gap-2 text-sm">
+          Add a mode for
+          <select
+            aria-label="Add a mode for an app"
+            value=""
+            onChange={(e) => {
+              const a = candidates.find((c) => c.bundle_id === e.currentTarget.value);
+              if (a) add(a);
+            }}
+            className="mac-field"
+          >
+            <option value="">Choose an app…</option>
+            {candidates.map((a) => (
+              <option key={a.bundle_id} value={a.bundle_id}>
+                {a.name || a.bundle_id}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+    </Card>
+  );
+}
+
+function ModeInstructions({ value, name, onCommit }: { value: string; name: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  return (
+    <textarea
+      aria-label={`Instructions for ${name}`}
+      placeholder="For example: keep it to one or two lines, no greeting."
+      value={draft}
+      maxLength={MAX_MODE_INSTRUCTIONS}
+      rows={2}
+      onChange={(e) => setDraft(e.currentTarget.value)}
+      onBlur={() => draft !== value && onCommit(draft.trim())}
+      className="mac-field w-full"
+    />
   );
 }
 

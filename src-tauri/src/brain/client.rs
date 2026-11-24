@@ -220,7 +220,7 @@ async fn send(rb: reqwest::RequestBuilder) -> Result<reqwest::Response, BrainErr
         return Err(BrainError::Unauthorized(status));
     }
     if !(200..300).contains(&status) {
-        let text = resp.text().await.unwrap_or_default();
+        let text = read_bounded(resp, MAX_ERROR_BODY).await;
         let message = serde_json::from_str::<serde_json::Value>(&text)
             .ok()
             .and_then(|v| {
@@ -232,6 +232,24 @@ async fn send(rb: reqwest::RequestBuilder) -> Result<reqwest::Response, BrainErr
         return Err(BrainError::Http { status, message });
     }
     Ok(resp)
+}
+
+/// Most bytes read from an error response (servers may return whole HTML pages).
+pub const MAX_ERROR_BODY: usize = 64 * 1024;
+/// Most bytes of one streamed answer. Suggestions and rewrites are a few kilobytes; a server that keeps
+/// sending is cut off instead of filling memory.
+pub const MAX_STREAM_BYTES: usize = 8 << 20;
+
+async fn read_bounded(resp: reqwest::Response, max: usize) -> String {
+    let mut body = resp.bytes_stream();
+    let mut out: Vec<u8> = vec![];
+    while let Some(Ok(chunk)) = body.next().await {
+        out.extend_from_slice(&chunk[..chunk.len().min(max - out.len())]);
+        if out.len() >= max {
+            break;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn describe(e: &reqwest::Error) -> String {
@@ -256,6 +274,7 @@ fn events(
         pending: VecDeque<SseItem>,
         parse: P,
         finished: bool,
+        received: usize,
     }
     let state = State {
         body: Box::pin(resp.bytes_stream()),
@@ -263,6 +282,7 @@ fn events(
         pending: VecDeque::new(),
         parse,
         finished: false,
+        received: 0,
     };
     Box::pin(futures_util::stream::unfold(state, |mut st| async move {
         loop {
@@ -295,7 +315,17 @@ fn events(
                 }
             }
             match st.body.next().await {
-                Some(Ok(bytes)) => st.pending.extend(st.decoder.push(&bytes)),
+                Some(Ok(bytes)) => {
+                    st.received += bytes.len();
+                    if st.received > MAX_STREAM_BYTES {
+                        st.finished = true;
+                        return Some((
+                            Err(BrainError::Protocol("the answer is too large".into())),
+                            st,
+                        ));
+                    }
+                    st.pending.extend(st.decoder.push(&bytes));
+                }
                 Some(Err(e)) => {
                     st.finished = true;
                     return Some((Err(BrainError::Unreachable(describe(&e))), st));
@@ -364,6 +394,35 @@ mod tests {
         let sent = server.last_request().json();
         assert_eq!(sent["cache_prompt"], true);
         assert_eq!(sent["prompt"], "Hello wor");
+    }
+
+    /// A server that never stops talking is cut off instead of filling memory.
+    #[tokio::test]
+    async fn an_endless_answer_is_cut_off_at_the_size_limit() {
+        let chunk = format!(r#"{{"content":"{}","stop":false}}"#, "x".repeat(60_000));
+        let n = MAX_STREAM_BYTES / 60_000 + 20;
+        let server = TestServer::start(move |_| {
+            let events: Vec<&str> = std::iter::repeat_n(chunk.as_str(), n).collect();
+            Response::sse(&events, Duration::ZERO)
+        })
+        .await;
+        let brain = HttpBrain::new(config(ProviderKind::Builtin, &server.base), None).unwrap();
+        let out = collect(
+            brain
+                .complete_stream(&CompletionRequest::ghost("x"))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let received: usize = out
+            .iter()
+            .filter_map(|r| r.as_ref().ok())
+            .map(String::len)
+            .sum();
+        assert!(received <= MAX_STREAM_BYTES, "{received}");
+        assert!(
+            matches!(out.last(), Some(Err(BrainError::Protocol(m))) if m.contains("too large"))
+        );
     }
 
     #[tokio::test]

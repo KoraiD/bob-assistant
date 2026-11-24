@@ -217,7 +217,12 @@ fn split_keep_spaces(s: &str) -> Vec<&str> {
 
 /// Whether the polished chip is complete, so the stream can be dropped early (saves generation time).
 pub fn is_final(chip: &str) -> bool {
-    chip.ends_with(['.', '!', '?', '。', '！', '？', '"', ')'])
+    // A closing quote or bracket ends the chip only after sentence punctuation (`done."`), not in the
+    // middle of a sentence (`it's "fine" today`), which the Ghost matrix test caught.
+    let t = chip.trim_end_matches(['"', ')', '”', '’', '\'']);
+    let closed = t.len() < chip.len();
+    let sentence = t.ends_with(['.', '!', '?', '。', '！', '？']);
+    (sentence && (closed || chip == t))
         || chip.split_whitespace().count() >= MAX_WORDS
         || chip.chars().count() >= MAX_CHARS - 4
 }
@@ -260,6 +265,15 @@ pub fn accept_word(chip: &str) -> (String, String) {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn a_quote_ends_a_chip_only_after_sentence_punctuation() {
+        assert!(!is_final(" it's \"fine\""));
+        assert!(!is_final(" (see below)"));
+        assert!(is_final(" he said \"done.\""));
+        assert!(is_final(" today."));
+        assert!(is_final(" really?)"));
+    }
 
     #[test]
     fn real_drift_examples_are_cut_at_the_sentence_end() {

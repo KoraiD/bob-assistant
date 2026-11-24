@@ -18,4 +18,5 @@ Plan task 8. Tick a box in the same commit as the code.
 - [x] 14. Optional idle unload and reload on press
 - [x] 15. Usage counts for Statistics
   - [ ] 15.1 Owner check: voice edit in TextEdit and Mail; tap-to-toggle feel; vocabulary on a name whisper usually misses
-
+## Task 12a additions
+- [x] 16. Start and stop sounds (proposal 12): synthesized in the helper, trimmed from the recording, switch in the card (Swift test)

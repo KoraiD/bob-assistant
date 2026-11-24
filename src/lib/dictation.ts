@@ -16,6 +16,8 @@ export interface DictationSettings {
   replacements: Replacement[];
   /** 0 keeps the speech model loaded. */
   unload_after_min: number;
+  /** Soft start and stop sounds. */
+  sounds: boolean;
 }
 export interface Replacement {
   from: string;

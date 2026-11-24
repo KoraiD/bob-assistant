@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Toggle } from "./ui";
 import { isTauri } from "../lib/appInfo";
 import { api, ghostSummary, type GhostStatus, type Snapshot } from "../lib/brains";
 import { PhraseEditor, QuietAppsEditor } from "./GhostLists";
@@ -41,23 +42,13 @@ export function GhostCard() {
     <section aria-label="Ghost Text" className="soft-card panel-in mt-6 p-5">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-medium">Ghost Text</h2>
+          <h3 className="sr-only">Ghost Text</h3>
           <p className="text-sm" style={{ color: "var(--text-muted)" }} data-testid="ghost-summary">
             {summary}
           </p>
         </div>
         {status && (
-          <button
-            type="button"
-            role="switch"
-            aria-checked={status.enabled}
-            aria-label="Ghost Text"
-            onClick={toggle}
-            className="rounded-full px-4 py-1.5 text-sm font-medium"
-            style={status.enabled ? { background: "var(--accent)", color: "var(--accent-fg)" } : { background: "var(--surface-raised)", color: "var(--text-muted)", border: "1px solid var(--border-strong)" }}
-          >
-            {status.enabled ? "On" : "Off"}
-          </button>
+          <Toggle label="Ghost Text" on={status.enabled} onChange={() => void toggle()} />
         )}
       </div>
       {s && s.chips_shown > 0 && (

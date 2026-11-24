@@ -55,7 +55,7 @@ pub fn save(path: &Path, text: &str) -> Result<(), ProfileError> {
         std::fs::create_dir_all(dir).map_err(io)?;
     }
     let tmp = path.with_extension("md.tmp");
-    std::fs::write(&tmp, text).map_err(io)?;
+    crate::fsutil::write_private_file(&tmp, text).map_err(io)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

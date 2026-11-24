@@ -26,6 +26,13 @@ What BOB protects, how, and how it is checked. Privacy (what data goes where) is
 | Audio stays in the helper's memory, never on disk | `AudioRecorder.swift`, `Transcriber.swift` |
 | Downloads: pinned URL, size cap, SHA-256 before install, resumable | `brain/models.rs` (property test) |
 | Third-party binaries (llama-server, whisper.xcframework): pinned version and SHA-256 | `scripts/versions.env`, fetch scripts |
+| Files with personal data are created 0600, written to a temporary file, synced, then renamed; the settings folder is 0700 | `fsutil.rs` (test) |
+| A brain server cannot exhaust memory: 8 MB per streamed answer, 64 KB per error body, 4 MB per SSE event | `brain/client.rs`, `brain/sse.rs` (tests) |
+| Local sockets accept only processes of the same user (`getpeereid`), and the helper must say hello within 5 s | `native_ipc.rs`, `mcp.rs` (tests) |
+| AI agents (MCP) are off by default; when on: same rules as the hotkeys, 60 calls per minute, 256 KB per request, every call audited | `mcp.rs` (tests) |
+| Logs and the activity trail never contain text; every log line and audit value is redacted as a safety net | `logging.rs`, `audit.rs` (tests) |
+| One panicked thread cannot take the rest of BOB down through poisoned locks; panics are logged and audited | all `Mutex` use, `install_panic_hook` |
+| Clipboard context skips concealed and transient pasteboard items and quiet apps | `ClipboardWatcher.swift` (tests) |
 
 ## Dependency advisories
 `make audit` runs `cargo audit` (RustSec) and `npm audit`; CI runs both on every push.

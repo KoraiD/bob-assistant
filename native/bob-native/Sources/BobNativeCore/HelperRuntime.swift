@@ -22,6 +22,8 @@ public final class HelperRuntime: @unchecked Sendable {
     private let screen = ScreenContext()
     private let hotkeys = HotkeyCenter()
     private let menu = ActionMenuPanel()
+    /// Copied text for the optional clipboard context (off unless the core turns it on).
+    private let clipboardWatcher = ClipboardWatcher()
     /// The app whose selection the menu is working on (SA-7: replacement only goes there).
     private var selectionPID: pid_t = 0
     // Voice Dictation: audio and transcription stay in this process (VD-8).
@@ -107,13 +109,15 @@ public final class HelperRuntime: @unchecked Sendable {
                 DispatchQueue.main.async { self?.sendPermissions() }
             }
             sendPermissions()
-        case let .setContextMode(scope, exclude):
+        case let .setContextMode(scope, exclude, clipboard):
             screen.configure(scope: scope, exclude: exclude)
+            clipboardWatcher.exclude = Set(exclude)
+            clipboardWatcher.setEnabled(clipboard)
         case .requestScreenRecording:
             ScreenContext.requestPermission()
             sendPermissions()
-        case let .showMenu(title, items, anchor):
-            menu.showMenu(title: title, items: items, anchorAX: anchor)
+        case let .showMenu(title, items, anchor, preview):
+            menu.showMenu(title: title, items: items, anchorAX: anchor, preview: preview)
             keyTap.isMenuOpen = true
         case let .menuStatus(text, busy, error):
             keyTap.isMenuOpen = false
@@ -125,8 +129,13 @@ public final class HelperRuntime: @unchecked Sendable {
             SelectionIO.replace(expected: expected, text: text, pid: selectionPID) { [weak self] ok, method, error in
                 try? self?.client?.send(NativeEvent.replaceResult(ok: ok, method: method, error: error))
             }
-        case let .setDictation(hotkey, modelPath, language, prompt):
+        case let .copyText(text):
+            ClipboardWatcher.ignoreChanges(for: 2)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        case let .setDictation(hotkey, modelPath, language, prompt, sounds):
             dictationPrompt = prompt
+            DictationSounds.enabled = sounds
             configureDictation(hotkey: hotkey, modelPath: modelPath, language: language)
         case .startRecording:
             startRecording()
@@ -180,6 +189,7 @@ public final class HelperRuntime: @unchecked Sendable {
         recorder.onLevel = { [weak self] level in self?.orb.setLevel(level) }
         keyTap.onMenuKey = { [weak self] key in self?.menuKey(key) }
         menu.onClick = { [weak self] i in self?.chooseMenu(i) }
+        clipboardWatcher.onText = { [weak self] text in try? self?.client?.send(NativeEvent.clipboardText(text: text)) }
         screen.onText = { [weak self] scope, app, text, ms in
             try? self?.client?.send(NativeEvent.screenText(scope: scope, appBundleId: app, text: text, ms: ms))
         }
@@ -237,6 +247,7 @@ public final class HelperRuntime: @unchecked Sendable {
             try? client?.send(NativeEvent.dictationSelection(appBundleId: front.bundleIdentifier ?? "",
                                                             text: String(selected.prefix(SelectionIO.maxChars + 1))))
         }
+        DictationSounds.play(.start)
         do {
             try recorder.start()
         } catch let failure as AudioRecorder.Failure {
@@ -247,8 +258,11 @@ public final class HelperRuntime: @unchecked Sendable {
     }
 
     private func stopRecording(transcribe: Bool) {
-        let samples = recorder.stop(keep: transcribe)
+        var samples = recorder.stop(keep: transcribe)
         guard transcribe else { return }
+        DictationSounds.play(.stop)
+        // The start cue may be in the first few hundred samples; it is not speech.
+        if DictationSounds.enabled { samples = Array(samples.dropFirst(16 * DictationSounds.startCueMs)) }
         let audioMs = samples.count / 16
         guard SpeechGate.hasSpeech(samples) else {
             try? client?.send(NativeEvent.transcript(text: "", language: nil, speech: false, audioMs: audioMs, transcribeMs: 0))

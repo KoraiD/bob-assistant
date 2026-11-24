@@ -43,6 +43,15 @@ pub async fn brain_upsert(
     config: BrainConfig,
     api_key: Option<String>,
 ) -> Result<(), String> {
+    crate::audit::record(
+        "brain.saved",
+        serde_json::json!({
+            "brain": config.id,
+            "kind": format!("{:?}", config.kind),
+            "cloud": config.is_cloud(),
+            "key": match api_key.as_deref() { None => "unchanged", Some("") => "removed", Some(_) => "set" },
+        }),
+    );
     brains
         .upsert(config, api_key)
         .await
@@ -58,6 +67,7 @@ pub async fn brain_remove(
     id: String,
 ) -> Result<(), String> {
     brains.remove(&id).await.map_err(|e| e.to_string())?;
+    crate::audit::record("brain.removed", serde_json::json!({ "brain": id }));
     changed(&app);
     Ok(())
 }
@@ -73,6 +83,10 @@ pub async fn brain_set_role(
         .set_role(role, id.as_deref())
         .await
         .map_err(|e| e.to_string())?;
+    crate::audit::record(
+        "brain.role",
+        serde_json::json!({ "role": role, "brain": id }),
+    );
     changed(&app);
     Ok(())
 }
@@ -317,6 +331,7 @@ pub async fn ghost_status(ghost: State<'_, GhostHandle>) -> Result<GhostStatus, 
 
 #[tauri::command]
 pub async fn ghost_set_enabled(ghost: State<'_, GhostHandle>, enabled: bool) -> Result<(), String> {
+    crate::audit::record("settings.ghost", serde_json::json!({ "enabled": enabled }));
     ghost.set_enabled(enabled);
     Ok(())
 }
@@ -331,6 +346,10 @@ pub async fn ghost_set_quiet(
     quiet: bool,
 ) -> Result<(), String> {
     ghost.set_quiet(&bundle_id, &name, quiet);
+    crate::audit::record(
+        "settings.quiet_app",
+        serde_json::json!({ "app": bundle_id, "quiet": quiet }),
+    );
     // Quiet apps are never captured for screen context either.
     push_context_mode(&bridge, &context, &ghost);
     Ok(())
@@ -370,6 +389,7 @@ pub async fn ghost_memory_edit(
 #[tauri::command]
 pub async fn ghost_memory_clear(ghost: State<'_, GhostHandle>) -> Result<(), String> {
     ghost.clear_memory();
+    crate::audit::record("memory.cleared", serde_json::json!({}));
     Ok(())
 }
 
@@ -415,6 +435,7 @@ pub fn push_context_mode(
     let _ = bridge.send(&crate::protocol::CoreCommand::SetContextMode {
         scope: context.settings().scope,
         exclude,
+        clipboard: context.settings().ghost.clipboard,
     });
 }
 
@@ -455,6 +476,8 @@ pub async fn context_set_settings(
     settings: crate::context::ContextSettings,
 ) -> Result<(), String> {
     let wants_capture = settings.scope != crate::protocol::ContextScope::Accessibility;
+    let old = context.settings();
+    crate::audit::settings("settings.personalize", &old, &settings.clone().sanitized());
     context
         .set_settings(settings)
         .map_err(|e| format!("cannot save the settings: {e}"))?;
@@ -468,7 +491,9 @@ pub async fn context_set_settings(
 
 #[tauri::command]
 pub async fn profile_save(context: State<'_, Context>, text: String) -> Result<(), String> {
-    context.set_profile(&text).map_err(|e| e.to_string())
+    context.set_profile(&text).map_err(|e| e.to_string())?;
+    crate::audit::record("profile.saved", serde_json::json!({ "bytes": text.len() }));
+    Ok(())
 }
 
 #[tauri::command]
@@ -512,6 +537,10 @@ pub async fn brain_set_share_context(
         .set_share_context(&id, share)
         .await
         .map_err(|e| e.to_string())?;
+    crate::audit::record(
+        "brain.share_context",
+        serde_json::json!({ "brain": id, "share": share }),
+    );
     changed(&app);
     Ok(())
 }
@@ -549,6 +578,7 @@ pub async fn selection_set_settings(
     bridge: State<'_, crate::native_ipc::Bridge>,
     settings: crate::selection::actions::SelectionSettings,
 ) -> Result<(), String> {
+    crate::audit::settings("settings.selection", &selection.settings(), &settings);
     selection
         .set_settings(settings)
         .map_err(|e| format!("cannot save the settings: {e}"))?;
@@ -597,6 +627,7 @@ pub async fn dictation_set_settings(
     dictation: State<'_, crate::dictation::engine::DictationHandle>,
     settings: crate::dictation::settings::DictationSettings,
 ) -> Result<(), String> {
+    crate::audit::settings("settings.dictation", &dictation.settings(), &settings);
     dictation
         .set_settings(settings)
         .map_err(|e| format!("cannot save the settings: {e}"))?;
@@ -630,6 +661,7 @@ pub async fn usage_get() -> Result<crate::usage::UsageView, String> {
 #[tauri::command]
 pub async fn usage_clear() -> Result<(), String> {
     crate::usage::clear();
+    crate::audit::record("usage.cleared", serde_json::json!({}));
     Ok(())
 }
 

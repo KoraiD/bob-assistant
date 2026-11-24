@@ -49,8 +49,7 @@ Summarized from product pages, reviews and user forums. All wording here is para
 - **Language and typography preferences:** UK vs US English and straight vs curly quotes appear among Cotypist's
   personalization settings ([review](https://chrischinchilla.com/blog/2025/cotypist-ai-autocomplete-macos-review/)).
 
-## Proposals for Task 11
-See the table in the Task 11 proposal (shared in chat on 2026-11-24). The owner picks what to build. Proposals
-marked "fits BOB" reuse pieces that already exist (hotkeys, dictation, selection engine, context).
+## Proposals
+The proposal table and the status of each one are in [ROADMAP.md](ROADMAP.md).
 
 *Content was rephrased for compliance with licensing restrictions.*

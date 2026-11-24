@@ -1,45 +1,37 @@
 import { useCallback, useEffect, useState } from "react";
 import { isTauri } from "../lib/appInfo";
-import { generalApi, loginLabel, pauseLabel, SHELL_EVENT, type GeneralView, type PauseHow } from "../lib/general";
+import {
+  auditLabel,
+  generalApi,
+  LOG_LEVELS,
+  loginLabel,
+  mcpSnippet,
+  pauseLabel,
+  SHELL_EVENT,
+  type AuditEntry,
+  type GeneralView,
+  type LogLevel,
+  type LogLine,
+  type PauseHow,
+} from "../lib/general";
 import { THEMES, type Theme } from "../lib/theme";
 import { useTauriEvent } from "../lib/useTauriEvent";
 import { GhostMark } from "./GhostMark";
+import { Button, Group, Row, Segmented, Toggle } from "./ui";
 
 const muted = { color: "var(--text-muted)" } as const;
-const pill = { background: "var(--surface-raised)", border: "1px solid var(--border-strong)" } as const;
 
-function Switch({ on, label, onChange, disabled }: { on: boolean; label: string; onChange: (v: boolean) => void; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!on)}
-      className="rounded-full px-4 py-1.5 text-sm font-medium disabled:opacity-50"
-      style={on ? { background: "var(--accent)", color: "var(--accent-fg)" } : { ...pill, color: "var(--text-muted)" }}
-    >
-      {on ? "On" : "Off"}
-    </button>
-  );
-}
+const AUDIT_FILTERS: { id: string; label: string }[] = [
+  { id: "", label: "All" },
+  { id: "data.", label: "Data sent" },
+  { id: "settings.", label: "Settings" },
+  { id: "brain.", label: "Brains" },
+  { id: "mcp.", label: "AI agents" },
+];
 
-function Row({ title, detail, children }: { title: string; detail: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3 py-2">
-      <div>
-        <div className="text-sm font-medium">{title}</div>
-        <div className="text-xs" style={muted}>
-          {detail}
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
+const time = (ms: number) => new Date(ms).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-/** Settings (Cmd+,): general Mac behavior, pause, appearance, the welcome tour, privacy and credits. */
+/** Settings (Cmd+,): Mac behavior, pause, appearance, AI agents, logs and the activity trail, about. */
 export function SettingsPanel({ build, theme, onTheme, onTour }: { build: string; theme: Theme; onTheme: (t: Theme) => void; onTour: () => void }) {
   const [general, setGeneral] = useState<GeneralView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,23 +56,25 @@ export function SettingsPanel({ build, theme, onTheme, onTour }: { build: string
     await refresh();
   };
   const pauses: { how: PauseHow; label: string }[] = [
-    { how: "hour", label: "For 1 hour" },
+    { how: "hour", label: "1 hour" },
     { how: "tomorrow", label: "Until tomorrow" },
     { how: "indefinite", label: "Until I resume" },
   ];
 
   return (
-    <div className="space-y-4">
-      <section aria-label="General" className="soft-card panel-in p-5">
-        <h2 className="mb-1 text-lg font-medium">General</h2>
+    <div className="max-w-3xl">
+      {error && (
+        <p role="alert" className="mb-2" style={{ color: "var(--danger)" }}>
+          {error}
+        </p>
+      )}
+      <Group title="General">
         {!general ? (
-          <p className="text-sm" style={muted}>
-            {isTauri() ? "Loading..." : "Open the BOB app to change these."}
-          </p>
+          <Row title={isTauri() ? "Loading..." : "Open the BOB app to change these."} />
         ) : (
-          <div className="divide-y" style={{ borderColor: "var(--border)" }}>
+          <>
             <Row title="Open at login" detail={loginLabel(general.login_item)}>
-              <Switch
+              <Toggle
                 label="Open at login"
                 on={general.login_item === "enabled" || general.login_item === "requires_approval"}
                 disabled={general.login_item === "unavailable"}
@@ -88,83 +82,192 @@ export function SettingsPanel({ build, theme, onTheme, onTour }: { build: string
               />
             </Row>
             <Row title="Open the window at launch" detail="Off: BOB starts quietly in the menu bar.">
-              <Switch label="Open the window at launch" on={general.open_window_at_launch} onChange={(v) => void run(() => generalApi.setOpenAtLaunch(v))} />
+              <Toggle label="Open the window at launch" on={general.open_window_at_launch} onChange={(v) => void run(() => generalApi.setOpenAtLaunch(v))} />
             </Row>
             <Row title="Show in the Dock" detail="Off: BOB lives only in the menu bar.">
-              <Switch label="Show in the Dock" on={general.show_in_dock} onChange={(v) => void run(() => generalApi.setDock(v))} />
+              <Toggle label="Show in the Dock" on={general.show_in_dock} onChange={(v) => void run(() => generalApi.setDock(v))} />
             </Row>
-            <Row title="Pause BOB" detail={`${pauseLabel(general.pause)}. Turns off suggestions, Selection Actions and dictation, for screen sharing or a quiet hour.`}>
+            <Row title="Pause BOB" detail={`${pauseLabel(general.pause)}. Stops suggestions, Selection Actions and dictation, for screen sharing or a quiet hour.`}>
               {general.pause.paused ? (
-                <button type="button" onClick={() => void run(generalApi.resume)} className="rounded-full px-4 py-1.5 text-sm font-medium" style={{ background: "var(--accent)", color: "var(--accent-fg)" }}>
+                <Button variant="primary" onClick={() => void run(generalApi.resume)}>
                   Resume
-                </button>
+                </Button>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {pauses.map((p) => (
-                    <button key={p.how} type="button" onClick={() => void run(() => generalApi.pause(p.how))} className="rounded-full px-3 py-1 text-xs" style={pill}>
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
+                pauses.map((p) => (
+                  <Button key={p.how} onClick={() => void run(() => generalApi.pause(p.how))}>
+                    {p.label}
+                  </Button>
+                ))
               )}
             </Row>
+          </>
+        )}
+      </Group>
+
+      <Group title="Appearance" footer="With Reduce Motion on in macOS, BOB stops floating and wiggling.">
+        <Row title="Theme">
+          <Segmented label="Theme" value={theme} options={THEMES.map((t) => ({ id: t.id, label: t.label }))} onChange={onTheme} />
+        </Row>
+      </Group>
+
+      {general && <AgentsGroup general={general} run={run} />}
+      {general && <LogsGroup general={general} run={run} />}
+
+      <Group title="Keyboard">
+        <Row title="Accept a word, everything, or dismiss" detail="While a suggestion is visible">
+          <span style={muted}>
+            <kbd>Tab</kbd> · <kbd>⇧Tab</kbd> · <kbd>Esc</kbd>
+          </span>
+        </Row>
+        <Row title="Selection Actions" detail="Change it in Selection Actions">
+          <kbd>⌘⇧J</kbd>
+        </Row>
+        <Row title="Voice Dictation" detail="Hold, or tap to start and tap again to stop">
+          <kbd>⌥Space</kbd>
+        </Row>
+        <Row title="Switch panels · Settings">
+          <span style={muted}>
+            <kbd>⌘1</kbd> to <kbd>⌘8</kbd> · <kbd>⌘,</kbd>
+          </span>
+        </Row>
+      </Group>
+
+      <Group title="Help">
+        <Row title="Welcome tour" detail="Permissions, models and a cheat sheet, step by step.">
+          <Button onClick={onTour}>Show the welcome tour</Button>
+        </Row>
+      </Group>
+
+      <section aria-label="About BOB" className="mac-group panel-in">
+        <div className="mac-group-body flex items-center gap-4 py-4">
+          <div className="shrink-0">
+            <GhostMark size={52} float interactive />
           </div>
-        )}
-        {error && (
-          <p role="alert" className="mt-2 text-xs" style={{ color: "var(--danger)" }}>
-            {error}
-          </p>
-        )}
-      </section>
-
-      <section aria-label="Appearance" className="soft-card panel-in p-5">
-        <h2 className="mb-2 text-lg font-medium">Appearance</h2>
-        <div role="radiogroup" aria-label="Theme" className="flex flex-wrap gap-2">
-          {THEMES.map((t) => (
-            <label key={t.id} className="flex cursor-pointer items-center gap-2 rounded-full px-3 py-1.5 text-sm" style={{ background: "var(--surface-raised)", border: `1px solid ${theme === t.id ? "var(--accent)" : "var(--border)"}` }}>
-              <input type="radio" name="theme" checked={theme === t.id} onChange={() => onTheme(t.id)} />
-              {t.label}
-            </label>
-          ))}
-        </div>
-        <p className="mt-2 text-xs" style={muted}>
-          Animations follow macOS: with Reduce Motion on, BOB stops floating.
-        </p>
-      </section>
-
-      <section aria-label="Keyboard" className="soft-card panel-in p-5">
-        <h2 className="mb-2 text-lg font-medium">Keyboard</h2>
-        <ul className="grid gap-1 text-sm md:grid-cols-2">
-          <li><kbd>Tab</kbd> / <kbd>⇧Tab</kbd> / <kbd>Esc</kbd>: take a word / take all / dismiss a suggestion</li>
-          <li><kbd>⌘⇧J</kbd>: Selection Actions (change it in Selection Actions)</li>
-          <li><kbd>⌥Space</kbd> (hold): Voice Dictation (change it in Voice Dictation)</li>
-          <li><kbd>⌘1</kbd> to <kbd>⌘8</kbd>: switch panels · <kbd>⌘,</kbd>: Settings</li>
-        </ul>
-      </section>
-
-      <section aria-label="Welcome tour" className="soft-card panel-in p-5">
-        <h2 className="mb-2 text-lg font-medium">Welcome tour</h2>
-        <p className="mb-3 text-sm" style={muted}>
-          Permissions, models and a cheat sheet, step by step.
-        </p>
-        <button type="button" onClick={onTour} className="rounded-full px-4 py-1.5 text-sm font-medium" style={{ background: "var(--accent)", color: "var(--accent-fg)" }}>
-          Show the welcome tour
-        </button>
-      </section>
-
-      <section aria-label="About BOB" className="soft-card panel-in flex items-center gap-5 p-5">
-        <div className="shrink-0">
-          <GhostMark size={56} float interactive />
-        </div>
-        <div>
-          <h2 className="text-lg font-medium">BOB: Bring Your Own Brain</h2>
-          <p className="text-sm" style={muted}>
-            {build}. No accounts, no telemetry. Text goes only to the brain you choose; cloud brains get no personal context unless you allow
-            it. Speech is recognized on this Mac and audio is never saved. Built with Kiro for Kiroween 2026 from llama.cpp, whisper.cpp, Tauri,
-            Swift and React (see THIRD_PARTY_NOTICES.md). MIT licensed.
-          </p>
+          <div>
+            <h2 className="font-semibold">BOB: Bring Your Own Brain</h2>
+            <p className="mt-1 text-xs" style={muted}>
+              {build}. No accounts, no telemetry. Text goes only to the brain you choose; cloud brains get no personal context unless you allow it.
+              Speech is recognized on this Mac and audio is never saved. Built with Kiro for Kiroween 2026 with llama.cpp, whisper.cpp, Tauri, Swift and
+              React (THIRD_PARTY_NOTICES.md). MIT licensed.
+            </p>
+          </div>
         </div>
       </section>
     </div>
+  );
+}
+
+function AgentsGroup({ general, run }: { general: GeneralView; run: (f: () => Promise<unknown>) => Promise<void> }) {
+  const [copied, setCopied] = useState(false);
+  const snippet = mcpSnippet(general.mcp_command);
+  return (
+    <Group
+      title="AI agents (MCP)"
+      footer="Agents can rewrite text and get suggestions with your brains and style, check status, and pause BOB. Every call is in the activity list below; text is never logged."
+    >
+      <Row title="Allow AI agents to use BOB" detail="For Kiro, Claude Desktop and other MCP clients on this Mac. Off by default.">
+        <Toggle label="Allow AI agents to use BOB" on={general.mcp_enabled} onChange={(v) => void run(() => generalApi.setMcp(v))} />
+      </Row>
+      {general.mcp_enabled && (
+        <div className="py-2">
+          <p className="mac-row-detail mb-1">Add this to the agent's MCP settings (in Kiro: .kiro/settings/mcp.json):</p>
+          <pre className="mac-field overflow-auto text-xs" data-testid="mcp-snippet" style={{ userSelect: "text" }}>
+            {snippet}
+          </pre>
+          <Button
+            className="mt-2"
+            onClick={() =>
+              void navigator.clipboard.writeText(snippet).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              })
+            }
+          >
+            {copied ? "Copied" : "Copy configuration"}
+          </Button>
+        </div>
+      )}
+    </Group>
+  );
+}
+
+function LogsGroup({ general, run }: { general: GeneralView; run: (f: () => Promise<unknown>) => Promise<void> }) {
+  const [filter, setFilter] = useState("");
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [lines, setLines] = useState<LogLine[] | null>(null);
+  const [lineLevel, setLineLevel] = useState<LogLevel>("info");
+  const load = useCallback(async () => {
+    try {
+      setAudit((await generalApi.audit(filter || null, 100)) ?? []);
+    } catch {
+      /* next refresh */
+    }
+  }, [filter]);
+  useEffect(() => {
+    void load();
+    const t = setInterval(() => void load(), 4000);
+    return () => clearInterval(t);
+  }, [load]);
+  const showLines = async (level: LogLevel) => {
+    setLineLevel(level);
+    setLines((await generalApi.logs(level)) ?? []);
+  };
+  return (
+    <>
+      <Group title="Logs" footer={general.log_dir ? `Saved in ${general.log_dir} (bob.log, rotated at 5 MB). Logs contain sizes and timings, never your text.` : undefined}>
+        <Row title="Detail level" detail="Raise it only to troubleshoot; Detailed and Everything write more.">
+          <select aria-label="Log detail level" value={general.log_level} onChange={(e) => void run(() => generalApi.setLogLevel(e.currentTarget.value as LogLevel))} className="mac-field">
+            {LOG_LEVELS.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        </Row>
+        <Row title="Recent log lines">
+          <Button onClick={() => void showLines(lineLevel)}>{lines ? "Refresh" : "Show"}</Button>
+          <Button onClick={() => void run(generalApi.openLogs)}>Show in Finder</Button>
+        </Row>
+        {lines && (
+          <div className="py-2">
+            <Segmented
+              label="Log lines to show"
+              value={lineLevel}
+              options={[
+                { id: "error" as LogLevel, label: "Errors" },
+                { id: "warn" as LogLevel, label: "Warnings" },
+                { id: "info" as LogLevel, label: "Info" },
+                { id: "debug" as LogLevel, label: "Debug" },
+              ]}
+              onChange={(l) => void showLines(l)}
+            />
+            <pre className="mac-field mt-2 max-h-56 overflow-auto text-[11px] leading-snug" data-testid="log-lines" style={{ userSelect: "text" }}>
+              {lines.length === 0 ? "No lines at this level yet." : lines.slice(-200).map((l) => `${time(l.at)} ${l.level.padEnd(5)} ${l.target}: ${l.message}`).join("\n")}
+            </pre>
+          </div>
+        )}
+      </Group>
+
+      <Group title="Activity" footer="What BOB did that matters for your privacy: settings changes, brains, text sent (sizes only), AI agent calls. Kept in audit.jsonl next to the log.">
+        <Row title="Show">
+          <Segmented label="Activity filter" value={filter} options={AUDIT_FILTERS} onChange={setFilter} />
+        </Row>
+        <ul className="max-h-64 overflow-auto py-1" aria-label="Activity" data-testid="audit-list">
+          {audit.length === 0 && (
+            <li className="py-1 text-xs" style={muted}>
+              Nothing recorded yet.
+            </li>
+          )}
+          {audit.map((e, i) => (
+            <li key={`${e.at}-${i}`} className="flex gap-3 py-1 text-xs">
+              <span className="w-32 shrink-0 tabular-nums" style={muted}>
+                {time(e.at)}
+              </span>
+              <span>{auditLabel(e)}</span>
+            </li>
+          ))}
+        </ul>
+      </Group>
+    </>
   );
 }

@@ -77,6 +77,14 @@ flowchart LR
 | Usage statistics (counts only) and the Statistics panel | `src-tauri/src/usage.rs`, `src/components/StatsPanel.tsx` | done |
 | This Mac: chip and RAM for the model recommendation, running apps for the quiet-apps picker | `src-tauri/src/system.rs` | done |
 | Open at login: SMAppService, LaunchAgent fallback | `src-tauri/src/app_settings.rs` | done; plist test, ignored real round trip |
+| Preferred languages: chip filter, detection, language check of rewrites | `src-tauri/src/context/languages.rs` | done; property test (filter only shortens) |
+| Per-app modes, style notes, clipboard and language-hint layers | `src-tauri/src/context/mod.rs` | done |
+| MCP server (`bob-mcp`) and control socket | `src-tauri/src/mcp.rs`, `src/bin/bob-mcp.rs` | done; JSON-RPC and real-socket tests |
+| Logging (levels, rotating file, tail) and audit trail | `src-tauri/src/logging.rs`, `audit.rs` | done |
+| Private, durable file writes | `src-tauri/src/fsutil.rs` | done |
+| Clipboard watcher, dictation sounds, settle re-reads | `ClipboardWatcher.swift`, `DictationSounds.swift`, `FocusObserver.swift` | done; Swift tests |
+| Ghost Text settings matrix and randomized sessions | `src-tauri/src/ghost/matrix_tests.rs` | done |
+| Mac-style controls (groups, rows, switches, segmented, icons) | `src/components/ui.tsx` | done |
 | Quiet-apps and phrases editors, interactive ghost | `src/components/{GhostLists,GhostMark}.tsx` | done |
 
 ## Decisions log
@@ -107,6 +115,10 @@ flowchart LR
 | 2026-11-24 | Tap-to-toggle in the pure machine (`Latched` state) | the 250 ms "tap" that used to be discarded now latches recording; P1 still holds with the toggle on and off |
 | 2026-11-24 | Idle unload sends `set_dictation` with no model; the next press reloads | the helper's whisper queue is serial, so a recording made during the reload is transcribed after it, with no new protocol |
 | 2026-11-24 | Open at login falls back to a LaunchAgent plist (`/usr/bin/open` the bundle) | `SMAppService.mainApp` reports "not found" for this development build (logged at startup); the plist works for any build and is removed when the switch is turned off |
+| 2026-11-24 | MCP as a separate stdio binary that talks to the app over a same-user socket, off by default | agents launch MCP servers as child processes; the running app owns the engines and models, so `bob-mcp` stays a thin forwarder and nothing listens unless the user allows it |
+| 2026-11-24 | Own logger instead of `env_logger` | one place for levels that change at runtime, a rotating 0600 file, an in-app tail and redaction of every line |
+| 2026-11-24 | Language filter from letters plus common words, no language-ID model | catches the measured drifts (Vietnamese, French) in microseconds; a model would cost memory and latency on the Ghost Text hot path |
+| 2026-11-24 | Re-read the focused field after each change in the helper | Chrome updates the caret before the text; three cheap re-reads fix the stale chip at its source |
 | 2026-11-24 | Usage is a process-wide recorder saved at most every 30 s and at exit | engines count without new plumbing; counts only, never text |
 | 2026-11-23 | Dictation state machine in Rust, audio in Swift | the core owns timing rules (250 ms minimum hold, 5-minute cap) as a pure, property-tested machine; the helper only records, gates silence and transcribes |
 

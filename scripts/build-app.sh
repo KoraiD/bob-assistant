@@ -24,6 +24,10 @@ APP="src-tauri/target/debug/bundle/macos/BOB.app"
 [ -d "$APP" ] || { echo "bundle not found: $APP" >&2; exit 1; }
 
 cp "$HELPER" "$APP/Contents/MacOS/bob-native"
+# MCP server for AI agents (proposal 17): a small stdio program next to the app's executable.
+echo "== bob-mcp"
+cargo build --manifest-path src-tauri/Cargo.toml --bin bob-mcp >/dev/null 2>&1
+cp src-tauri/target/debug/bob-mcp "$APP/Contents/MacOS/bob-mcp"
 
 # whisper.cpp for on-device dictation (Task 8): embed the framework and let the helper find it.
 WHISPER_FW="native/bob-native/Frameworks/whisper.xcframework/macos-arm64_x86_64/whisper.framework"
@@ -40,6 +44,8 @@ codesign --force --options runtime --timestamp=none --sign "$IDENTITY" "$APP/Con
 codesign --force --options runtime --timestamp=none \
   --entitlements native/bob-native/BobNative.entitlements \
   --identifier dev.bob.assistant.native --sign "$IDENTITY" "$APP/Contents/MacOS/bob-native"
+codesign --force --options runtime --timestamp=none \
+  --identifier dev.bob.assistant.mcp --sign "$IDENTITY" "$APP/Contents/MacOS/bob-mcp"
 codesign --force --options runtime --timestamp=none \
   --entitlements src-tauri/Entitlements.plist --sign "$IDENTITY" "$APP"
 codesign --verify --strict --deep "$APP"

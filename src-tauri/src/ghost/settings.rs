@@ -104,7 +104,7 @@ impl GhostSettings {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(
+        crate::fsutil::write_private_file(
             &tmp,
             serde_json::to_string_pretty(self).map_err(std::io::Error::other)?,
         )?;

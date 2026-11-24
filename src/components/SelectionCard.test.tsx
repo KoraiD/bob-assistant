@@ -12,7 +12,7 @@ let view: SelectionView;
 
 beforeEach(() => {
   view = {
-    settings: { hotkey: { key_code: 38, modifiers: ["cmd", "shift"] }, custom: [] },
+    settings: { hotkey: { key_code: 38, modifiers: ["cmd", "shift"] }, custom: [], preview: false },
     actions: ["Fix grammar", "Rephrase", "Summarize", "Translate to English"],
     stats: { menus: 2, runs: 2, replaced: 1, failed: 1, last_error: "Nothing changed: the selection changed.", last_ms: 1500 },
   };
@@ -44,7 +44,7 @@ describe("SelectionCard", () => {
     render(<SelectionCard />);
     await userEvent.selectOptions(await screen.findByLabelText("Selection Actions hotkey"), "ctrl-opt-space");
     expect(invoke).toHaveBeenCalledWith("selection_set_settings", {
-      settings: { hotkey: { key_code: 49, modifiers: ["control", "option"] }, custom: [] },
+      settings: { hotkey: { key_code: 49, modifiers: ["control", "option"] }, custom: [], preview: false },
     });
   });
 

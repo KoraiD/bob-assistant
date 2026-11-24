@@ -11,12 +11,16 @@
 pub mod activity;
 pub mod app_info;
 pub mod app_settings;
+pub mod audit;
 pub mod bench;
 pub mod brain;
 pub mod commands;
 pub mod context;
 pub mod dictation;
+pub mod fsutil;
 pub mod ghost;
+pub mod logging;
+pub mod mcp;
 pub mod native_ipc;
 pub mod pause;
 pub mod protocol;
@@ -350,14 +354,37 @@ fn quit_on_signals(app: tauri::AppHandle) {
     });
 }
 
+/// A panic in any thread is logged (with its location) before the default handler runs, so a crash in
+/// an engine task leaves a trace in bob.log instead of a silently dead feature.
+fn install_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let at = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_default();
+        log::error!(
+            "panic at {at}: {}",
+            info.payload()
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| info.payload().downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "(no message)".into())
+        );
+        audit::record("app.panic", serde_json::json!({"at": at}));
+        default(info);
+    }));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Logs go to stderr. Default: info for BOB, warn for dependencies; override with RUST_LOG.
+    // Logs go to stderr and ~/Library/Logs/BOB/bob.log. Default: info for BOB, warn for dependencies; the
+    // level is a setting (applied once settings load) and RUST_LOG overrides it.
     // Privacy: log metadata only (sizes, timings, states), never typed text, prompts or keys.
-    let _ = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("warn,bob_lib=info"),
-    )
-    .try_init();
+    let log_dir = logging::default_dir();
+    logging::init(Some(&log_dir), logging::Level::Info);
+    audit::init(&log_dir);
+    install_panic_hook();
     // One BOB per user: a second copy would take over the helper socket and load a second model.
     let runtime = native_ipc::default_socket_path()
         .parent()
@@ -431,6 +458,11 @@ pub fn run() {
             shell::general_set_dock,
             shell::general_set_open_at_launch,
             shell::general_set_login,
+            shell::general_set_log_level,
+            shell::mcp_set_enabled,
+            shell::logs_tail,
+            shell::audit_recent,
+            shell::logs_open_folder,
             shell::pause_start,
             shell::pause_resume,
         ])
@@ -438,6 +470,9 @@ pub fn run() {
             // Brain service: registry in the config dir, models in the data dir, the sidecar's key and
             // PID files in the per-user 0700 runtime dir next to the helper socket.
             let config_dir = app.path().app_config_dir()?;
+            if let Err(e) = fsutil::private_dir(&config_dir) {
+                log::warn!("cannot make the settings folder private: {e}");
+            }
             let ghost_dir = config_dir.clone();
             usage::init(config_dir.join(usage::FILE));
             #[cfg(target_os = "macos")]
@@ -517,16 +552,25 @@ pub fn run() {
             // General settings: Dock icon now; launch at login is read live from macOS.
             let general_path = app.path().app_config_dir()?.join(app_settings::FILE);
             let general = app_settings::AppSettings::load(&general_path);
+            if std::env::var_os("RUST_LOG").is_none() {
+                logging::set_level(general.log_level);
+            }
+            audit::record(
+                "app.start",
+                serde_json::json!({"version": env!("CARGO_PKG_VERSION"), "log_level": format!("{:?}", logging::level())}),
+            );
             shell::apply_dock(app.handle(), general.show_in_dock, false);
             if !general.open_window_at_launch && commands_onboarded(app.handle()) {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();
                 }
             }
+            let mcp_on = general.mcp_enabled;
             app.manage(shell::General {
                 path: general_path,
                 settings: Mutex::new(general),
             });
+            app.manage(shell::Mcp::default());
             let pause = std::sync::Arc::new(pause::Pause::default());
             app.manage(pause.clone());
             shell::build_tray(app, ghost.settings().enabled, dictation.settings().enabled)?;
@@ -543,6 +587,10 @@ pub fn run() {
                 pause,
             };
             start_native_bridge(app, bridge, engines, ax, mic);
+            // AI agents (MCP): the control socket exists only while the user allows it.
+            if mcp_on {
+                shell::apply_mcp(app.handle(), true);
+            }
             Ok(())
         })
         // Closing the window hides it; BOB keeps running from the menu bar.
@@ -565,6 +613,8 @@ pub fn run() {
             // Stop the built-in model server before the process exits (it would otherwise keep a model
             // in memory). A crash is covered by the PID file check at the next start.
             if let tauri::RunEvent::Exit = event {
+                audit::record("app.exit", serde_json::json!({}));
+                crate::mcp::stop_control(None);
                 usage::flush();
                 if let Some(brains) = app.try_state::<commands::Brains>() {
                     let brains = brains.inner().clone();

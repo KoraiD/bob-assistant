@@ -84,6 +84,7 @@ public enum NativeEvent: Equatable, Sendable {
     case dictationKey(pressed: Bool)
     case transcript(text: String, language: String?, speech: Bool, audioMs: Int, transcribeMs: Int)
     case dictationSelection(appBundleId: String, text: String)
+    case clipboardText(text: String)
     case dictationError(reason: String)
     case dictationStatus(modelLoaded: Bool, error: String?)
     case error(message: String)
@@ -101,14 +102,15 @@ public enum CoreCommand: Equatable, Sendable {
     case insertText(text: String)
     case captureKeys(active: Bool)
     case requestPermissions
-    case setContextMode(scope: ContextScope, exclude: [String])
+    case setContextMode(scope: ContextScope, exclude: [String], clipboard: Bool)
     case requestScreenRecording
-    case showMenu(title: String, items: [String], anchor: Rect?)
+    case showMenu(title: String, items: [String], anchor: Rect?, preview: String?)
     case menuStatus(text: String, busy: Bool, error: Bool)
     case hideMenu
     case replaceSelection(expected: String, text: String)
     case setHotkey(Hotkey)
-    case setDictation(hotkey: Hotkey?, modelPath: String?, language: String, prompt: String?)
+    case setDictation(hotkey: Hotkey?, modelPath: String?, language: String, prompt: String?, sounds: Bool)
+    case copyText(text: String)
     case startRecording
     case stopRecording(transcribe: Bool)
     case orb(state: OrbState, text: String?)
@@ -182,6 +184,8 @@ extension NativeEvent: Codable {
         case "dictation_selection":
             self = .dictationSelection(appBundleId: try c.decode(String.self, forKey: Keys("app_bundle_id")),
                                        text: try c.decode(String.self, forKey: Keys("text")))
+        case "clipboard_text":
+            self = .clipboardText(text: try c.decode(String.self, forKey: Keys("text")))
         case "dictation_error":
             self = .dictationError(reason: try c.decode(String.self, forKey: Keys("reason")))
         case "dictation_status":
@@ -263,6 +267,9 @@ extension NativeEvent: Codable {
             try c.encode("dictation_selection", forKey: Keys("type"))
             try c.encode(appBundleId, forKey: Keys("app_bundle_id"))
             try c.encode(text, forKey: Keys("text"))
+        case let .clipboardText(text):
+            try c.encode("clipboard_text", forKey: Keys("type"))
+            try c.encode(text, forKey: Keys("text"))
         case let .dictationError(reason):
             try c.encode("dictation_error", forKey: Keys("type"))
             try c.encode(reason, forKey: Keys("reason"))
@@ -300,12 +307,14 @@ extension CoreCommand: Codable {
         case "request_permissions": self = .requestPermissions
         case "set_context_mode":
             self = .setContextMode(scope: try c.decode(ContextScope.self, forKey: Keys("scope")),
-                                   exclude: try c.decodeIfPresent([String].self, forKey: Keys("exclude")) ?? [])
+                                   exclude: try c.decodeIfPresent([String].self, forKey: Keys("exclude")) ?? [],
+                                   clipboard: try c.decodeIfPresent(Bool.self, forKey: Keys("clipboard")) ?? false)
         case "request_screen_recording": self = .requestScreenRecording
         case "show_menu":
             self = .showMenu(title: try c.decode(String.self, forKey: Keys("title")),
                              items: try c.decode([String].self, forKey: Keys("items")),
-                             anchor: try c.decodeIfPresent(Rect.self, forKey: Keys("anchor")))
+                             anchor: try c.decodeIfPresent(Rect.self, forKey: Keys("anchor")),
+                             preview: try c.decodeIfPresent(String.self, forKey: Keys("preview")))
         case "menu_status":
             self = .menuStatus(text: try c.decode(String.self, forKey: Keys("text")),
                                busy: try c.decode(Bool.self, forKey: Keys("busy")),
@@ -319,7 +328,9 @@ extension CoreCommand: Codable {
             self = .setDictation(hotkey: try c.decodeIfPresent(Hotkey.self, forKey: Keys("hotkey")),
                                  modelPath: try c.decodeIfPresent(String.self, forKey: Keys("model_path")),
                                  language: try c.decode(String.self, forKey: Keys("language")),
-                                 prompt: try c.decodeIfPresent(String.self, forKey: Keys("prompt")))
+                                 prompt: try c.decodeIfPresent(String.self, forKey: Keys("prompt")),
+                                 sounds: try c.decodeIfPresent(Bool.self, forKey: Keys("sounds")) ?? false)
+        case "copy_text": self = .copyText(text: try c.decode(String.self, forKey: Keys("text")))
         case "start_recording": self = .startRecording
         case "stop_recording": self = .stopRecording(transcribe: try c.decode(Bool.self, forKey: Keys("transcribe")))
         case "orb":
@@ -351,16 +362,18 @@ extension CoreCommand: Codable {
             try c.encode("capture_keys", forKey: Keys("type"))
             try c.encode(active, forKey: Keys("active"))
         case .requestPermissions: try c.encode("request_permissions", forKey: Keys("type"))
-        case let .setContextMode(scope, exclude):
+        case let .setContextMode(scope, exclude, clipboard):
             try c.encode("set_context_mode", forKey: Keys("type"))
             try c.encode(scope, forKey: Keys("scope"))
             try c.encode(exclude, forKey: Keys("exclude"))
+            try c.encode(clipboard, forKey: Keys("clipboard"))
         case .requestScreenRecording: try c.encode("request_screen_recording", forKey: Keys("type"))
-        case let .showMenu(title, items, anchor):
+        case let .showMenu(title, items, anchor, preview):
             try c.encode("show_menu", forKey: Keys("type"))
             try c.encode(title, forKey: Keys("title"))
             try c.encode(items, forKey: Keys("items"))
             try c.encode(anchor, forKey: Keys("anchor"))
+            try c.encode(preview, forKey: Keys("preview"))
         case let .menuStatus(text, busy, error):
             try c.encode("menu_status", forKey: Keys("type"))
             try c.encode(text, forKey: Keys("text"))
@@ -374,12 +387,16 @@ extension CoreCommand: Codable {
         case let .setHotkey(hotkey):
             try c.encode("set_hotkey", forKey: Keys("type"))
             try c.encode(hotkey, forKey: Keys("hotkey"))
-        case let .setDictation(hotkey, modelPath, language, prompt):
+        case let .setDictation(hotkey, modelPath, language, prompt, sounds):
             try c.encode("set_dictation", forKey: Keys("type"))
             try c.encode(hotkey, forKey: Keys("hotkey"))
             try c.encode(modelPath, forKey: Keys("model_path"))
             try c.encode(language, forKey: Keys("language"))
             try c.encode(prompt, forKey: Keys("prompt"))
+            try c.encode(sounds, forKey: Keys("sounds"))
+        case let .copyText(text):
+            try c.encode("copy_text", forKey: Keys("type"))
+            try c.encode(text, forKey: Keys("text"))
         case .startRecording: try c.encode("start_recording", forKey: Keys("type"))
         case let .stopRecording(transcribe):
             try c.encode("stop_recording", forKey: Keys("type"))

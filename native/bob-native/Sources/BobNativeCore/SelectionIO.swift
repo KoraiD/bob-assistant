@@ -98,6 +98,7 @@ public enum SelectionIO {
 
     /// Post Cmd+C, wait for the pasteboard to change, read its string, restore the previous contents.
     static func copySelection(completion: @escaping (String?) -> Void) {
+        ClipboardWatcher.ignoreChanges(for: 3)
         let pb = NSPasteboard.general
         let saved = PasteboardSnapshot.capture(pb)
         let before = pb.changeCount
@@ -169,6 +170,7 @@ public enum SelectionIO {
 
     /// Put `text` on the clipboard, Cmd+V, then restore the clipboard once the app has read it.
     static func paste(_ text: String, completion: @escaping (Bool, String?, String?) -> Void) {
+        ClipboardWatcher.ignoreChanges(for: 3)
         let pb = NSPasteboard.general
         let saved = PasteboardSnapshot.capture(pb)
         pb.clearContents()

@@ -82,12 +82,13 @@ public final class ActionMenuPanel: NSPanel {
     public override var canBecomeKey: Bool { false }
     public override var canBecomeMain: Bool { false }
 
-    private func label(_ text: String, size: CGFloat = 13, color: NSColor = .white, wraps: Bool = false) -> NSTextField {
+    private func label(_ text: String, size: CGFloat = 13, color: NSColor = .white, wraps: Bool = false,
+                       lines: Int = 8) -> NSTextField {
         let l = wraps ? NSTextField(wrappingLabelWithString: text) : NSTextField(labelWithString: text)
         l.font = .systemFont(ofSize: size)
         l.textColor = color
         l.lineBreakMode = wraps ? .byWordWrapping : .byTruncatingTail
-        l.maximumNumberOfLines = wraps ? 8 : 1
+        l.maximumNumberOfLines = wraps ? lines : 1
         l.preferredMaxLayoutWidth = Self.width - 32
         l.wantsLayer = true
         l.layer?.cornerRadius = 6
@@ -101,10 +102,17 @@ public final class ActionMenuPanel: NSPanel {
         rows = []
     }
 
-    /// Show the actions near `anchorAX` (selection bounds, AX coordinates), or near the mouse.
-    public func showMenu(title: String, items: [String], anchorAX: Rect?) {
+    /// Show the actions near `anchorAX` (selection bounds, AX coordinates), or near the mouse. `preview` is
+    /// a result shown above the items (preview before replace); without an anchor an open panel stays put.
+    public func showMenu(title: String, items: [String], anchorAX: Rect?, preview: String? = nil) {
+        let keepPlace = anchorAX == nil && isVisible
         clear()
         stack.addArrangedSubview(label("👻 \(title)", size: 11, color: Palette.ectoplasm.withAlphaComponent(0.85)))
+        if let preview {
+            let p = label(preview, size: 13, color: NSColor.white.withAlphaComponent(0.95), wraps: true, lines: 14)
+            p.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+            stack.addArrangedSubview(p)
+        }
         for (i, item) in items.enumerated() {
             let row = label("  \(item)")
             row.heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
@@ -117,7 +125,7 @@ public final class ActionMenuPanel: NSPanel {
                                        color: NSColor.white.withAlphaComponent(0.5)))
         navigator = MenuNavigator(count: items.count)
         highlight()
-        place(near: anchorAX)
+        if keepPlace { resizeToFit() } else { place(near: anchorAX) }
         isMenuVisible = true
         orderFrontRegardless()
     }

@@ -150,7 +150,7 @@ impl Shared {
             if let Err(e) = self
                 .settings
                 .lock()
-                .expect("settings")
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .save(&dir.join(SETTINGS_FILE))
             {
                 log::warn!("ghost: cannot save settings: {e}");
@@ -162,7 +162,7 @@ impl Shared {
             if let Err(e) = self
                 .memory
                 .lock()
-                .expect("memory")
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .save(&dir.join(MEMORY_FILE))
             {
                 log::warn!("ghost: cannot save memory: {e}");
@@ -190,7 +190,11 @@ impl GhostHandle {
 
     /// Turn Ghost Text on or off (persisted).
     pub fn set_enabled(&self, on: bool) {
-        self.shared.settings.lock().expect("settings").enabled = on;
+        self.shared
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .enabled = on;
         self.shared.save_settings();
         let _ = self.tx.send(Input::SetEnabled(on));
     }
@@ -205,34 +209,57 @@ impl GhostHandle {
         self.shared
             .settings
             .lock()
-            .expect("settings")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .set_quiet(bundle_id, name, quiet);
         self.shared.save_settings();
         let _ = self.tx.send(Input::SettingsChanged);
     }
 
     pub fn settings(&self) -> GhostSettings {
-        self.shared.settings.lock().expect("settings").clone()
+        self.shared
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub fn recent_apps(&self) -> Vec<RecentApp> {
-        self.shared.recent.lock().expect("recent").clone()
+        self.shared
+            .recent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     pub fn memory(&self) -> Memory {
-        self.shared.memory.lock().expect("memory").clone()
+        self.shared
+            .memory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Record a phrase as if it had been accepted (benchmark seeding; persisted when storage is set).
     pub fn remember(&self, text: &str) {
-        if self.shared.memory.lock().expect("memory").record(text) {
+        if self
+            .shared
+            .memory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .record(text)
+        {
             self.shared.save_memory();
         }
     }
 
     /// Forget one phrase (persisted).
     pub fn forget_phrase(&self, text: &str) -> bool {
-        let removed = self.shared.memory.lock().expect("memory").forget(text);
+        let removed = self
+            .shared
+            .memory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .forget(text);
         if removed {
             self.shared.save_memory();
         }
@@ -241,7 +268,12 @@ impl GhostHandle {
 
     /// Edit one phrase (persisted). False when it is missing or the new text would not be kept.
     pub fn edit_phrase(&self, old: &str, new: &str) -> bool {
-        let changed = self.shared.memory.lock().expect("memory").edit(old, new);
+        let changed = self
+            .shared
+            .memory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .edit(old, new);
         if changed {
             self.shared.save_memory();
         }
@@ -250,13 +282,79 @@ impl GhostHandle {
 
     /// Forget every accepted phrase (persisted).
     pub fn clear_memory(&self) {
-        self.shared.memory.lock().expect("memory").clear();
+        self.shared
+            .memory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         self.shared.save_memory();
     }
 
     pub fn stats(&self) -> GhostStats {
-        self.stats.lock().expect("stats").clone()
+        self.stats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
+}
+
+/// One Ghost Text suggestion for `before` without the chip (AI agents over MCP, tests): the same brain,
+/// redaction, context layers, polishing and language filter as typing. `None` when nothing worth showing.
+pub async fn suggest_once(
+    brains: &BrainService,
+    context: &ContextHub,
+    memory: &[String],
+    before: &str,
+) -> Result<Option<String>, String> {
+    let before = normalize_typed(before);
+    let brain = brains
+        .resolve_role(Role::Ghost)
+        .await
+        .map_err(|e| format!("No brain is ready for Ghost Text ({e})."))?;
+    if !brain.config.capabilities.ghost {
+        return Err("The Ghost Text brain cannot continue text.".into());
+    }
+    let typed = redact::scrub(prompt::build(&before));
+    if typed.trim().is_empty() {
+        return Ok(None);
+    }
+    let prompt_text = if brain.config.shares_context() {
+        format!("{}{typed}", context.ghost_preamble(memory))
+    } else {
+        typed
+    };
+    if brain.config.is_cloud() {
+        crate::audit::sent(
+            "ghost",
+            &brain.config,
+            prompt_text.chars().count(),
+            brain.config.shares_context(),
+        );
+    }
+    let mut stream = brain
+        .complete_stream(&CompletionRequest::ghost(prompt_text))
+        .await
+        .map_err(|e| e.to_string())?;
+    let languages = context.settings().languages;
+    let mut raw = String::new();
+    let mut best = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while let Ok(Some(item)) = tokio::time::timeout_at(deadline, stream.next()).await {
+        raw.push_str(&item.map_err(|e| e.to_string())?);
+        let Some(polished) = chip::polish(&raw, &before) else {
+            continue;
+        };
+        let filtered = crate::context::languages::filter_chip(&polished, &before, &languages);
+        let cut = filtered.as_deref() != Some(polished.as_str());
+        best = filtered.clone();
+        if filtered.is_none() || cut || chip::is_final(&polished) {
+            break;
+        }
+    }
+    Ok(best.map(|c| {
+        let s = context.settings();
+        crate::context::typography::finish(&c, s.spelling, s.quotes, before.chars().last())
+    }))
 }
 
 /// Start the engine task with the shipped settings, in memory only (tests).
@@ -326,6 +424,7 @@ pub fn spawn_ctx(
         dismissed_for: None,
         capturing: false,
         first_chip_pending: None,
+        expect: None,
     };
     tokio::spawn(engine.run(rx));
     GhostHandle { tx, stats, shared }
@@ -352,6 +451,17 @@ struct Engine {
     capturing: bool,
     /// Keystroke time for the request whose first chip is not painted yet.
     first_chip_pending: Option<(u64, Instant)>,
+    /// After BOB inserted accepted text: the text expected before the caret, and when. Text events that
+    /// still show an older prefix of it are stale (the app updated Accessibility late) and are ignored.
+    expect: Option<(String, Instant)>,
+}
+
+/// How long a stale text event after an insertion is ignored before BOB believes the app.
+pub const STALE_WINDOW: Duration = Duration::from_millis(500);
+
+/// Text as the engine compares it: apps (Chrome, contenteditable) report typed spaces as no-break spaces.
+pub fn normalize_typed(text: &str) -> String {
+    text.replace('\u{a0}', " ")
 }
 
 impl Engine {
@@ -363,14 +473,22 @@ impl Engine {
     }
 
     fn is_quiet(&self, app: &str) -> bool {
-        self.shared.settings.lock().expect("settings").is_quiet(app)
+        self.shared
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_quiet(app)
     }
 
     fn remember_app(&self, bundle_id: String, name: String) {
         if bundle_id.is_empty() {
             return;
         }
-        let mut recent = self.shared.recent.lock().expect("recent");
+        let mut recent = self
+            .shared
+            .recent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         recent.retain(|a| a.bundle_id != bundle_id);
         recent.insert(0, RecentApp { bundle_id, name });
         recent.truncate(RECENT_APPS);
@@ -382,7 +500,12 @@ impl Engine {
         let words = text.split_whitespace().count();
         let long_word = text.trim().chars().count() >= 6;
         if words >= 2 || long_word {
-            let changed = self.shared.memory.lock().expect("memory").record(text);
+            let changed = self
+                .shared
+                .memory
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .record(text);
             if changed {
                 self.shared.save_memory();
             }
@@ -390,7 +513,10 @@ impl Engine {
     }
 
     fn stat(&self, f: impl FnOnce(&mut GhostStats)) {
-        f(&mut self.stats.lock().expect("stats"));
+        f(&mut self
+            .stats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner));
     }
 
     fn handle(&mut self, input: Input) {
@@ -458,6 +584,9 @@ impl Engine {
                 let Some(caret) = self.ctx.as_ref().map(|c| c.caret) else {
                     return;
                 };
+                if text.is_empty() {
+                    return self.hide(); // a chip taken back (wrong language)
+                }
                 if let Some((g, t0)) = self.first_chip_pending.take() {
                     if g == generation {
                         let ms = t0.elapsed().as_millis() as u64;
@@ -476,9 +605,11 @@ impl Engine {
                     }
                 }
                 // Writing style: quotes in the chip match what the user chose (prefix-stable while streaming).
-                let text = crate::context::typography::apply(
+                let style = self.context.settings();
+                let text = crate::context::typography::finish(
                     &text,
-                    self.context.settings().quotes,
+                    style.spelling,
+                    style.quotes,
                     before.chars().last(),
                 );
                 self.show(
@@ -512,6 +643,19 @@ impl Engine {
         selection_len: u32,
         caret: Option<Rect>,
     ) {
+        let before = normalize_typed(&before);
+        // Stale after an insertion: the app still reports text from before it. Wait for the real update
+        // (the helper re-reads shortly after every change) instead of repainting the old chip.
+        if let Some((expected, at)) = &self.expect {
+            if at.elapsed() < STALE_WINDOW
+                && before.len() < expected.len()
+                && expected.starts_with(&before)
+                && !secure
+            {
+                return;
+            }
+            self.expect = None;
+        }
         // Quiet zones (GT-3, GT-4): secure fields, no caret position, an active selection.
         // Plus apps on the quiet list (terminals, password managers, BOB, user choices).
         let quiet = self.is_quiet(&app);
@@ -530,6 +674,20 @@ impl Engine {
             caret,
         });
 
+        // A caret that moved sideways on the same line while the text stayed the same is an app reporting
+        // the caret before the text (typing in Chrome): keep the chip where it is until the text arrives.
+        if let (Some(_), Some(p)) = (&self.chip, prev.as_ref()) {
+            if p.app == app
+                && p.before == before
+                && (p.caret.y - caret.y).abs() < 1.0
+                && p.caret.x != caret.x
+            {
+                if let Some(c) = self.ctx.as_mut() {
+                    c.caret = p.caret;
+                }
+                return;
+            }
+        }
         // Typing-through (GT-7, GT-8): the new text extends the old one.
         if let (Some(chip), Some(prev)) = (self.chip.clone(), prev.as_ref()) {
             if prev.app == app && before.starts_with(&chip.before) {
@@ -598,6 +756,7 @@ impl Engine {
                 });
                 self.remember_phrase(&word);
                 // The chip stays; the text event caused by the insertion advances it (typing-through).
+                self.expect = Some((format!("{}{word}", ctx.before), Instant::now()));
                 self.sink.send(CoreCommand::InsertText { text: word });
             }
             Key::ShiftTab => {
@@ -608,6 +767,7 @@ impl Engine {
                     d.ghost_words += n;
                 });
                 self.remember_phrase(&visible);
+                self.expect = Some((format!("{}{visible}", ctx.before), Instant::now()));
                 self.sink.send(CoreCommand::InsertText { text: visible });
             }
             Key::Escape => {
@@ -662,11 +822,12 @@ impl Engine {
             self.config,
             self.context.clone(),
         );
+        let languages = context.settings().languages;
         let memory = if context.settings().ghost.memory {
             self.shared
                 .memory
                 .lock()
-                .expect("memory")
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .most_used(GHOST_MEMORY_PHRASES)
         } else {
             vec![]
@@ -694,7 +855,19 @@ impl Engine {
             } else {
                 typed
             };
-            stats.lock().expect("stats").requests += 1;
+            stats
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .requests += 1;
+            // Local Ghost requests happen at every pause and stay on this Mac; cloud ones are audited.
+            if brain.config.is_cloud() {
+                crate::audit::sent(
+                    "ghost",
+                    &brain.config,
+                    prompt_text.chars().count(),
+                    brain.config.shares_context(),
+                );
+            }
             let mut stream = match brain
                 .complete_stream(&CompletionRequest {
                     max_tokens: config.max_tokens,
@@ -713,8 +886,27 @@ impl Engine {
                     Ok(tok) => raw.push_str(&tok),
                     Err(e) => return send_done(Some(e.to_string())),
                 }
-                if let Some(chip) = chip::polish(&raw, &before) {
-                    let done = chip::is_final(&chip);
+                let Some(polished) = chip::polish(&raw, &before) else {
+                    continue;
+                };
+                // Wrong language inside the same script (owner's screenshot: Vietnamese after "Hát.").
+                let filtered =
+                    crate::context::languages::filter_chip(&polished, &before, &languages);
+                let cut = filtered.as_deref() != Some(polished.as_str());
+                if filtered.is_none() {
+                    // The model went off in another language: nothing later can fix it. Take back a
+                    // partial chip that is already on screen.
+                    if last_sent.is_some() {
+                        let _ = tx.send(Input::Chip {
+                            generation,
+                            before: before.clone(),
+                            text: String::new(),
+                        });
+                    }
+                    break;
+                }
+                if let Some(chip) = filtered {
+                    let done = cut || chip::is_final(&chip);
                     if last_sent.as_deref() != Some(chip.as_str()) {
                         last_sent = Some(chip.clone());
                         let _ = tx.send(Input::Chip {
@@ -990,6 +1182,96 @@ mod tests {
             }]
         );
         assert_eq!((g.stats().accepted_words, g.stats().accepted_all), (1, 1));
+    }
+
+    fn text_caret(before: &str, x: f64) -> NativeEvent {
+        NativeEvent::TextState {
+            app_bundle_id: "com.google.Chrome".into(),
+            secure: false,
+            before_caret: before.into(),
+            selection_len: 0,
+            caret: Some(Rect { x, ..CARET }),
+        }
+    }
+
+    /// The owner's screenshot: "Investigate the" with the chip "te the possibility of using". Chrome reported
+    /// the new caret with the old text after an insertion, so the old chip was repainted at the new caret.
+    #[tokio::test]
+    async fn stale_text_after_an_accept_never_repaints_the_old_chip() {
+        let (g, rec, server, _root) =
+            setup(&["te", " the", " possibility", " of using"], Duration::ZERO).await;
+        g.native(text_caret("We will Investiga", 100.0));
+        settle(300).await;
+        assert_eq!(rec.chips().last().unwrap(), "te the possibility of using");
+        rec.take();
+        g.native(NativeEvent::Key { key: Key::Tab });
+        settle(30).await;
+        rec.take();
+        // Stale: caret already moved, text not yet.
+        g.native(text_caret("We will Investiga", 118.0));
+        settle(30).await;
+        assert!(
+            rec.chips().is_empty(),
+            "repainted a stale chip: {:?}",
+            rec.chips()
+        );
+        // The re-read brings the real text: the chip advances.
+        g.native(text_caret("We will Investigate", 118.0));
+        settle(30).await;
+        assert_eq!(rec.chips(), vec![" the possibility of using".to_string()]);
+        assert_eq!(server.request_count(), 1);
+    }
+
+    /// Typing ahead of Chrome's text: a sideways caret move with unchanged text keeps the chip in place.
+    #[tokio::test]
+    async fn a_caret_that_moves_before_the_text_does_not_move_the_chip() {
+        let (g, rec, _server, _root) = setup(&[" lazy", " dog."], Duration::ZERO).await;
+        g.native(text_caret("over the", 100.0));
+        settle(300).await;
+        rec.take();
+        g.native(text_caret("over the", 108.0));
+        settle(30).await;
+        assert!(rec.take().is_empty());
+        g.native(text_caret("over the l", 108.0));
+        settle(30).await;
+        assert_eq!(rec.chips(), vec!["azy dog.".to_string()]);
+    }
+
+    /// The owner's second screenshot: after the Hungarian "Hát." the model went on in Vietnamese. The
+    /// partial chip ("100% là") may reach the screen, but is taken back as soon as the language is clear.
+    #[tokio::test]
+    async fn a_suggestion_in_another_language_is_taken_back() {
+        let (g, rec, _server, _root) = setup(
+            &[" 100%", " là", " một", " album", " rất hay"],
+            Duration::from_millis(5),
+        )
+        .await;
+        g.native(text("Hát."));
+        settle(400).await;
+        let cmds = rec.take();
+        assert!(
+            matches!(
+                cmds.last(),
+                Some(CoreCommand::HideChip) | Some(CoreCommand::CaptureKeys { active: false })
+            ),
+            "{cmds:?}"
+        );
+        assert!(!cmds
+            .iter()
+            .any(|c| matches!(c, CoreCommand::ShowChip { text, .. } if text.contains("một"))));
+    }
+
+    /// Chrome reports typed spaces as no-break spaces; typing through a space must still match.
+    #[tokio::test]
+    async fn no_break_spaces_from_the_app_type_through() {
+        let (g, rec, server, _root) = setup(&[" lazy", " dog."], Duration::ZERO).await;
+        g.native(text("over the"));
+        settle(300).await;
+        rec.take();
+        g.native(text("over the\u{a0}lazy\u{a0}"));
+        settle(50).await;
+        assert_eq!(rec.chips(), vec!["dog.".to_string()]);
+        assert_eq!(server.request_count(), 1);
     }
 
     #[tokio::test]

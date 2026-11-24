@@ -5,6 +5,8 @@
 
 pub mod chip;
 pub mod engine;
+#[cfg(test)]
+mod matrix_tests;
 pub mod memory;
 pub mod prompt;
 pub mod redact;

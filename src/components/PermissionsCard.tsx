@@ -20,20 +20,16 @@ const LABEL: Record<PermissionState, string> = {
 function Row({ name, why, state }: { name: string; why: string; state: PermissionState }) {
   const good = state === "ok";
   return (
-    <li className="flex items-center justify-between gap-4 py-2" data-testid={`perm-${name.toLowerCase()}`}>
+    <li className="mac-row justify-between" data-testid={`perm-${name.toLowerCase()}`}>
       <div>
-        <div className="font-medium">{name}</div>
-        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
-          {why}
-        </div>
+        <div className="mac-row-title">{name}</div>
+        <div className="mac-row-detail">{why}</div>
       </div>
       <span
-        className="rounded-full px-3 py-1 text-xs"
-        style={{
-          background: good ? "var(--accent-soft)" : "var(--accent-2-soft)",
-          color: good ? "var(--accent)" : "var(--accent-2)",
-        }}
+        className="flex items-center gap-1.5 text-xs"
+        style={{ color: good ? "var(--accent)" : "var(--accent-2)" }}
       >
+        <span aria-hidden className="inline-block h-2 w-2 rounded-full" style={{ background: "currentColor" }} />
         {LABEL[state]}
       </span>
     </li>
@@ -72,17 +68,15 @@ export function PermissionsCard() {
   const offline = !status.connected;
 
   return (
-    <section aria-label="Permissions" className="soft-card panel-in mt-6 p-5">
-      <h2 className="mb-1 text-lg font-medium">Permissions</h2>
-      <p className="mb-2 text-sm" style={{ color: "var(--text-muted)" }}>
-        BOB only asks for what each feature needs. Reading the screen is opt-in (Personalize).
-      </p>
+    <section aria-label="Permissions" className="mac-group panel-in">
+      <h2 className="mac-group-title">Permissions</h2>
+      <div className="mac-group-body py-1">
       <ul>
         <Row name="Accessibility" why="Read the caret position and insert text in other apps." state={accessibilityState(status)} />
         <Row name="Microphone" why="Voice dictation." state={microphoneState(status)} />
       </ul>
       {offline && (
-        <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }} data-testid="helper-offline">
+        <p className="py-2 text-xs" style={{ color: "var(--text-muted)" }} data-testid="helper-offline">
           BOB's helper is not running yet. Open BOB from the menu bar app to check permissions.
         </p>
       )}
@@ -90,12 +84,13 @@ export function PermissionsCard() {
         <button
           type="button"
           onClick={ask}
-          className="mt-3 rounded-xl px-4 py-2 text-sm font-medium"
-          style={{ background: "var(--accent)", color: "var(--accent-fg)" }}
+          className="mac-button primary my-2"
         >
           Grant permissions
         </button>
       )}
+      </div>
+      <p className="mac-group-footer">BOB only asks for what each feature needs. Reading the screen is opt-in (Personalize).</p>
       {error && (
         <p role="alert" className="mt-2 text-sm" style={{ color: "var(--danger)" }}>
           {error}

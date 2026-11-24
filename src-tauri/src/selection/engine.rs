@@ -63,14 +63,18 @@ impl SelectionHandle {
         self.shared
             .settings
             .lock()
-            .expect("selection settings")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
     /// Save (sanitized) settings. The caller pushes the hotkey to the helper.
     pub fn set_settings(&self, s: SelectionSettings) -> std::io::Result<SelectionSettings> {
         let s = s.sanitized();
-        *self.shared.settings.lock().expect("selection settings") = s.clone();
+        *self
+            .shared
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = s.clone();
         if let Some(dir) = &self.shared.storage {
             s.save(&dir.join(SETTINGS_FILE))?;
         }
@@ -88,7 +92,11 @@ impl SelectionHandle {
     }
 
     pub fn stats(&self) -> SelectionStats {
-        self.shared.stats.lock().expect("selection stats").clone()
+        self.shared
+            .stats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Voice edit (proposal 1): apply a spoken `instruction` to the selected `text` and replace it.
@@ -156,7 +164,16 @@ enum State {
     Replacing {
         voice: bool,
     },
+    /// The result is shown in the panel, waiting for Replace, Copy or Discard (proposal 6).
+    Preview {
+        capture: Capture,
+        text: String,
+        voice: bool,
+    },
 }
+
+/// The preview's choices, in order.
+pub const PREVIEW_ITEMS: [&str; 3] = ["Replace selection", "Copy", "Discard"];
 
 pub fn spawn(
     brains: Arc<BrainService>,
@@ -214,7 +231,11 @@ impl Engine {
     }
 
     fn stats(&self, f: impl FnOnce(&mut SelectionStats)) {
-        f(&mut self.shared.stats.lock().expect("selection stats"));
+        f(&mut self
+            .shared
+            .stats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner));
     }
 
     /// Show a status line; `hide_after` closes the panel later unless something newer happened.
@@ -251,7 +272,13 @@ impl Engine {
                 anchor,
                 ..
             }) => self.on_selection(text, secure, anchor),
-            Input::Native(NativeEvent::MenuChoice { index }) => self.on_choice(index as usize),
+            Input::Native(NativeEvent::MenuChoice { index }) => {
+                if matches!(self.state, State::Preview { .. }) {
+                    self.on_preview_choice(index as usize)
+                } else {
+                    self.on_choice(index as usize)
+                }
+            }
             Input::Native(NativeEvent::MenuCancel) => {
                 self.cancel();
                 self.generation += 1;
@@ -316,10 +343,11 @@ impl Engine {
                 match result {
                     Err(e) => self.fail(&e),
                     Ok(raw) => {
-                        let quotes = self.context.settings().quotes;
-                        let text = crate::context::typography::apply(
+                        let style = self.context.settings();
+                        let text = crate::context::typography::finish(
                             &clean::clean(&raw, &capture.text),
-                            quotes,
+                            style.spelling,
+                            style.quotes,
                             None,
                         );
                         if text.trim().is_empty() {
@@ -334,6 +362,20 @@ impl Engine {
                                 false,
                                 Some(DONE_HIDE),
                             );
+                        }
+                        if self.settings().preview {
+                            self.sink.send(CoreCommand::ShowMenu {
+                                title: "Preview: ⏎ replaces, Esc discards".into(),
+                                items: PREVIEW_ITEMS.iter().map(|s| s.to_string()).collect(),
+                                anchor: None,
+                                preview: Some(text.clone()),
+                            });
+                            self.state = State::Preview {
+                                capture,
+                                text,
+                                voice,
+                            };
+                            return;
                         }
                         self.state = State::Replacing { voice };
                         self.sink.send(CoreCommand::ReplaceSelection {
@@ -387,6 +429,7 @@ impl Engine {
             title: "BOB".into(),
             items: menu.iter().map(|a| a.label.clone()).collect(),
             anchor,
+            preview: None,
         });
         self.state = State::Menu {
             capture: Capture { text },
@@ -398,7 +441,7 @@ impl Engine {
         self.shared
             .settings
             .lock()
-            .expect("selection settings")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -410,6 +453,36 @@ impl Engine {
             return;
         };
         self.start(capture, action, false);
+    }
+
+    fn on_preview_choice(&mut self, index: usize) {
+        let State::Preview {
+            capture,
+            text,
+            voice,
+        } = std::mem::replace(&mut self.state, State::Idle)
+        else {
+            return;
+        };
+        match index {
+            0 => {
+                self.state = State::Replacing { voice };
+                self.sink.send(CoreCommand::ReplaceSelection {
+                    expected: capture.text,
+                    text,
+                });
+            }
+            1 => {
+                self.sink.send(CoreCommand::CopyText { text });
+                self.status(
+                    "Copied. The selection was not changed.",
+                    false,
+                    false,
+                    Some(DONE_HIDE),
+                );
+            }
+            _ => self.status("Discarded. Nothing changed.", false, false, Some(DONE_HIDE)),
+        }
     }
 
     fn on_voice_edit(&mut self, text: String, instruction: String) {
@@ -451,7 +524,13 @@ impl Engine {
             let started = Instant::now();
             let result = tokio::time::timeout(
                 TIMEOUT,
-                run_action(&brains, &context, &job_action, &text, generation, &tx),
+                run_checked(
+                    &brains,
+                    &context,
+                    &job_action,
+                    &text,
+                    Some((generation, &tx)),
+                ),
             )
             .await
             .unwrap_or_else(|_| Err("The brain took too long, so BOB stopped waiting.".into()));
@@ -469,14 +548,115 @@ impl Engine {
     }
 }
 
-/// Run `action` on `text` with the selection brain, streaming previews.
+/// Run an action without the panel (AI agents over MCP): same brain, rules, cleaning and quote style as the
+/// hotkey, with the whole-action deadline. Returns the rewritten text.
+pub async fn rewrite(
+    brains: &BrainService,
+    context: &ContextHub,
+    action: &Action,
+    text: &str,
+) -> Result<String, String> {
+    let n = text.chars().count();
+    if text.trim().is_empty() {
+        return Err("The text is empty.".into());
+    }
+    if n > MAX_CHARS {
+        return Err(format!(
+            "The text is too long ({n} characters; the limit is {MAX_CHARS})."
+        ));
+    }
+    let raw = tokio::time::timeout(TIMEOUT, run_checked(brains, context, action, text, None))
+        .await
+        .unwrap_or_else(|_| Err("The brain took too long, so BOB stopped waiting.".into()))?;
+    let style = context.settings();
+    let out = crate::context::typography::finish(
+        &clean::clean(&raw, text),
+        style.spelling,
+        style.quotes,
+        None,
+    );
+    if out.trim().is_empty() {
+        return Err("The brain returned no text.".into());
+    }
+    Ok(out)
+}
+
+/// The language the result must be in, when BOB can tell: the per-app or global "answer in" language, or
+/// else the text's own language (when clearly detected and one the user writes). `None` for Translate and
+/// for short or mixed text.
+pub fn expected_language(
+    context: &ContextHub,
+    action: &Action,
+    text: &str,
+) -> Option<&'static str> {
+    use crate::context::languages;
+    if action.sets_language {
+        return None;
+    }
+    let s = context.settings();
+    let v = context.visible();
+    let mode_lang = s
+        .app_mode(&v.app_bundle_id)
+        .and_then(|m| languages::code_for(&m.language));
+    if let Some(code) = mode_lang.or_else(|| languages::code_for(&s.sanitized_language())) {
+        return Some(code);
+    }
+    let own = languages::detect_strong(text)?;
+    (s.languages.is_empty() || s.languages.iter().any(|l| l == own)).then_some(own)
+}
+
+/// Run the action and check the result's language. Small models sometimes answer a Hungarian text in
+/// English, or ignore "answer in English" (style benchmark, docs/PERFORMANCE.md): BOB then asks once more
+/// with a firmer rule and keeps whichever answer is in the right language.
+async fn run_checked(
+    brains: &BrainService,
+    context: &ContextHub,
+    action: &Action,
+    text: &str,
+    previews: Option<(u64, &mpsc::UnboundedSender<Input>)>,
+) -> Result<String, String> {
+    use crate::context::languages;
+    let first = run_action(brains, context, action, text, previews, None).await?;
+    let Some(want) = expected_language(context, action, text) else {
+        return Ok(first);
+    };
+    match languages::detect_strong(&first) {
+        Some(got) if got != want => {
+            let name = languages::find(want).map_or(want, |l| l.name);
+            log::info!("selection: answer came back in {got}, expected {want}; asking again");
+            let rule = format!(
+                "Important: write your whole answer in {name}. If the text is in another language, translate it into {name}."
+            );
+            let second = run_action(brains, context, action, text, previews, Some(&rule)).await?;
+            if languages::detect_strong(&second) == Some(want) {
+                return Ok(second);
+            }
+            // Still wrong: translate the first answer. Small models do one thing at a time well, and
+            // Translate is that one thing.
+            let translate = actions::menu(&Default::default(), name)
+                .into_iter()
+                .find(|a| a.sets_language)
+                .expect("the menu has Translate");
+            let third = run_action(brains, context, &translate, &first, previews, None).await?;
+            Ok(if languages::detect_strong(&third) == Some(want) {
+                third
+            } else {
+                first
+            })
+        }
+        _ => Ok(first),
+    }
+}
+
+/// Run `action` on `text` with the selection brain, streaming previews when `previews` is set. `extra` is
+/// appended to the system prompt (the language retry).
 async fn run_action(
     brains: &BrainService,
     context: &ContextHub,
     action: &Action,
     text: &str,
-    generation: u64,
-    tx: &mpsc::UnboundedSender<Input>,
+    previews: Option<(u64, &mpsc::UnboundedSender<Input>)>,
+    extra: Option<&str>,
 ) -> Result<String, String> {
     let brain = brains.resolve_role(Role::Selection).await.map_err(|_| {
         "No brain is ready for Selection Actions. Pick one in Brains (or wake BOB's own brain)."
@@ -495,10 +675,20 @@ async fn run_action(
                 .into(),
         );
     }
-    let system = context.chat_system_opts(
+    let mut system = context.chat_system_opts(
         &action.instruction,
         brain.config.shares_context(),
         !action.sets_language,
+    );
+    if let Some(rule) = extra {
+        system.push_str("\n\n");
+        system.push_str(rule);
+    }
+    crate::audit::sent(
+        "selection",
+        &brain.config,
+        text.chars().count(),
+        brain.config.shares_context(),
     );
     let mut stream = brain
         .chat_stream(&ChatRequest {
@@ -513,12 +703,14 @@ async fn run_action(
     let mut last_preview = Instant::now();
     while let Some(item) = stream.next().await {
         out.push_str(&item.map_err(|e| e.to_string())?);
-        if last_preview.elapsed() >= PREVIEW_EVERY {
-            last_preview = Instant::now();
-            let _ = tx.send(Input::Preview {
-                generation,
-                text: out.clone(),
-            });
+        if let Some((generation, tx)) = previews {
+            if last_preview.elapsed() >= PREVIEW_EVERY {
+                last_preview = Instant::now();
+                let _ = tx.send(Input::Preview {
+                    generation,
+                    text: out.clone(),
+                });
+            }
         }
     }
     Ok(out)
@@ -664,6 +856,130 @@ mod tests {
         assert_eq!(h.stats().replaced, 1);
         settle(1300).await;
         assert_eq!(rec.take(), vec![CoreCommand::HideMenu]);
+    }
+
+    #[tokio::test]
+    async fn preview_shows_the_result_and_waits_for_a_choice() {
+        let (h, rec, _server, _root) = setup(&["The quick fox."], "local").await;
+        h.set_settings(SelectionSettings {
+            preview: true,
+            ..Default::default()
+        })
+        .unwrap();
+        let run = |h: &SelectionHandle| {
+            h.native(selection("teh quick fox"));
+            h.native(NativeEvent::MenuChoice { index: 0 });
+        };
+        run(&h);
+        settle(300).await;
+        let cmds = rec.take();
+        assert!(!cmds
+            .iter()
+            .any(|c| matches!(c, CoreCommand::ReplaceSelection { .. })));
+        assert!(cmds.iter().any(|c| matches!(
+            c,
+            CoreCommand::ShowMenu { preview: Some(p), items, .. } if p == "The quick fox." && items[0] == PREVIEW_ITEMS[0]
+        )));
+        // Replace.
+        h.native(NativeEvent::MenuChoice { index: 0 });
+        settle(30).await;
+        assert!(rec.take().contains(&CoreCommand::ReplaceSelection {
+            expected: "teh quick fox".into(),
+            text: "The quick fox.".into()
+        }));
+        // Copy leaves the selection alone.
+        h.native(NativeEvent::ReplaceResult {
+            ok: true,
+            method: None,
+            error: None,
+        });
+        run(&h);
+        settle(300).await;
+        rec.take();
+        h.native(NativeEvent::MenuChoice { index: 1 });
+        settle(30).await;
+        let cmds = rec.take();
+        assert!(cmds.contains(&CoreCommand::CopyText {
+            text: "The quick fox.".into()
+        }));
+        assert!(!cmds
+            .iter()
+            .any(|c| matches!(c, CoreCommand::ReplaceSelection { .. })));
+        // Esc discards.
+        run(&h);
+        settle(300).await;
+        h.native(NativeEvent::MenuCancel);
+        h.native(NativeEvent::MenuChoice { index: 0 });
+        settle(30).await;
+        assert!(!rec
+            .take()
+            .iter()
+            .any(|c| matches!(c, CoreCommand::ReplaceSelection { .. })));
+    }
+
+    /// The style benchmark found the local model answering Hungarian text in English; BOB asks once more.
+    #[tokio::test]
+    async fn an_answer_in_the_wrong_language_is_asked_again() {
+        let server = TestServer::start(|req| {
+            let system = req.json()["messages"][0]["content"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            let answer = if system.contains("Important: write your whole answer in Hungarian") {
+                "Holnap nem tudok menni, mert beteg vagyok."
+            } else {
+                "I can't go tomorrow because I am sick."
+            };
+            let ev = serde_json::json!({"choices":[{"delta":{"content": answer}}]}).to_string();
+            Response::sse(&[ev.as_str()], Duration::ZERO)
+                .chunk_after(Duration::ZERO, "data: [DONE]\n\n")
+        })
+        .await;
+        let root = std::env::temp_dir().join(format!("bob-sel-lang-{}", rand::random::<u32>()));
+        let svc = Arc::new(BrainService::new(
+            root.join("c"),
+            root.join("d"),
+            root.join("r"),
+            Box::new(MemoryStore::default()),
+        ));
+        svc.upsert(
+            BrainConfig {
+                id: "chat".into(),
+                name: "Chat".into(),
+                kind: ProviderKind::OpenAiCompatible,
+                endpoint: server.base.clone(),
+                model: Some("m".into()),
+                capabilities: Capabilities {
+                    ghost: false,
+                    chat: true,
+                },
+                has_api_key: false,
+                share_context: None,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        svc.set_role(Role::Selection, Some("chat")).await.unwrap();
+        let ctx = ContextHub::in_memory(Default::default(), "");
+        let fix = actions::menu(&Default::default(), "").remove(0);
+        let out = rewrite(&svc, &ctx, &fix, "Holnap nem tudok menni mert beteg vagyok")
+            .await
+            .unwrap();
+        assert_eq!(out, "Holnap nem tudok menni, mert beteg vagyok.");
+        assert_eq!(server.request_count(), 2);
+        // Text in the expected language: one request only.
+        let _ = rewrite(&svc, &ctx, &fix, "I cant go tomorrow because I am sick").await;
+        assert_eq!(server.request_count(), 3);
+        // Translate decides its own language: never retried.
+        let tr = actions::menu(&Default::default(), "")
+            .into_iter()
+            .find(|a| a.sets_language)
+            .unwrap();
+        assert_eq!(
+            expected_language(&ctx, &tr, "Holnap nem tudok menni mert beteg vagyok"),
+            None
+        );
     }
 
     #[tokio::test]

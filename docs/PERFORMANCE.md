@@ -173,3 +173,67 @@ the replay harness (Task 5). Two prompts only, so these are smoke numbers, not p
 - "Thanks for your email. I will get back to you" -> " as soon as possible. A. 正确 B." The instruct model drifts into
   exam-style text after the sentence ends. Chip polishing must stop at the sentence boundary and drop script switches
   (Task 4), and Task 5 compares a base model.
+
+## Ghost Text settings matrix and stale updates (Task 12a)
+- **Matrix** (`ghost::matrix_tests`, CI): 16 layer combinations (memory, window, language hint, clipboard) x 2
+  language settings x 3 quote styles x 2 sharing permissions = 192 cases through the real engine and a local test
+  server. Every case checks that the prompt carries exactly the allowed notes, never the copied secret, and that the
+  chip uses the chosen quote style. Engine overhead with a 5 ms gate and an instant server: **p50 8 ms, p95 9 ms**.
+  A second matrix covers on/off x pause x quiet app x secure field x selection (32 cases): the model is asked only
+  when every gate is open. Randomized typing sessions (6 seeds x 25 steps) check that key capture follows the chip and
+  that BOB inserts text only while a chip is visible.
+- **Bug found by the matrix:** a chip such as `it's "fine" today` stopped at the closing quote. `chip::is_final` now
+  ends a chip at a quote only after sentence punctuation.
+- **Chrome stale updates** (owner's screenshot): Chrome reports the new caret before the new text after typing or
+  an accept, so the old chip was repainted at the new caret ("Investigate the | te the possibility of using"). Fix,
+  in one change per layer: the helper re-reads the field 40, 120 and 300 ms after each change and sends only real
+  changes (about 1 ms per read); the engine ignores text that is an older prefix of what it just inserted (500 ms
+  window), keeps the chip in place when only the caret moved sideways, and treats no-break spaces as spaces. Covered
+  by three engine tests. `scripts/ax-lag-probe.swift` measures the lag in a page it opens itself (needs the probe page
+  focused; owner check pending).
+
+## Writing languages and style (Task 12a, `style-bench`)
+Default model (Qwen2.5-1.5B-Instruct Q4_K_M), Apple M4 Max, 2026-11-24. Three runs before the fixes and one after;
+small samples, so the direction matters more than single counts.
+
+**A. Ghost Text language** on 13 short openings (8 Hungarian, 5 English), where small models drift:
+
+| Condition | Raw output in the expected language | Chips shown | Chips in a wrong language |
+|---|---|---|---|
+| No preference | 9 to 11 of 13 | 12 | 1 (French after "Bocs, de") |
+| Preferred Hungarian + English (filter) | 10 to 12 | 11 to 12 | 1, then **0** after the common-word check |
+| Filter + "I write in Hungarian and English" hint | 12 to 13 | 13 | **0** |
+
+Raw drift seen: Vietnamese after "Hát." in every run (the owner's screenshot), French after "Bocs, de". Letters
+alone cannot catch French ("é" is Hungarian too), so with preferences a chip made of another language's common words
+and none of the user's is dropped. The hint costs about 2 ms (p50 50 vs 48 ms). Known limit: Hungarian shares "ü"
+with German, so a German word can pass for a Hungarian and English writer.
+
+**B. Rephrase with writing style** (6 English sentences each):
+
+| Condition | Mean words | Contractions | Exclamations | US / UK spellings |
+|---|---|---|---|---|
+| Natural | 15.2 | 3 to 5 | 0 | 4 / 0 |
+| Friendly (old wording) | 14.8 | 4 | 0 | |
+| Friendly (new wording) | 14.2 | 5 | 2 | |
+| Professional (old / new) | 16 / 14.7 | 4 / **0** | 0 | |
+| Concise (old / new) | 14.3 / **9.7 to 10.3** | | | |
+| Style notes "No emoji. At most 12 words." | 10.5 | | | 4 of 6 within 12 words |
+| Spelling UK, instruction only | 15.2 | | | 4 / **0** UK |
+| Spelling UK, instruction + BOB's respelling | 14.3 | | | 0 / **5** |
+
+The model ignored the spelling instruction completely, so BOB now respells unambiguous US/UK pairs in everything it
+types (`typography::respell`, whole words only, case kept). Old tone wording barely changed the output; the new
+wording works for professional (no contractions) and concise (about a third shorter).
+
+**C. Language of rewrites** (Fix grammar and Rephrase on 4 Hungarian texts, 8 outputs):
+
+| Condition | Before the check | After the check and retry | After the Translate fallback |
+|---|---|---|---|
+| No preference | 6 to 8 Hungarian | 8 Hungarian | 8 |
+| Preferred Hungarian + English | 6 to 8 Hungarian | 8 Hungarian | 8 |
+| Per-app mode "answer in English" | 2 to 4 English | 4 English | **7 English** |
+
+Rewrites are now checked with `languages::detect_strong`: in the wrong language BOB asks once more with a firmer
+rule, and if that is still wrong it translates the first answer (a small model handles one task at a time better).
+Unit test: `selection::engine::tests::an_answer_in_the_wrong_language_is_asked_again`.

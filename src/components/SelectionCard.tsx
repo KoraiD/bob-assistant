@@ -29,7 +29,7 @@ export function SelectionCard() {
   if (!view) {
     return (
       <section aria-label="Selection Actions" className="soft-card panel-in mt-6 p-5">
-        <h2 className="text-lg font-medium">Selection Actions</h2>
+        <h3 className="sr-only">Selection Actions</h3>
         <p className="text-sm" style={muted}>
           {isTauri() ? "Checking..." : "Open the BOB app to use Selection Actions."}
         </p>
@@ -56,7 +56,7 @@ export function SelectionCard() {
     <section aria-label="Selection Actions" className="soft-card panel-in mt-6 p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-medium">Selection Actions</h2>
+          <h3 className="sr-only">Selection Actions</h3>
           <p className="text-sm" style={muted} data-testid="selection-summary">
             Select text in any app and press <kbd>{preset?.label ?? "your hotkey"}</kbd>. Pick an action with ↑↓ and ⏎; the result replaces the selection (⌘Z undoes it).
           </p>
@@ -97,6 +97,13 @@ export function SelectionCard() {
         </p>
       )}
 
+      <label className="mt-3 flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={view.settings.preview} onChange={(e) => void save({ preview: e.currentTarget.checked })} aria-label="Preview before replacing" />
+        Preview before replacing
+        <span className="text-xs" style={muted}>
+          The result appears in the panel first: ⏎ replaces, Copy keeps the selection, Esc discards.
+        </span>
+      </label>
       <details className="mt-4" data-testid="custom-actions">
         <summary className="cursor-pointer text-sm">
           Your own actions <span style={muted}>({view.settings.custom.length})</span>

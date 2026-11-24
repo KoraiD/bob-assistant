@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Toggle } from "./ui";
 import { isTauri } from "../lib/appInfo";
 import { api, formatBytes, percent, type ProgressEvent } from "../lib/brains";
 import {
@@ -55,7 +56,7 @@ export function DictationCard() {
   if (!view) {
     return (
       <section aria-label="Voice Dictation" className="soft-card panel-in mt-6 p-5">
-        <h2 className="text-lg font-medium">Voice Dictation</h2>
+        <h3 className="sr-only">Voice Dictation</h3>
         <p className="text-sm" style={muted}>
           {isTauri() ? "Checking..." : "Open the BOB app to use Voice Dictation."}
         </p>
@@ -80,22 +81,12 @@ export function DictationCard() {
     <section aria-label="Voice Dictation" className="soft-card panel-in mt-6 p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-medium">Voice Dictation</h2>
+          <h3 className="sr-only">Voice Dictation</h3>
           <p className="text-sm" style={muted} data-testid="dictation-summary">
             {dictationSummary(view, preset?.label ?? "your hotkey")}
           </p>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={s.enabled}
-          aria-label="Voice Dictation"
-          onClick={() => void save({ enabled: !s.enabled })}
-          className="rounded-full px-4 py-1.5 text-sm font-medium"
-          style={s.enabled ? { background: "var(--accent)", color: "var(--accent-fg)" } : { ...field, color: "var(--text-muted)" }}
-        >
-          {s.enabled ? "On" : "Off"}
-        </button>
+        <Toggle label="Voice Dictation" on={s.enabled} onChange={(v) => void save({ enabled: v })} />
       </div>
 
       <div className="mt-4 flex flex-wrap gap-4 text-sm">
@@ -137,6 +128,10 @@ export function DictationCard() {
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={s.tap_to_toggle} onChange={(e) => void save({ tap_to_toggle: e.currentTarget.checked })} aria-label="Tap to start and stop" />
           Tap to start, tap again to stop
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={s.sounds} onChange={(e) => void save({ sounds: e.currentTarget.checked })} aria-label="Start and stop sounds" />
+          Start and stop sounds
         </label>
         <label className="flex items-center gap-2">
           Free the model's memory

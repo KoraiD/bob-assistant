@@ -51,11 +51,24 @@ pub fn until_tomorrow_morning(now: u64, utc_offset: i64) -> u64 {
 }
 
 /// The local UTC offset, read once per run (a DST switch applies after a restart).
-fn local_utc_offset() -> i64 {
+pub(crate) fn local_utc_offset() -> i64 {
     static OFFSET: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
     *OFFSET.get_or_init(read_utc_offset)
 }
 
+/// Local "YYYY-MM-DD HH:MM:SS.mmm" for Unix milliseconds (log lines).
+pub fn local_stamp(unix_ms: u64) -> String {
+    let local = (unix_ms / 1000) as i64 + local_utc_offset();
+    let t = local.rem_euclid(86_400);
+    format!(
+        "{} {:02}:{:02}:{:02}.{:03}",
+        date_for(local),
+        t / 3600,
+        t / 60 % 60,
+        t % 60,
+        unix_ms % 1000
+    )
+}
 /// Local calendar date `days_ago` days before today, as "YYYY-MM-DD".
 pub fn local_date(days_ago: i64) -> String {
     date_for(now_secs() as i64 + local_utc_offset() - days_ago * 86_400)
@@ -99,18 +112,27 @@ impl Pause {
             PauseFor::UntilTomorrow => Some(until_tomorrow_morning(now_secs(), local_utc_offset())),
             PauseFor::Indefinitely => None,
         };
-        *self.state.lock().expect("pause") = Some(until);
+        *self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(until);
         self.view()
     }
 
     pub fn resume(&self) -> PauseView {
-        *self.state.lock().expect("pause") = None;
+        *self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.view()
     }
 
     /// Current state; an expired pause counts as resumed (and is cleared).
     pub fn view(&self) -> PauseView {
-        let mut s = self.state.lock().expect("pause");
+        let mut s = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(Some(t)) = *s {
             if now_secs() >= t {
                 *s = None;

@@ -3,6 +3,25 @@
 All notable changes to BOB. Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
 
 ## [Unreleased]
+### Added (Task 12a, features and hardening)
+- Per-app modes (Personalize): tone, answer language and instructions per app for Selection Actions and dictation cleanup, plus a Ghost Text switch per app.
+- Preview before replace (Selection Actions, optional): the result appears in the panel; Enter replaces, Copy keeps the selection, Esc discards.
+- Soft start and stop sounds for dictation, synthesized by BOB (no sound files), with a switch to turn them off.
+- Clipboard context (opt-in): text copied in the last two minutes helps Ghost Text and, for allowed brains, Selection Actions. Items password managers mark as private, copies in quiet apps and BOB's own copies are skipped.
+- AI agents (MCP): `bob-mcp` lets Kiro, Claude Desktop and other MCP clients rewrite text, get suggestions, check status and pause BOB. Off by default (Settings > AI agents). A Skill file (`skills/bob/SKILL.md`) explains BOB to other tools. See docs/MCP.md.
+- Preferred writing languages (up to four) and style notes (Personalize). Ghost Text drops suggestions in other languages; rewrites keep to them and are checked, retried once and, if needed, translated.
+- Logging with five levels (Settings > Logs), a rotating `~/Library/Logs/BOB/bob.log`, recent lines in the app, and the helper's messages in the same log.
+- Activity trail (Settings > Activity, `audit.jsonl`): settings changes, brains, permissions, text sent to brains (sizes only), AI agent calls.
+- `style-bench` measures what the language and style settings change on the real model; a 192-case Ghost Text settings matrix and randomized typing sessions run in CI.
+### Changed
+- A Mac-style window: inset traffic lights, no title bar, a sidebar with line icons, System Settings style groups, switches and segmented controls; SF Pro for text, the rounded face only for BOB's name.
+- Tone presets are stronger (friendly uses contractions, professional none, concise about two thirds of the length), measured in docs/PERFORMANCE.md.
+- US or UK spelling is applied by BOB to everything it types (the model ignored the instruction).
+### Fixed
+- Ghost Text in Chrome showed text you had already typed (owner's screenshot "Investigate the | te the possibility of using"): Chrome reports the new caret before the new text. BOB now re-reads the field shortly after each change, ignores stale text after an accept, keeps the chip in place until the text arrives, and treats Chrome's no-break spaces as spaces.
+- Ghost Text suggested another language in the same script (owner's screenshot: Vietnamese after the Hungarian "Hát."). Such suggestions are now taken back.
+- A suggestion with a quoted word mid-sentence (`it's "fine" today`) stopped at the closing quote.
+- Hardening: settings, memory, profile and usage files are created 0600 and synced before replacing; the settings folder is 0700; brain answers are capped (8 MB per answer, 64 KB per error page); the helper socket refuses other users and has a handshake deadline; a panicked thread no longer poisons shared state for the rest of the app; panics are logged.
 ### Added (Task 11, from user research)
 - Voice edit: select text, hold ⌥Space and say what to change ("make this friendlier", "translate to German"); the Selection brain rewrites the selection (⌘Z undoes it).
 - Dictation vocabulary (names and terms whisper should expect) and text replacements ("my email" → your address).

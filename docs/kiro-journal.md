@@ -192,3 +192,21 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
   could reach `ghost-settings.json`. The core now validates them, with a test.
 - **Tests now:** Rust 222 + 2 end-to-end (+4 ignored), Swift 84, Vitest 122 (axe audits of all eight panels).
 
+## 2026-11-24: Task 12a, five proposals, hardening, logging, UI, languages
+- **Two bugs from screenshots, fixed at their source:** in Chrome the chip repeated typed text because Chrome sends
+  the new caret before the new text; the helper now re-reads the field shortly after each change, and the engine
+  ignores stale text after an accept. A Vietnamese suggestion after the Hungarian "Hát." passed the script check
+  (both Latin); a language filter from letters and common words now takes such chips back.
+- **Measuring changed the design twice.** `style-bench` showed the local model ignores US/UK spelling entirely, so
+  BOB now respells the output itself; the old tone wording barely changed anything, so the presets were rewritten
+  and re-measured. The per-app "answer in English" rule held 3 of 8 times; a language check with one retry and a
+  Translate fallback brought it to 7 of 8.
+- **The settings matrix found a real bug:** 192 combinations through the real engine showed a chip like
+  `it's "fine" today` stopping at the closing quote. The randomized sessions confirm key capture always follows the
+  chip.
+- **The full test run caught a race that single runs missed:** a new handshake deadline made `set_read_timeout`
+  fail with EINVAL on macOS when the peer had already hung up. The fix ignores that error, with a regression test
+  that connects and hangs up 50 times.
+- **MCP both ways:** Kiro used `fetch` while building BOB, and now BOB is an MCP server itself (`bob-mcp`), tested
+  end to end against the running app and the local model, plus a Skill file for other tools.
+- **Tests now:** Rust 253 + 2 end-to-end (+4 ignored), Swift 87, Vitest 127.

@@ -99,9 +99,13 @@ fn run_loop(program: &Path, socket: &Path, backoff: Backoff, stop: &AtomicBool) 
     let mut attempt: u32 = 0;
     while !stop.load(Ordering::SeqCst) {
         let started = Instant::now();
-        let child = Command::new(program).env("BOB_SOCKET", socket).spawn();
+        let child = Command::new(program)
+            .env("BOB_SOCKET", socket)
+            .stderr(std::process::Stdio::piped())
+            .spawn();
         match child {
             Ok(mut child) => {
+                forward_stderr(&mut child);
                 wait_or_kill(&mut child, stop);
                 // A helper that stayed up for a while is healthy: reset the backoff.
                 if started.elapsed() > Duration::from_secs(10) {
@@ -116,6 +120,25 @@ fn run_loop(program: &Path, socket: &Path, backoff: Backoff, stop: &AtomicBool) 
         sleep_interruptible(backoff.delay(attempt), stop);
         attempt = attempt.saturating_add(1);
     }
+}
+
+/// The helper's stderr goes into BOB's log (target "helper"): its own messages at info, whisper and Metal
+/// initialization chatter at debug. The helper never prints user text.
+fn forward_stderr(child: &mut Child) {
+    use std::io::BufRead;
+    let Some(err) = child.stderr.take() else {
+        return;
+    };
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(err).lines().map_while(Result::ok) {
+            let line: String = line.chars().take(500).collect();
+            if line.starts_with("bob-native") {
+                log::info!(target: "helper", "{line}");
+            } else {
+                log::debug!(target: "helper", "{line}");
+            }
+        }
+    });
 }
 
 fn wait_or_kill(child: &mut Child, stop: &AtomicBool) {

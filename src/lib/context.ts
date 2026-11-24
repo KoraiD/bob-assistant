@@ -21,7 +21,30 @@ export interface GhostLayers {
   memory: boolean;
   window: boolean;
   screen: boolean;
+  /** "I write in Hungarian and English" before the text. */
+  language_hint: boolean;
+  /** Text copied in the last two minutes. */
+  clipboard: boolean;
 }
+export interface AppMode {
+  bundle_id: string;
+  name: string;
+  tone: Tone | null;
+  /** A code from LANGUAGES, or "" for the global rule. */
+  language: string;
+  instructions: string;
+}
+/** Mirrors context/languages.rs (codes and names). */
+export const LANGUAGES: { code: string; name: string }[] = [
+  ["en", "English"], ["hu", "Hungarian"], ["de", "German"], ["fr", "French"], ["es", "Spanish"], ["it", "Italian"],
+  ["pt", "Portuguese"], ["nl", "Dutch"], ["pl", "Polish"], ["ro", "Romanian"], ["cs", "Czech"], ["sk", "Slovak"],
+  ["sv", "Swedish"], ["da", "Danish"], ["no", "Norwegian"], ["fi", "Finnish"], ["tr", "Turkish"], ["vi", "Vietnamese"],
+  ["ru", "Russian"], ["uk", "Ukrainian"], ["el", "Greek"], ["ja", "Japanese"], ["zh", "Chinese"],
+].map(([code, name]) => ({ code, name }));
+export const MAX_PREFERRED = 4;
+export const MAX_MODE_INSTRUCTIONS = 500;
+export const MAX_STYLE_NOTES = 300;
+export const languageName = (code: string) => LANGUAGES.find((l) => l.code === code)?.name ?? code;
 
 export interface ContextSettings {
   scope: ContextScope;
@@ -30,6 +53,9 @@ export interface ContextSettings {
   ghost: GhostLayers;
   quotes: Quotes;
   spelling: Spelling;
+  languages: string[];
+  style_notes: string;
+  app_modes: AppMode[];
 }
 
 export interface VisibleSummary {
@@ -85,8 +111,8 @@ export const TONES: { id: Tone; label: string }[] = [
  * Ghost Text layers the app offers (owner decision after the benchmark): remembered phrases alone, optionally
  * with the window title. The window title needs memory; profile and screen text stay benchmark-only.
  */
-export function ghostLayers(memory: boolean, window: boolean): GhostLayers {
-  return { profile: false, memory, window: memory && window, screen: false };
+export function ghostLayers(memory: boolean, window: boolean, extra: Pick<GhostLayers, "language_hint" | "clipboard"> = { language_hint: false, clipboard: false }): GhostLayers {
+  return { profile: false, memory, window: memory && window, screen: false, language_hint: extra.language_hint, clipboard: extra.clipboard };
 }
 
 export const contextApi = {

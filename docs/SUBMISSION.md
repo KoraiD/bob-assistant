@@ -1,4 +1,5 @@
 # Kiroween 2026 submission checklist
+The current plan, open items and the packaging steps are in [ROADMAP.md](ROADMAP.md).
 
 Sources: the Devpost overview page and the **Official Rules** (page updated Nov 16, 2026; read 2026-11-22).
 Rule section numbers below refer to the Official Rules. Re-read the Rules tab before submitting: they can change.
@@ -29,7 +30,7 @@ Rule section numbers below refer to the Official Rules. Re-read the Rules tab be
 - [ ] Public GitHub repo (GitHub only) with visible license in About
   - [x] MIT `LICENSE` at the root
   - [x] Repo created under the owner's personal GitHub account, pushed, public: https://github.com/KoraiD/bob-assistant
-  - [ ] License visible in the About section (check on the repo page)
+  - [x] License visible in the About section (GitHub API reports `mit`, 2026-11-24)
 - [x] `/.kiro` at the root, never ignored (specs, steering, hooks, agents)
   - [x] `.kiro/settings/mcp.json` (added by the owner: the agent is blocked from writing that folder)
 - [ ] URL to the functional app: a GitHub Release with the `.dmg`, plus build-from-source instructions

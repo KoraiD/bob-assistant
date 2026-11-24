@@ -33,7 +33,18 @@ const DEFAULTS: Record<string, unknown> = {
   orb_get: { state: "idle", message: null },
   models_list: [],
   dictation_get: { settings: {}, models: [], stats: {}, microphone: null },
-  general_get: { show_in_dock: true, open_window_at_launch: true, login_item: "disabled", pause: { paused: false, until: null } },
+  general_get: {
+    show_in_dock: true,
+    open_window_at_launch: true,
+    login_item: "disabled",
+    pause: { paused: false, until: null },
+    log_level: "info",
+    log_dir: "/Users/me/Library/Logs/BOB",
+    mcp_enabled: false,
+    mcp_command: "/Applications/BOB.app/Contents/MacOS/bob-mcp",
+  },
+  audit_recent: [{ at: 1764000000000, kind: "brain.removed", detail: { brain: "old-llama" } }],
+  logs_tail: [],
 };
 function mockCore(overrides: Record<string, unknown> = {}) {
   invoke.mockImplementation(async (cmd: string) => ({ ...DEFAULTS, ...overrides })[cmd]);
@@ -187,7 +198,7 @@ describe("Settings and Mac behavior", () => {
     expect(invoke).toHaveBeenCalledWith("general_set_dock", { show: false });
     await userEvent.click(screen.getByRole("switch", { name: "Open at login" }));
     expect(invoke).toHaveBeenCalledWith("general_set_login", { on: true });
-    await userEvent.click(screen.getByRole("button", { name: "For 1 hour" }));
+    await userEvent.click(screen.getByRole("button", { name: "1 hour" }));
     expect(invoke).toHaveBeenCalledWith("pause_start", { how: "hour" });
   });
 

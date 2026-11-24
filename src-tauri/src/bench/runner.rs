@@ -23,7 +23,10 @@ pub struct TimedRecorder(Mutex<Vec<(Instant, CoreCommand)>>);
 
 impl Sink for TimedRecorder {
     fn send(&self, cmd: CoreCommand) {
-        self.0.lock().expect("recorder").push((Instant::now(), cmd));
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((Instant::now(), cmd));
     }
 }
 
@@ -32,7 +35,7 @@ impl TimedRecorder {
     pub fn chip_events(&self, start: Instant) -> Vec<ChipEvent> {
         self.0
             .lock()
-            .expect("recorder")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .filter(|(t, _)| *t >= start)
             .filter_map(|(t, c)| {

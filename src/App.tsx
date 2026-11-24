@@ -14,12 +14,13 @@ import { generalApi, OPEN_PANEL_EVENT, pauseLabel, SHELL_EVENT, type PauseView }
 import { useOrb } from "./lib/orb";
 import { useTauriEvent } from "./lib/useTauriEvent";
 import { useTheme } from "./lib/theme";
+import { Icon } from "./components/ui";
 
 /** The three capabilities, in priority order (see .kiro/steering/product.md). */
 export const CAPABILITIES = [
-  { id: "ghost", title: "Ghost Text", blurb: "Inline next-word predictions at your caret, in any app.", status: "Live", how: "Type, pause, press Tab" },
-  { id: "selection", title: "Selection Actions", blurb: "Highlight text, press a hotkey, rewrite it in place.", status: "Live", how: "Select, press ⌘⇧J" },
-  { id: "dictation", title: "Voice Dictation", blurb: "Hold a key, speak, release. Clean text appears at the caret.", status: "Live", how: "Hold ⌥Space, speak" },
+  { id: "ghost", title: "Ghost Text", blurb: "Suggests the next words where you type, in any app.", how: "Pause, then Tab" },
+  { id: "selection", title: "Selection Actions", blurb: "Rewrite selected text in place: fix, shorten, translate.", how: "Select, then ⌘⇧J" },
+  { id: "dictation", title: "Voice Dictation", blurb: "Speak and BOB types it at the cursor. Recognized on this Mac.", how: "Hold ⌥Space" },
 ] as const;
 
 /** Footer text: "BOB 0.1.0 · macos aarch64", or a plain preview label outside the app. */
@@ -31,38 +32,35 @@ export function formatBuild(info: AppInfo): string {
 export type Panel = "overview" | "ghost" | "selection" | "dictation" | "brains" | "personalize" | "stats" | "settings";
 
 /** UI-1: one panel per capability plus Brains, Personalize, Statistics and Settings. */
-export const PANELS: { id: Panel; label: string; icon: string }[] = [
-  { id: "overview", label: "Overview", icon: "🏚️" },
-  { id: "ghost", label: "Ghost Text", icon: "👻" },
-  { id: "selection", label: "Selection Actions", icon: "✨" },
-  { id: "dictation", label: "Voice Dictation", icon: "🎙️" },
-  { id: "brains", label: "Brains", icon: "🧠" },
-  { id: "personalize", label: "Personalize", icon: "🪄" },
-  { id: "stats", label: "Statistics", icon: "📈" },
-  { id: "settings", label: "Settings", icon: "🕯️" },
+export const PANELS: { id: Panel; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "ghost", label: "Ghost Text" },
+  { id: "selection", label: "Selection Actions" },
+  { id: "dictation", label: "Voice Dictation" },
+  { id: "brains", label: "Brains" },
+  { id: "personalize", label: "Personalize" },
+  { id: "stats", label: "Statistics" },
+  { id: "settings", label: "Settings" },
 ];
 
 function Overview({ go }: { go: (p: Panel) => void }) {
   return (
     <>
-      <section aria-label="Capabilities" className="grid gap-4 md:grid-cols-3">
+      <section aria-label="Capabilities" className="mac-group-body panel-in">
         {CAPABILITIES.map((c) => (
-          <article key={c.id} className="soft-card panel-in flex flex-col p-5" data-testid={`capability-${c.id}`}>
-            <h3 className="mb-1 text-lg font-medium">{c.title}</h3>
-            <p className="mb-3 text-sm" style={{ color: "var(--text-muted)" }}>
-              {c.blurb}
-            </p>
-            <p className="mb-4 text-xs" style={{ color: "var(--text-muted)" }}>
-              <kbd>{c.how}</kbd>
-            </p>
-            <div className="mt-auto flex items-center justify-between">
-              <span className="rounded-full px-3 py-1 text-xs" style={{ background: "var(--accent-2-soft)", color: "var(--accent-2)" }}>
-                {c.status}
-              </span>
-              <button type="button" onClick={() => go(c.id)} className="rounded-full px-3 py-1 text-xs" style={{ background: "var(--surface-raised)", border: "1px solid var(--border-strong)" }} aria-label={`Open ${c.title}`}>
-                Open
-              </button>
+          <article key={c.id} className="mac-row" data-testid={`capability-${c.id}`}>
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
+              <Icon name={c.id} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="mac-row-title font-medium">{c.title}</h3>
+              <p className="mac-row-detail">
+                {c.blurb} <kbd className="ml-1">{c.how}</kbd>
+              </p>
             </div>
+            <button type="button" onClick={() => go(c.id)} className="mac-button" aria-label={`Open ${c.title}`}>
+              Open
+            </button>
           </article>
         ))}
       </section>
@@ -124,11 +122,13 @@ export default function App() {
   };
 
   return (
-    <div className="flex min-h-screen" style={{ background: "var(--bg)" }}>
-      <aside className="flex w-60 shrink-0 flex-col gap-6 p-5" style={{ background: "var(--bg-sidebar)", borderRight: "1px solid var(--border)" }}>
-        <header>
-          <h1 className="text-3xl font-semibold tracking-tight">BOB</h1>
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+    <div className="relative flex min-h-screen">
+      <aside className="sidebar flex w-56 shrink-0 flex-col gap-4 px-3 pb-4 pt-12" style={{ borderRight: "1px solid var(--border)" }}>
+        {/* Space for the traffic lights; dragging here moves the window. */}
+        <div data-tauri-drag-region className="absolute left-0 top-0 h-10 w-56" aria-hidden />
+        <header className="px-2">
+          <h1 className="text-xl font-semibold tracking-tight">BOB</h1>
+          <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>
             Bring Your Own Brain
           </p>
         </header>
@@ -147,7 +147,7 @@ export default function App() {
           </div>
         )}
         <nav aria-label="Sections">
-          <ul className="space-y-1">
+          <ul className="space-y-0.5">
             {PANELS.map((p) => (
               <li key={p.id}>
                 <button
@@ -155,26 +155,28 @@ export default function App() {
                   aria-current={panel === p.id ? "page" : undefined}
                   onClick={() => setPanel(p.id)}
                   title={`${p.label} (⌘${PANELS.indexOf(p) + 1})`}
-                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm"
-                  style={panel === p.id ? { background: "var(--accent-soft)", color: "var(--accent)" } : { color: "var(--text)" }}
+                  className="nav-item"
                 >
-                  <span aria-hidden="true">{p.icon}</span>
+                  <span style={{ color: panel === p.id ? "var(--accent)" : "var(--text-muted)" }}>
+                    <Icon name={p.id} size={16} />
+                  </span>
                   {p.label}
                 </button>
               </li>
             ))}
           </ul>
         </nav>
-        <footer className="mt-auto text-xs" style={{ color: "var(--text-muted)" }}>
+        <footer className="mt-auto px-2 text-[11px]" style={{ color: "var(--text-muted)" }}>
           {formatBuild(info)}
         </footer>
       </aside>
-      <main className="min-w-0 flex-1 p-8" aria-label={current.label}>
+      <main className="relative min-w-0 flex-1 px-8 pb-8 pt-10" aria-label={current.label} style={{ background: "var(--bg)" }}>
+        <div data-tauri-drag-region className="absolute left-0 right-0 top-0 h-10" aria-hidden />
+        <h2 className="panel-in mb-4 text-[20px] font-semibold">{current.label}</h2>
         {panel === "overview" && (
           <div className="panel-in mb-6">
-            <h2 className="text-2xl font-semibold">Welcome to the haunt</h2>
-            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-              A friendly ghost for every app. Here is what I can do:
+            <p style={{ color: "var(--text-muted)" }}>
+              Three ways BOB helps you write, with the brain you choose.
             </p>
           </div>
         )}

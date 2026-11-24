@@ -83,7 +83,7 @@ impl Usage {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(
+        crate::fsutil::write_private_file(
             &tmp,
             serde_json::to_string(self).map_err(std::io::Error::other)?,
         )?;
@@ -155,14 +155,18 @@ fn recorder() -> &'static Mutex<Recorder> {
 
 /// Load and persist usage at `path` (the app). Without this call usage stays in memory (tests, benchmark).
 pub fn init(path: PathBuf) {
-    let mut r = recorder().lock().expect("usage");
+    let mut r = recorder()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     r.usage = Usage::load(&path);
     r.path = Some(path);
 }
 
 /// Count something for today. Saved at most every 30 seconds (and by [`flush`] at exit).
 pub fn record(f: impl FnOnce(&mut Day)) {
-    let mut r = recorder().lock().expect("usage");
+    let mut r = recorder()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let today = crate::pause::local_date(0);
     r.usage.record(&today, f);
     let due = r
@@ -177,20 +181,26 @@ pub fn record(f: impl FnOnce(&mut Day)) {
 }
 
 pub fn flush() {
-    let r = recorder().lock().expect("usage");
+    let r = recorder()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(p) = &r.path {
         let _ = r.usage.save(p);
     }
 }
 
 pub fn view() -> UsageView {
-    let r = recorder().lock().expect("usage");
+    let r = recorder()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let last14: Vec<String> = (0..14).rev().map(crate::pause::local_date).collect();
     r.usage.view(&last14[13], &last14)
 }
 
 pub fn clear() {
-    let mut r = recorder().lock().expect("usage");
+    let mut r = recorder()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     r.usage = Usage::default();
     if let Some(p) = r.path.clone() {
         let _ = r.usage.save(&p);

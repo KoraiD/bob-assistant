@@ -34,8 +34,13 @@ Custom agents list steering explicitly in `resources` because steering is not au
 measure, research, change one thing, re-measure).
 
 ## MCP
-Planned: `fetch` server for documentation lookups during the build, and a custom `bob-bench` server exposing
-benchmark results to Kiro (stretch). The workspace file `.kiro/settings/mcp.json` was created by the owner because the
+Two directions:
+- **MCP servers Kiro used while building BOB:** `fetch` for documentation and research lookups (llama.cpp server
+  flags, MCP revisions, Devpost rules).
+- **BOB is an MCP server** (Task 12a): `bob-mcp` exposes BOB's rewrite, suggestion, status, pause and usage tools to
+  Kiro and other agents, off by default, audited, with a Skill file (`skills/bob/SKILL.md`) that tells other tools
+  when and how to use it. The workspace `.kiro/settings/mcp.json` has a `bob` entry for the development build.
+  See docs/MCP.md. The workspace file `.kiro/settings/mcp.json` was created by the owner because the
 agent's permission rules block writes to that folder (a deliberate safeguard). Content:
 
 ```json

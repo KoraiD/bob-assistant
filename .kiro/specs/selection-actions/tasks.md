@@ -8,3 +8,6 @@ Plan task 7. Tick a box in the same commit as the code.
   - [ ] 5.1 Owner check: undo (Cmd+Z) as one step in TextEdit, Notes, Mail; Chrome/Slack paste path
 - [x] 6. Settings: hotkey presets and custom actions (Overview > Selection Actions); default brain is the Selection role in Brains; tone, language and profile come from Personalize (`chat_system`)
 - [x] 7. Docs and journal
+- [x] 8. Preview before replace (proposal 6): `State::Preview`, `CopyText`, panel preview block (engine test)
+- [x] 9. Language check of results: retry once, then translate (`run_checked`, engine test; style-bench part C)
+- [x] 10. Headless rewrite for AI agents (`selection::engine::rewrite`, MCP)

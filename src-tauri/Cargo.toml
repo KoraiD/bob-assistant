@@ -17,12 +17,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip: exact f64 round trips (default parsing can be 1 ULP off; found by a property test).
 serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time", "sync", "process", "io-util", "net", "fs", "signal"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time", "sync", "process", "io-util", "net", "fs", "signal", "io-std"] }
 futures-util = "0.3.34"
 thiserror = "2.0.21"
 sha2 = "0.10.9"
@@ -34,7 +34,6 @@ bytes = "1.12.2"
 rand = "0.9"
 # Remember the window's size and position (official Tauri plugin).
 tauri-plugin-window-state = "2.4"
-env_logger = { version = "0.11.12", default-features = false, features = ["auto-color", "humantime"] }
 
 
 # AppKit access for the Cmd+Q key monitor (already in the tree through Tauri; same versions).

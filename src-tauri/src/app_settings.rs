@@ -15,6 +15,10 @@ pub struct AppSettings {
     pub show_in_dock: bool,
     /// Show the window when BOB starts. Off: start quietly in the menu bar (handy as a login item).
     pub open_window_at_launch: bool,
+    /// How much goes into ~/Library/Logs/BOB/bob.log (Settings > Logs).
+    pub log_level: crate::logging::Level,
+    /// Let AI agents use BOB through MCP (Settings > AI agents). Off by default.
+    pub mcp_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -22,6 +26,8 @@ impl Default for AppSettings {
         Self {
             show_in_dock: true,
             open_window_at_launch: true,
+            log_level: crate::logging::Level::Info,
+            mcp_enabled: false,
         }
     }
 }
@@ -39,7 +45,7 @@ impl AppSettings {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(
+        crate::fsutil::write_private_file(
             &tmp,
             serde_json::to_string_pretty(self).map_err(std::io::Error::other)?,
         )?;
@@ -220,6 +226,8 @@ mod tests {
         let s = AppSettings {
             show_in_dock: false,
             open_window_at_launch: false,
+            log_level: crate::logging::Level::Debug,
+            mcp_enabled: true,
         };
         s.save(&p).unwrap();
         assert_eq!(AppSettings::load(&p), s);

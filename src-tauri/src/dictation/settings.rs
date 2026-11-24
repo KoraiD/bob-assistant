@@ -66,6 +66,8 @@ pub struct DictationSettings {
     pub replacements: Vec<Replacement>,
     /// Free the speech model's memory after this many idle minutes (0 = keep it loaded).
     pub unload_after_min: u32,
+    /// Soft start and stop sounds (proposal 12). On by default; the Dictation card turns them off.
+    pub sounds: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -147,6 +149,7 @@ impl Default for DictationSettings {
             vocabulary: vec![],
             replacements: vec![],
             unload_after_min: 0,
+            sounds: true,
         }
     }
 }
@@ -169,7 +172,7 @@ impl DictationSettings {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(
+        crate::fsutil::write_private_file(
             &tmp,
             serde_json::to_string_pretty(self).map_err(std::io::Error::other)?,
         )?;

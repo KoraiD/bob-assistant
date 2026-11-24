@@ -228,6 +228,14 @@ pub fn set_pause(app: &AppHandle, how: Option<PauseFor>) -> PauseView {
         g.set_paused(view.paused);
     }
     log::info!("BOB {}", if view.paused { "paused" } else { "resumed" });
+    crate::audit::record(
+        if view.paused {
+            "app.paused"
+        } else {
+            "app.resumed"
+        },
+        serde_json::json!({ "until": view.until }),
+    );
     if let Some(until) = view.until {
         let (app, pause) = (app.clone(), pause.clone());
         std::thread::spawn(move || {
@@ -259,6 +267,40 @@ pub struct GeneralView {
     pub open_window_at_launch: bool,
     pub login_item: LoginItem,
     pub pause: PauseView,
+    pub log_level: crate::logging::Level,
+    pub log_dir: Option<String>,
+    pub mcp_enabled: bool,
+    /// Where `bob-mcp` is (inside the app bundle), for the agent configuration snippet.
+    pub mcp_command: Option<String>,
+}
+
+/// The control-socket task while AI agents are allowed.
+#[derive(Default)]
+pub struct Mcp(pub Mutex<Option<tauri::async_runtime::JoinHandle<()>>>);
+
+pub fn mcp_command() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let p = exe.parent()?.join("bob-mcp");
+    Some(p.display().to_string())
+}
+
+/// Start or stop the control socket to match `on`.
+pub fn apply_mcp(app: &AppHandle, on: bool) {
+    let Some(state) = app.try_state::<Mcp>() else {
+        return;
+    };
+    let mut slot = state
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if on && slot.is_none() {
+        match crate::mcp::start_control(crate::mcp::app_dispatch(app.clone())) {
+            Ok(h) => *slot = Some(h),
+            Err(e) => log::warn!("mcp: cannot start the control socket: {e}"),
+        }
+    } else if !on {
+        crate::mcp::stop_control(slot.take());
+    }
 }
 
 fn login_item() -> LoginItem {
@@ -275,12 +317,20 @@ fn login_item() -> LoginItem {
 /// The Settings view. Locks the settings once: a second `lock()` in the same expression would deadlock,
 /// because the first guard lives until the end of the statement (this froze the app once).
 pub fn general_view(general: &General, pause: &Pause, login_item: LoginItem) -> GeneralView {
-    let s = general.settings.lock().expect("general").clone();
+    let s = general
+        .settings
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
     GeneralView {
         show_in_dock: s.show_in_dock,
         open_window_at_launch: s.open_window_at_launch,
         login_item,
         pause: pause.view(),
+        log_level: s.log_level,
+        log_dir: crate::logging::dir_in_use().map(|p| p.display().to_string()),
+        mcp_enabled: s.mcp_enabled,
+        mcp_command: mcp_command(),
     }
 }
 
@@ -296,10 +346,17 @@ pub fn general_set_dock(
     show: bool,
 ) -> Result<(), String> {
     let s = {
-        let mut s = general.settings.lock().expect("general");
+        let mut s = general
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         s.show_in_dock = show;
         s.clone()
     };
+    crate::audit::record(
+        "settings.general",
+        serde_json::json!({ "show_in_dock": show }),
+    );
     s.save(&general.path)
         .map_err(|e| format!("cannot save the setting: {e}"))?;
     apply_dock(&app, show, true);
@@ -309,16 +366,24 @@ pub fn general_set_dock(
 #[tauri::command]
 pub fn general_set_open_at_launch(general: State<'_, General>, open: bool) -> Result<(), String> {
     let s = {
-        let mut s = general.settings.lock().expect("general");
+        let mut s = general
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         s.open_window_at_launch = open;
         s.clone()
     };
+    crate::audit::record(
+        "settings.general",
+        serde_json::json!({ "open_window_at_launch": open }),
+    );
     s.save(&general.path)
         .map_err(|e| format!("cannot save the setting: {e}"))
 }
 
 #[tauri::command]
 pub fn general_set_login(on: bool) -> Result<LoginItem, String> {
+    crate::audit::record("settings.login_item", serde_json::json!({ "on": on }));
     #[cfg(target_os = "macos")]
     {
         app_settings::set_login_item(on)
@@ -329,6 +394,68 @@ pub fn general_set_login(on: bool) -> Result<LoginItem, String> {
         let _ = on;
         Err("launch at login is only available on macOS".into())
     }
+}
+
+fn save_general(general: &General, f: impl FnOnce(&mut AppSettings)) -> Result<(), String> {
+    let s = {
+        let mut s = general
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        f(&mut s);
+        s.clone()
+    };
+    s.save(&general.path)
+        .map_err(|e| format!("cannot save the setting: {e}"))
+}
+
+#[tauri::command]
+pub fn general_set_log_level(
+    general: State<'_, General>,
+    level: crate::logging::Level,
+) -> Result<(), String> {
+    save_general(&general, |s| s.log_level = level)?;
+    crate::logging::set_level(level);
+    crate::audit::record("settings.log_level", serde_json::json!({ "level": level }));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn mcp_set_enabled(
+    app: AppHandle,
+    general: State<'_, General>,
+    on: bool,
+) -> Result<(), String> {
+    save_general(&general, |s| s.mcp_enabled = on)?;
+    crate::audit::record("settings.mcp", serde_json::json!({ "enabled": on }));
+    apply_mcp(&app, on);
+    Ok(())
+}
+
+/// Recent log lines at or above `level` ("error" to "trace"), oldest first.
+#[tauri::command]
+pub fn logs_tail(level: crate::logging::Level) -> Vec<crate::logging::Line> {
+    crate::logging::tail(level.filter())
+}
+
+/// Recent audit entries, newest first; `prefix` filters by kind ("data.", "mcp.", "settings.").
+#[tauri::command]
+pub fn audit_recent(prefix: Option<String>, limit: Option<usize>) -> Vec<crate::audit::Entry> {
+    crate::audit::recent(
+        prefix.as_deref().filter(|p| !p.is_empty()),
+        limit.unwrap_or(200).min(300),
+    )
+}
+
+/// Show the log folder in Finder.
+#[tauri::command]
+pub fn logs_open_folder() -> Result<(), String> {
+    let dir = crate::logging::dir_in_use().ok_or("logging to a file is not active")?;
+    std::process::Command::new("/usr/bin/open")
+        .arg(&dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// `how`: "hour", "tomorrow" or "indefinite".
@@ -360,6 +487,7 @@ mod tests {
             settings: Mutex::new(AppSettings {
                 show_in_dock: false,
                 open_window_at_launch: true,
+                ..Default::default()
             }),
         };
         let pause = Pause::default();

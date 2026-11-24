@@ -64,11 +64,17 @@ struct Shared {
 
 impl Shared {
     fn settings(&self) -> DictationSettings {
-        self.settings.lock().expect("dictation settings").clone()
+        self.settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     fn last(&self) -> Option<String> {
-        let mut last = self.last.lock().expect("last dictation");
+        let mut last = self
+            .last
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if last
             .as_ref()
             .is_some_and(|(_, at)| at.elapsed() > LAST_KEEP)
@@ -92,6 +98,7 @@ impl Shared {
             },
             language: s.language.clone(),
             prompt: vocabulary_prompt(&s.vocabulary),
+            sounds: s.sounds,
         }
     }
 }
@@ -111,7 +118,7 @@ impl DictationHandle {
         self.shared
             .settings
             .lock()
-            .expect("dictation settings")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -121,7 +128,11 @@ impl DictationHandle {
             // Loaded again with the next helper configuration.
             self.shared.unloaded.store(false, Ordering::SeqCst);
         }
-        *self.shared.settings.lock().expect("dictation settings") = s.clone();
+        *self
+            .shared
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = s.clone();
         if let Some(dir) = &self.shared.storage {
             s.save(&dir.join(SETTINGS_FILE))?;
         }
@@ -129,7 +140,12 @@ impl DictationHandle {
     }
 
     pub fn stats(&self) -> DictationStats {
-        let mut st = self.shared.stats.lock().expect("dictation stats").clone();
+        let mut st = self
+            .shared
+            .stats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         st.idle_unloaded = self.shared.unloaded.load(Ordering::SeqCst);
         st.last_available = self.shared.last().is_some();
         st
@@ -273,7 +289,11 @@ impl Engine {
     }
 
     fn stats(&self, f: impl FnOnce(&mut DictationStats)) {
-        f(&mut self.shared.stats.lock().expect("dictation stats"));
+        f(&mut self
+            .shared
+            .stats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner));
     }
 
     fn feed(&mut self, input: Input) {
@@ -452,7 +472,7 @@ impl Engine {
         self.shared
             .settings
             .lock()
-            .expect("dictation settings")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -544,14 +564,19 @@ impl Engine {
                 }
                 let settings = self.shared.settings();
                 let text = apply_replacements(&text, &settings.replacements);
-                let text = typography::apply(&text, self.context.settings().quotes, self.last_char);
-                *self.shared.last.lock().expect("last dictation") =
+                let style = self.context.settings();
+                let text = typography::finish(&text, style.spelling, style.quotes, self.last_char);
+                *self
+                    .shared
+                    .last
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
                     Some((text.clone(), Instant::now()));
                 let audio_ms = self
                     .shared
                     .stats
                     .lock()
-                    .expect("dictation stats")
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .last_audio_ms;
                 let words = crate::usage::words(&text);
                 crate::usage::record(|d| {
@@ -601,6 +626,12 @@ async fn run_cleanup(
         return Err("the dictation brain cannot follow instructions".into());
     }
     let system = context.chat_system_opts(task, brain.config.shares_context(), !sets_language);
+    crate::audit::sent(
+        "dictation_cleanup",
+        &brain.config,
+        text.chars().count(),
+        brain.config.shares_context(),
+    );
     let mut stream = brain
         .chat_stream(&ChatRequest {
             system,

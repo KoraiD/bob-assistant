@@ -61,17 +61,25 @@ pub struct MemoryStore(Mutex<HashMap<String, String>>);
 
 impl SecretStore for MemoryStore {
     fn get(&self, brain_id: &str) -> Result<Option<String>, SecretError> {
-        Ok(self.0.lock().expect("lock").get(brain_id).cloned())
+        Ok(self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(brain_id)
+            .cloned())
     }
     fn set(&self, brain_id: &str, key: &str) -> Result<(), SecretError> {
         self.0
             .lock()
-            .expect("lock")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(brain_id.into(), key.into());
         Ok(())
     }
     fn delete(&self, brain_id: &str) -> Result<(), SecretError> {
-        self.0.lock().expect("lock").remove(brain_id);
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(brain_id);
         Ok(())
     }
 }

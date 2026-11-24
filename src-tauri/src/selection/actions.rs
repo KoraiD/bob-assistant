@@ -50,6 +50,8 @@ impl Default for HotkeySetting {
 pub struct SelectionSettings {
     pub hotkey: HotkeySetting,
     pub custom: Vec<CustomAction>,
+    /// Show the result first: Enter replaces, Esc discards (proposal 6). Off by default.
+    pub preview: bool,
 }
 
 impl SelectionSettings {
@@ -70,7 +72,7 @@ impl SelectionSettings {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(
+        crate::fsutil::write_private_file(
             &tmp,
             serde_json::to_string_pretty(self).map_err(std::io::Error::other)?,
         )?;
@@ -134,7 +136,7 @@ pub fn menu(settings: &SelectionSettings, language: &str) -> Vec<Action> {
         builtin(
             "Rephrase",
             "Rephrasing",
-            "Task: rewrite the user's text so it reads clearly and naturally. Keep the meaning, the language and \
+            "Task: rewrite the user's text so it reads clearly and naturally. Keep the meaning and \
              about the same length.",
         ),
         builtin(
@@ -273,6 +275,7 @@ mod tests {
                 label: "Emoji".into(),
                 instruction: "Add fitting emoji.".into(),
             }],
+            preview: true,
         };
         s.save(&p).unwrap();
         assert_eq!(SelectionSettings::load(&p), s);

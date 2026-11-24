@@ -27,3 +27,4 @@
 {"type":"dictation_status","model_loaded":true,"error":null}
 {"type":"dictation_status","model_loaded":false,"error":"cannot load the dictation model ggml-base.bin"}
 {"type":"dictation_selection","app_bundle_id":"com.apple.mail","text":"see you at the meeting"}
+{"type":"clipboard_text","text":"Meeting moved to 3 pm"}

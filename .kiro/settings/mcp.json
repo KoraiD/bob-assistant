@@ -1,5 +1,16 @@
 {
   "mcpServers": {
-    "fetch": { "command": "uvx", "args": ["mcp-server-fetch"], "disabled": false }
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ],
+      "disabled": false
+    },
+    "bob": {
+      "command": "./src-tauri/target/debug/bundle/macos/BOB.app/Contents/MacOS/bob-mcp",
+      "args": [],
+      "disabled": true
+    }
   }
 }

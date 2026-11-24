@@ -25,7 +25,7 @@ let view: DictationView;
 
 beforeEach(() => {
   view = {
-    settings: { enabled: true, model: "whisper-large-v3-turbo-q5", language: "", hotkey: { key_code: 49, modifiers: ["option"] }, cleanup: "none", tap_to_toggle: false, vocabulary: ["Kiroween"], replacements: [], unload_after_min: 0 },
+    settings: { enabled: true, model: "whisper-large-v3-turbo-q5", language: "", hotkey: { key_code: 49, modifiers: ["option"] }, cleanup: "none", tap_to_toggle: false, vocabulary: ["Kiroween"], replacements: [], unload_after_min: 0, sounds: true },
     models: [model("whisper-large-v3-turbo-q5", true), model("whisper-base", false)],
     stats: { dictations: 3, discarded: 1, errors: 0, last_error: null, last_audio_ms: 3200, last_transcribe_ms: 260, last_release_to_insert_ms: 290, model_loaded: true, model_error: null, idle_unloaded: false, last_available: false },
     microphone: "granted",

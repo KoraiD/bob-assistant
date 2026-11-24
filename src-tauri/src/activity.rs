@@ -88,13 +88,19 @@ impl Activity {
     }
 
     pub fn view(&self) -> OrbView {
-        self.inner.lock().expect("activity").view(Instant::now())
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .view(Instant::now())
     }
 
     /// Notify only when the visible state changes.
     fn publish(self: &Arc<Self>) {
         let v = self.view();
-        let mut last = self.last.lock().expect("activity last");
+        let mut last = self
+            .last
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if *last != v {
             *last = v.clone();
             drop(last);
@@ -106,7 +112,10 @@ impl Activity {
     pub fn observe(self: &Arc<Self>, cmd: &CoreCommand) {
         let mut error = false;
         {
-            let mut i = self.inner.lock().expect("activity");
+            let mut i = self
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             match cmd {
                 CoreCommand::ShowChip { .. } => i.haunting = true,
                 CoreCommand::HideChip => i.haunting = false,

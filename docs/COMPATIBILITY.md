@@ -150,3 +150,15 @@ Cmd+Shift+4. A delayed capture also works: `screencapture -T 5 ~/Desktop/chip.pn
   worked as `caret_source`, and the summary counts them in `caret_sources`. All-zero, non-finite or implausibly sized rects are rejected, so the chip is hidden instead of misplaced (GT-4).
 - Secure text fields (`AXSecureTextField`) are never read (GT-3).
 - Chromium/Electron apps get `AXManualAccessibility` set when they become frontmost.
+
+## Chrome: caret before text (Task 12a)
+Typing or accepting a suggestion in Chrome produced a chip that repeated text already typed (owner's screenshot,
+2026-11-24). Chrome sends the value-changed notification with the new caret bounds before the value itself has
+changed. The helper now re-reads the focused field 40, 120 and 300 ms after each change and sends only real changes;
+the engine ignores stale text after an accept and keeps the chip in place while only the caret has moved.
+`scripts/ax-lag-probe.swift` measures the lag in a page it opens itself. Owner check pending: type and accept in a
+Chrome text area and a contenteditable (Gmail compose).
+
+## Languages (Task 12a)
+With preferred languages set, suggestions in other languages are dropped (letters plus common words). Measured in
+PERFORMANCE.md. Known limit: shared letters (Hungarian and German "ü") cannot separate those two.

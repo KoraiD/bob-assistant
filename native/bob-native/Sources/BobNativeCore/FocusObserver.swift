@@ -21,7 +21,22 @@ public enum TransientApps {
 public final class FocusObserver {
     public enum Reason: String {
         case appActivated, focusChanged, valueChanged, selectionChanged
+        /// A re-read shortly after a change found newer text or caret (apps that update Accessibility late).
+        case settled
     }
+
+    /// Re-reads after each delivered snapshot. Some apps (Chrome, Electron) report the new caret before the
+    /// new text, or update the value after the notification; without a re-read the chip could keep showing
+    /// text the user already typed. Each re-read costs about a millisecond and is only delivered on change.
+    public static let settleDelaysMs = [40, 120, 300]
+
+    struct Key: Equatable {
+        let before: String?
+        let selectionLen: Int?
+        let caret: Rect?
+    }
+    private var lastDelivered: Key?
+    private var settleGeneration = 0
 
     /// Called (coalesced, main thread) with a fresh snapshot.
     public var onSnapshot: ((AXSnapshot, Reason) -> Void)?
@@ -130,7 +145,27 @@ public final class FocusObserver {
             guard let self, let reason = self.pendingReason else { return }
             self.pendingReason = nil
             guard let element = AXReader.focusedElement() else { return }
-            self.onSnapshot?(AXReader.snapshot(of: element), reason)
+            self.deliver(AXReader.snapshot(of: element), reason)
+            self.scheduleSettle()
+        }
+    }
+
+    private func deliver(_ snap: AXSnapshot, _ reason: Reason) {
+        lastDelivered = Key(before: snap.beforeCaret, selectionLen: snap.selectionLen, caret: snap.caret)
+        onSnapshot?(snap, reason)
+    }
+
+    private func scheduleSettle() {
+        settleGeneration += 1
+        let generation = settleGeneration
+        for delay in Self.settleDelaysMs {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delay)) { [weak self] in
+                guard let self, generation == self.settleGeneration, self.pendingReason == nil,
+                      let element = AXReader.focusedElement(), AXReader.pid(of: element) == self.observedPID else { return }
+                let snap = AXReader.snapshot(of: element)
+                let key = Key(before: snap.beforeCaret, selectionLen: snap.selectionLen, caret: snap.caret)
+                if key != self.lastDelivered { self.deliver(snap, .settled) }
+            }
         }
     }
 }

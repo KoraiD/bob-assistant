@@ -9,18 +9,18 @@ BOB is a privacy-first macOS assistant. It adds three capabilities to every app,
 
 | Capability | What it does | Status |
 |---|---|---|
-| **Ghost Text** | Inline next-word predictions at your caret. `Tab` accepts a word, `Shift+Tab` accepts all, `Esc` dismisses. | v1 (keystroke to chip p50 104 ms on M4 Max) |
-| **Voice Dictation** | Hold a key, speak, release. Clean text lands at the caret. Fully offline with local Whisper. | Planned (Task 8) |
-| **Selection Actions** | Highlight text, press a hotkey, rephrase / fix / summarize / translate in place. | Planned (Task 7) |
+| **Ghost Text** | Inline next-word predictions at your caret. `Tab` accepts a word, `Shift+Tab` accepts all, `Esc` dismisses. Drops suggestions in languages you do not write. | Working (keystroke to chip p50 about 90 ms on M4 Max) |
+| **Selection Actions** | Highlight text, press `⌘⇧J`, then fix / rephrase / shorten / summarize / translate or your own action, in place. Optional preview. | Working |
+| **Voice Dictation** | Hold `⌥Space` (or tap to toggle), speak, and the text lands at the caret. Speak over a selection to edit it. Fully offline with whisper.cpp. | Working |
+| **AI agents (MCP)** | Kiro and other agents can use BOB's brains and your writing style (off by default). See [docs/MCP.md](docs/MCP.md). | Working |
 
 > Built for **Kiroween 2026** (category: Frankenstein) with [Kiro](https://kiro.dev). The `/.kiro` directory
 > contains the specs, steering, hooks and custom agents used to build it. See [docs/KIRO.md](docs/KIRO.md).
 
 ## Status
-
-Tasks 1 to 4 are in place: app shell and tray, haunted theme, the Rust <-> Swift native bridge (protocol, handshake,
-supervision), the Accessibility caret observer, the permissions UI, the Brain layer (any local or cloud model)
-and Ghost Text v1. Progress is tracked in [docs/SUBMISSION.md](docs/SUBMISSION.md) and in each spec's `tasks.md`.
+All three capabilities work end to end, with per-app modes, preferred languages, statistics, an activity trail and
+an MCP server. What is left (packaging a notarized release, the demo video) is in [docs/ROADMAP.md](docs/ROADMAP.md);
+the submission checklist is [docs/SUBMISSION.md](docs/SUBMISSION.md).
 
 ## Requirements
 

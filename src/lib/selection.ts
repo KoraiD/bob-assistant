@@ -14,6 +14,8 @@ export interface CustomAction {
 export interface SelectionSettings {
   hotkey: HotkeySetting;
   custom: CustomAction[];
+  /** Show the result first; Enter replaces, Esc discards. */
+  preview: boolean;
 }
 
 export interface SelectionStats {

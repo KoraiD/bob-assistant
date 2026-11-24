@@ -18,6 +18,22 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+/// Time a new connection has to complete the version handshake.
+pub const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Whether the process on the other end of `stream` runs as this user (`getpeereid`).
+pub fn same_user(stream: &UnixStream) -> bool {
+    use std::os::fd::AsRawFd;
+    extern "C" {
+        fn getpeereid(fd: i32, uid: *mut u32, gid: *mut u32) -> i32;
+        fn geteuid() -> u32;
+    }
+    let (mut uid, mut gid) = (u32::MAX, u32::MAX);
+    // SAFETY: valid fd for the lifetime of `stream`; out-pointers to locals.
+    let ok = unsafe { getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) } == 0;
+    ok && uid == unsafe { geteuid() }
+}
+
 /// What the UI and tray need to know about the helper.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct BridgeStatus {
@@ -97,19 +113,26 @@ impl Bridge {
 
     /// Snapshot of the helper status.
     pub fn status(&self) -> BridgeStatus {
-        self.status.lock().expect("status lock").clone()
+        self.status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Send a command to the connected helper. `Err(NotConnected)` when none is connected.
     pub fn send(&self, cmd: &CoreCommand) -> io::Result<()> {
-        let mut guard = self.writer.lock().expect("writer lock");
+        let mut guard = self
+            .writer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match guard.as_mut() {
             Some(stream) => stream.write_all(encode_line(cmd).as_bytes()),
             None => Err(io::Error::from(io::ErrorKind::NotConnected)),
         }
     }
 
-    /// Accept helper connections one at a time, forever. Blocks the calling thread.
+    /// Accept helper connections one at a time, forever. Blocks the calling thread. Connections from
+    /// another user are refused (the socket is already 0600 in a 0700 folder; this is a second check).
     pub fn run<F: FnMut(&NativeEvent, &BridgeStatus)>(
         &self,
         listener: UnixListener,
@@ -118,6 +141,11 @@ impl Bridge {
         for incoming in listener.incoming() {
             match incoming {
                 Ok(stream) => {
+                    if !same_user(&stream) {
+                        log::warn!("rejected a helper connection from another user");
+                        crate::audit::record("security.peer_rejected", serde_json::json!({}));
+                        continue;
+                    }
                     if let Err(e) = self.serve_connection(stream, &mut on_event) {
                         log::warn!("native helper connection ended: {e}");
                     }
@@ -134,6 +162,9 @@ impl Bridge {
         on_event: &mut F,
     ) -> io::Result<()> {
         let mut reader = stream.try_clone()?;
+        // A peer that never says hello must not hold the bridge: the handshake has a deadline.
+        // macOS returns EINVAL when the peer already hung up; the read below then sees the close.
+        let _ = reader.set_read_timeout(Some(HANDSHAKE_TIMEOUT));
         let mut writer = stream;
         let mut decoder = LineDecoder::new();
         let mut buf = [0u8; 8192];
@@ -174,9 +205,17 @@ impl Bridge {
                                 })
                                 .as_bytes(),
                             )?;
-                            *self.writer.lock().expect("writer lock") = Some(writer.try_clone()?);
-                            self.status.lock().expect("status lock").connected = true;
+                            *self
+                                .writer
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                                Some(writer.try_clone()?);
+                            self.status
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .connected = true;
                             handshaken = true;
+                            let _ = reader.set_read_timeout(None);
                         }
                         // Anything before `hello` is a protocol violation: ignore it.
                         _ => continue,
@@ -187,7 +226,10 @@ impl Bridge {
                     screen_recording,
                 } = &event
                 {
-                    let mut st = self.status.lock().expect("status lock");
+                    let mut st = self
+                        .status
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     st.accessibility = Some(*accessibility);
                     st.microphone = Some(*microphone);
                     st.screen_recording = Some(*screen_recording);
@@ -201,8 +243,14 @@ impl Bridge {
         };
 
         // Connection closed: clear the writer and mark disconnected.
-        *self.writer.lock().expect("writer lock") = None;
-        let mut st = self.status.lock().expect("status lock");
+        *self
+            .writer
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        let mut st = self
+            .status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         st.connected = false;
         drop(st);
         result
@@ -371,6 +419,17 @@ mod tests {
         handle.join().unwrap().unwrap();
         assert!(rx.try_recv().is_err());
         assert_eq!(bridge.status(), BridgeStatus::default());
+    }
+
+    /// A peer that connects and hangs up at once must end the session cleanly (macOS: setting a socket
+    /// timeout after the peer closed fails with EINVAL; the full test run caught it under load).
+    #[test]
+    fn a_peer_that_hangs_up_immediately_ends_cleanly() {
+        for _ in 0..50 {
+            let (client, _bridge, _rx, handle) = start();
+            drop(client);
+            handle.join().unwrap().unwrap();
+        }
     }
 
     #[test]

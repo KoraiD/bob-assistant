@@ -42,6 +42,11 @@ feature that changes the answer.
 | Usage statistics | local `usage.json`: per-day counts (words accepted, words dictated, rewrites, speech milliseconds), at most 400 days, never any text; Statistics > Clear | yes, locally |
 | Running apps (quiet-apps picker) | bundle id and name, read when you open the list | not stored |
 | Open at login | macOS Login Items, or `~/Library/LaunchAgents/dev.bob.assistant.login.plist` when macOS refuses the login item; removed when you turn it off | yes, by macOS |
+| Copied text (clipboard context, opt-in) | read only while the switch is on: plain text, at most 2,000 characters, kept in memory for two minutes; skipped for items marked private by password managers (nspasteboard.org concealed or transient types), copies in quiet apps and BOB's own copies; to allowed brains only, redacted | no |
+| Per-app modes, preferred languages, style notes | local `context-settings.json` | yes, locally |
+| Logs | `~/Library/Logs/BOB/bob.log` (0600, rotated at 5 MB, 3 old files): states, sizes and timings only; every line is also redacted | yes, locally |
+| Activity trail | `~/Library/Logs/BOB/audit.jsonl` (0600, rotated at 2 MB): settings changes, brains (never keys), text sent to brains as feature, brain, cloud or not, character count and whether personal context was included; AI agent calls as tool, characters, duration and outcome | yes, locally |
+| AI agents (MCP, opt-in) | text an agent sends goes to your brains with the same rules as the hotkeys; only same-user processes can connect | not stored (audited without text) |
 | Transcripts, typed text, selections | never logged | no |
 | API keys | macOS Keychain | yes |
 

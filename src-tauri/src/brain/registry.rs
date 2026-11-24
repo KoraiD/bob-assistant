@@ -231,7 +231,8 @@ impl Registry {
         let tmp = path.with_extension("json.tmp");
         let text =
             serde_json::to_string_pretty(self).map_err(|e| RegistryError::Io(e.to_string()))?;
-        std::fs::write(&tmp, text).map_err(|e| RegistryError::Io(e.to_string()))?;
+        crate::fsutil::write_private_file(&tmp, text)
+            .map_err(|e| RegistryError::Io(e.to_string()))?;
         std::fs::rename(&tmp, path).map_err(|e| RegistryError::Io(e.to_string()))
     }
 }

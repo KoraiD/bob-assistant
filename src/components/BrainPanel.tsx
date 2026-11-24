@@ -544,7 +544,7 @@ export function BrainPanel() {
   if (!isTauri()) {
     return (
       <section className="soft-card p-5" aria-label="Brains">
-        <h2 className="text-lg font-medium">Brains</h2>
+        <h3 className="sr-only">Brains</h3>
         <p className="text-sm" style={muted} data-testid="brains-preview">
           Open the BOB app to manage brains. This browser preview cannot reach models.
         </p>

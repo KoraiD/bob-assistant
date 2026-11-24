@@ -13,3 +13,5 @@ Tick a box in the same commit as the code.
 - [x] 9. Selection Actions and Dictation use `chat_system` (Tasks 7 and 8)
 - [ ] 10. Manual check: screen context in Mail, Safari and a second display; compatibility matrix
 - [x] 11. Writing style: quote style applied to Ghost chips, dictation and rewrites; spelling preference in `chat_system` (Task 11)
+- [x] 12. Per-app modes (proposal 5), preferred languages, style notes (Task 12a; tests and style-bench)
+- [x] 13. Clipboard layer (proposal 16): opt-in, protocol `clipboard_text` and `set_context_mode.clipboard`, private items skipped (Swift and Rust tests)

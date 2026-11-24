@@ -11,7 +11,11 @@ BOB is a **friendly ghost**: spooky but warm, never gory or scary. Design counts
 ## Tokens (single source: `src/styles/globals.css`)
 - Surfaces: midnight indigo (`--bg #0c0b16`, `--surface #15132a`). Default theme is dark; "daylight" is optional.
 - Primary: ectoplasm green `--accent #8affc1`. Secondary: pumpkin `--accent-2 #ff9f5a`.
-- Rounded shapes (`--radius-card 18px`), soft glows (`--glow`), subtle floating motion.
+- Mac-native structure, haunted palette (owner request, 2026-11-24): System Settings style groups and rows
+  (`components/ui.tsx`: `Group`, `Row`, `Toggle`, `Segmented`, `Button`, `Icon`), `--radius-card 10px`, SF Pro for
+  text and the rounded face only for BOB's name and big numbers. Line icons, not emoji, in navigation.
+- The spooky part lives in the palette, the ghost (eyes follow the mouse, blush, bounce), the orb and the microcopy,
+  not in decoration. Soft glows (`--glow`) and gentle floating motion only on the ghost.
 - The Swift chip mirrors these colors; keep them in sync via `docs/DESIGN.md`.
 
 ## Rules

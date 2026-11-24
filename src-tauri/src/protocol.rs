@@ -174,6 +174,11 @@ pub enum NativeEvent {
         app_bundle_id: String,
         text: String,
     },
+    /// Text the user copied (proposal 16), only while the core enabled the clipboard layer. Never sent for
+    /// concealed or transient pasteboard items (password managers), bounded to 2,000 characters.
+    ClipboardText {
+        text: String,
+    },
     /// Recording or transcription failed; `reason` is "microphone", "no_model" or a short message.
     DictationError {
         reason: String,
@@ -223,6 +228,9 @@ pub enum CoreCommand {
     SetContextMode {
         scope: ContextScope,
         exclude: Vec<String>,
+        /// Report copied text (`clipboard_text`). Off unless the user turned the clipboard layer on.
+        #[serde(default)]
+        clipboard: bool,
     },
     /// Show macOS's Screen Recording prompt (only when the user picks a capture scope).
     RequestScreenRecording,
@@ -231,6 +239,9 @@ pub enum CoreCommand {
         title: String,
         items: Vec<String>,
         anchor: Option<Rect>,
+        /// A text block above the items (preview before replace, proposal 6).
+        #[serde(default)]
+        preview: Option<String>,
     },
     /// Replace the menu with a status line: progress, a streamed preview, or an error (SA-5, SA-7).
     MenuStatus {
@@ -242,6 +253,10 @@ pub enum CoreCommand {
     /// Replace the selection with `text`, only if it still equals `expected` (SA-6, SA-7).
     ReplaceSelection {
         expected: String,
+        text: String,
+    },
+    /// Put `text` on the clipboard (Copy in the preview).
+    CopyText {
         text: String,
     },
     /// Register the Selection Actions hotkey (replaces the previous one).
@@ -257,6 +272,9 @@ pub enum CoreCommand {
         /// Vocabulary hint for whisper ("Glossary: ..."), from the user's custom words.
         #[serde(default)]
         prompt: Option<String>,
+        /// Play the start and stop sounds (proposal 12).
+        #[serde(default)]
+        sounds: bool,
     },
     StartRecording,
     /// Stop recording; transcribe only when `transcribe` (a too-short hold is discarded, VD-4).
@@ -380,6 +398,10 @@ impl fmt::Debug for NativeEvent {
                 .field("speech", speech)
                 .field("audio_ms", audio_ms)
                 .field("transcribe_ms", transcribe_ms)
+                .finish(),
+            NativeEvent::ClipboardText { text } => f
+                .debug_struct("ClipboardText")
+                .field("text_chars", &text.chars().count())
                 .finish(),
             NativeEvent::DictationSelection {
                 app_bundle_id,

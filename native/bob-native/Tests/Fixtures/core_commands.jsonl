@@ -7,19 +7,22 @@
 {"type":"insert_text","text":" lazy"}
 {"type":"capture_keys","active":true}
 {"type":"capture_keys","active":false}
-{"type":"set_context_mode","scope":"accessibility","exclude":[]}
-{"type":"set_context_mode","scope":"all_screens","exclude":["com.1password.1password","dev.bob.assistant"]}
+{"type":"set_context_mode","scope":"accessibility","exclude":[],"clipboard":false}
+{"type":"set_context_mode","scope":"all_screens","exclude":["com.1password.1password","dev.bob.assistant"],"clipboard":false}
 {"type":"request_screen_recording"}
-{"type":"show_menu","title":"BOB","items":["Fix grammar","Rephrase","Summarize"],"anchor":{"x":200.0,"y":300.0,"width":140.0,"height":18.0}}
-{"type":"show_menu","title":"BOB","items":["Fix grammar"],"anchor":null}
+{"type":"show_menu","title":"BOB","items":["Fix grammar","Rephrase","Summarize"],"anchor":{"x":200.0,"y":300.0,"width":140.0,"height":18.0},"preview":null}
+{"type":"show_menu","title":"BOB","items":["Fix grammar"],"anchor":null,"preview":null}
 {"type":"menu_status","text":"Fixing grammar…","busy":true,"error":false}
 {"type":"hide_menu"}
 {"type":"replace_selection","expected":"teh quick","text":"the quick"}
 {"type":"set_hotkey","hotkey":{"key_code":38,"modifiers":["cmd","shift"]}}
-{"type":"set_dictation","hotkey":{"key_code":49,"modifiers":["option"]},"model_path":"/Users/me/Library/Application Support/dev.bob.assistant/models/ggml-large-v3-turbo-q5_0.bin","language":"","prompt":"Glossary: Kiroween, Dávid, llama.cpp."}
-{"type":"set_dictation","hotkey":null,"model_path":null,"language":"hu","prompt":null}
+{"type":"set_dictation","hotkey":{"key_code":49,"modifiers":["option"]},"model_path":"/Users/me/Library/Application Support/dev.bob.assistant/models/ggml-large-v3-turbo-q5_0.bin","language":"","prompt":"Glossary: Kiroween, Dávid, llama.cpp.","sounds":true}
+{"type":"set_dictation","hotkey":null,"model_path":null,"language":"hu","prompt":null,"sounds":true}
 {"type":"start_recording"}
 {"type":"stop_recording","transcribe":true}
 {"type":"stop_recording","transcribe":false}
 {"type":"orb","state":"listening","text":null}
 {"type":"orb","state":"error","text":"I didn't hear anything."}
+{"type":"set_context_mode","scope":"accessibility","exclude":["com.1password.1password"],"clipboard":true}
+{"type":"show_menu","title":"Preview: ⏎ replaces, Esc discards","items":["Replace selection","Copy","Discard"],"anchor":null,"preview":"The quick fox."}
+{"type":"copy_text","text":"The quick fox."}
