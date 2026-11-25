@@ -58,7 +58,30 @@ describe("SelectionCard", () => {
     await userEvent.type(within(box).getByLabelText("Action 1 instruction"), "Turn this into a polite no.");
     await userEvent.click(within(box).getByRole("button", { name: "Save actions" }));
     expect(invoke).toHaveBeenCalledWith("selection_set_settings", {
-      settings: expect.objectContaining({ custom: [{ label: "Decline politely", instruction: "Turn this into a polite no." }] }),
+      settings: expect.objectContaining({ custom: [{ label: "Decline politely", instruction: "Turn this into a polite no.", hotkey: null }] }),
+    });
+  });
+  it("gives a custom action its own shortcut, one action per shortcut", async () => {
+    view.settings.custom = [
+      { label: "Decline", instruction: "Say no politely.", hotkey: { key_code: 18, modifiers: ["control", "option"] } },
+      { label: "Emoji", instruction: "Add emoji." },
+    ];
+    render(<SelectionCard />);
+    const box = await screen.findByTestId("custom-actions");
+    await userEvent.click(within(box).getByText(/Edit your actions/));
+    const second = within(box).getByLabelText("Action 2 shortcut");
+    expect(second).toHaveValue("none");
+    // ⌃⌥1 belongs to the first action.
+    expect(within(second).getByRole("option", { name: "⌃⌥1" })).toBeDisabled();
+    await userEvent.selectOptions(second, "ctrl-opt-2");
+    await userEvent.click(within(box).getByRole("button", { name: "Save actions" }));
+    expect(invoke).toHaveBeenCalledWith("selection_set_settings", {
+      settings: expect.objectContaining({
+        custom: [
+          { label: "Decline", instruction: "Say no politely.", hotkey: { key_code: 18, modifiers: ["control", "option"] } },
+          { label: "Emoji", instruction: "Add emoji.", hotkey: { key_code: 19, modifiers: ["control", "option"] } },
+        ],
+      }),
     });
   });
 });
@@ -73,6 +96,6 @@ describe("selection helpers", () => {
     const many = Array.from({ length: 20 }, (_, i) => ({ label: ` A  ${i} `, instruction: " do it " }));
     const out = validCustom([{ label: "", instruction: "x" }, ...many]);
     expect(out).toHaveLength(12);
-    expect(out[0]).toEqual({ label: "A 0", instruction: "do it" });
+    expect(out[0]).toEqual({ label: "A 0", instruction: "do it", hotkey: null });
   });
 });

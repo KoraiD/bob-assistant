@@ -66,7 +66,19 @@ struct DictationHotkeyTests {
     @Test func defaultIsOptionSpaceAndAcceptable() {
         #expect(HotkeyCenter.defaultDictationHotkey == Hotkey(keyCode: kVK_Space, modifiers: ["option"]))
         #expect(HotkeyCenter.isAcceptable(HotkeyCenter.defaultDictationHotkey))
-        #expect(HotkeyCenter.Slot.allCases.count == 2)
+    }
+    @Test func warmUpWithoutAModelDoesNothing() async {
+        let warm: Int? = await withCheckedContinuation { c in Transcriber().warmUp { c.resume(returning: $0) } }
+        #expect(warm == nil)
+    }
+        @Test func slotsKeepTheirIdsAndActionIndexes() {
+        #expect(HotkeyCenter.Slot.selection.rawValue == 1)
+        #expect(HotkeyCenter.Slot.dictation.rawValue == 2)
+        #expect(HotkeyCenter.Slot.action(3).actionIndex == 3)
+        #expect(HotkeyCenter.Slot.selection.actionIndex == nil)
+        #expect(HotkeyCenter.Slot(rawValue: HotkeyCenter.Slot.action(5).rawValue) == .action(5))
+        #expect(HotkeyCenter.Slot(rawValue: 7) == nil)
+        #expect(Set([HotkeyCenter.Slot.selection, .dictation, .action(0), .action(1)]).count == 4)
     }
 }
 
@@ -98,6 +110,9 @@ struct GoldenTranscriptionTests {
         let t = Transcriber()
         let loaded: Transcriber.Failure? = await withCheckedContinuation { c in t.setModel(path: Self.modelPath) { c.resume(returning: $0) } }
         #expect(loaded == nil)
+        // The wake-up warm-up runs on the loaded model and leaves it usable.
+        let warm: Int? = await withCheckedContinuation { c in t.warmUp { c.resume(returning: $0) } }
+        #expect(warm != nil)
         let result = await withCheckedContinuation { c in t.transcribe(samples, language: "en") { c.resume(returning: $0) } }
         let text = try result.get().text.lowercased()
         #expect(text.contains("update"))

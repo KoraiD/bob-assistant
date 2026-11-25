@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { isTauri } from "../lib/appInfo";
 import { Group, Row, Toggle } from "./ui";
-import { HOTKEYS, hotkeyPreset, MAX_CUSTOM, selectionApi, validCustom, type CustomAction, type SelectionView } from "../lib/selection";
+import { ACTION_HOTKEYS, actionHotkeyPreset, HOTKEYS, hotkeyPreset, MAX_CUSTOM, selectionApi, validCustom, type CustomAction, type SelectionView } from "../lib/selection";
 
 const muted = { color: "var(--text-muted)" } as const;
 const field = { background: "var(--surface-raised)", border: "1px solid var(--border)" } as const;
@@ -60,7 +60,7 @@ export function SelectionCard() {
         label="Selection Actions"
         footer={
           <span data-testid="selection-summary">
-            Select text in any app and press <kbd>{preset?.label ?? "your hotkey"}</kbd>. Choose with ↑↓ and ⏎; the result replaces the selection, and ⌘Z undoes it.
+            Select text in any app and press <kbd>{preset?.label ?? "your hotkey"}</kbd>. Choose with ↑↓ and ⏎; the result replaces the selection, and ⌘Z undoes it. Explain and Reply show their answer to copy or insert instead.
           </span>
         }
       >
@@ -116,13 +116,34 @@ export function SelectionCard() {
           Edit your actions <span style={muted}>({view.settings.custom.length})</span>
         </summary>
         <p className="mt-2 text-xs" style={muted}>
-          Give each action a name and tell BOB what to do, for example “Reply politely and decline”. They appear after the built-in actions.
+          Give each action a name and tell BOB what to do, for example “Reply politely and decline”. They appear after the built-in actions. A shortcut runs the action on the selection directly, without the menu.
         </p>
         <ul className="mt-2 space-y-2">
           {custom.map((c, i) => (
             <li key={i} className="flex flex-wrap gap-2">
               <input aria-label={`Action ${i + 1} name`} value={c.label} maxLength={40} placeholder="Name" onChange={(e) => edit(i, { label: e.currentTarget.value })} className="w-40 rounded-lg px-2 py-1 text-sm" style={field} />
               <input aria-label={`Action ${i + 1} instruction`} value={c.instruction} maxLength={1000} placeholder="What BOB should do with the selected text" onChange={(e) => edit(i, { instruction: e.currentTarget.value })} className="min-w-64 flex-1 rounded-lg px-2 py-1 text-sm" style={field} />
+              <select
+                aria-label={`Action ${i + 1} shortcut`}
+                value={actionHotkeyPreset(c.hotkey)?.id ?? (c.hotkey ? "custom" : "none")}
+                onChange={(e) => {
+                  const id = e.currentTarget.value;
+                  if (id === "custom") return;
+                  edit(i, { hotkey: ACTION_HOTKEYS.find((h) => h.id === id)?.hotkey ?? null });
+                }}
+                className="mac-field"
+              >
+                <option value="none">No shortcut</option>
+                {ACTION_HOTKEYS.map((h) => {
+                  const taken = custom.some((o, j) => j !== i && actionHotkeyPreset(o.hotkey)?.id === h.id);
+                  return (
+                    <option key={h.id} value={h.id} disabled={taken}>
+                      {h.label}
+                    </option>
+                  );
+                })}
+                {c.hotkey && !actionHotkeyPreset(c.hotkey) && <option value="custom">Custom</option>}
+              </select>
               <button type="button" aria-label={`Remove action ${i + 1}`} onClick={() => setDrafts(custom.filter((_, j) => j !== i))} className="rounded-full px-3 text-xs" style={field}>
                 Remove
               </button>

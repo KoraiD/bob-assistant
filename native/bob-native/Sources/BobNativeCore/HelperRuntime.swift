@@ -158,6 +158,11 @@ public final class HelperRuntime: @unchecked Sendable {
                 try? client?.send(NativeEvent.error(message: "hotkey unavailable"))
                 hotkeys.register(HotkeyCenter.defaultHotkey)
             }
+        case let .setActionHotkeys(list):
+            let failed = hotkeys.registerActions(list)
+            if !failed.isEmpty {
+                try? client?.send(NativeEvent.error(message: "action shortcut unavailable: \(failed.map(String.init).joined(separator: ","))"))
+            }
         case .quit:
             exitCleanly(0)
         case .unknown:
@@ -193,6 +198,7 @@ public final class HelperRuntime: @unchecked Sendable {
     private func startObserving() {
         startStallTestIfRequested()
         AXReader.limitMessagingTimeout()
+        observeWake()
         observer.onSnapshot = { [weak self] snap, reason in self?.forward(snap, reason) }
         observer.start()
         keyTap.onKey = { [weak self] key in try? self?.client?.send(NativeEvent.key(key)) }
@@ -200,6 +206,7 @@ public final class HelperRuntime: @unchecked Sendable {
             switch slot {
             case .selection: self?.selectionHotkey()
             case .dictation: try? self?.client?.send(NativeEvent.dictationKey(pressed: true))
+            default: if let i = slot.actionIndex { self?.selectionHotkey(action: i) }
             }
         }
         hotkeys.onRelease = { [weak self] slot in
@@ -304,15 +311,35 @@ public final class HelperRuntime: @unchecked Sendable {
         }
     }
 
-    // MARK: Selection Actions
+    // MARK: Wake from sleep
 
-    private func selectionHotkey() {
+    /// After sleep, models may have been paged out and the first suggestion or dictation would be slow: tell
+    /// the core (it warms the built-in brain) and warm the speech model here. Waits a moment for the GPU and
+    /// disks to settle first.
+    private func observeWake() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(2)) {
+                guard let self else { return }
+                try? self.client?.send(NativeEvent.woke)
+                self.transcriber.warmUp { ms in
+                    if let ms { FileHandle.standardError.write(Data("bob-native: woke; speech model warmed up in \(ms) ms\n".utf8)) }
+                }
+            }
+        }
+    }
+
+        // MARK: Selection Actions
+
+    /// `action`: the custom action whose own shortcut was pressed (it runs without the menu).
+    private func selectionHotkey(action: Int? = nil) {
         SelectionIO.read { [weak self] capture in
             guard let self else { return }
             self.selectionPID = capture.pid
             try? self.client?.send(NativeEvent.selection(
                 appBundleId: capture.appBundleId, text: capture.text, secure: capture.secure,
-                source: capture.source, anchor: capture.anchor))
+                source: capture.source, anchor: capture.anchor, action: action))
         }
     }
 

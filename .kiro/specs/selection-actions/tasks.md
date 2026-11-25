@@ -11,3 +11,6 @@ Plan task 7. Tick a box in the same commit as the code.
 - [x] 8. Preview before replace (proposal 6): `State::Preview`, `CopyText`, panel preview block (engine test)
 - [x] 9. Language check of results: retry once, then translate (`run_checked`, engine test; style-bench part C)
 - [x] 10. Headless rewrite for AI agents (`selection::engine::rewrite`, MCP)
+- [x] 11. Explain and Reply (`Action::answer`, `State::Answer`): Copy, Insert after the selection, Discard; never replaces (engine test; e2e)
+- [x] 12. A shortcut per custom action (proposal 7): `CustomAction.hotkey`, protocol v5 `set_action_hotkeys` and `selection.action`, unique and usable shortcuts only (actions, engine, Swift slot and UI tests)
+  - [ ] 12.1 Owner check: give an action ⌃⌥1 and press it on a selection in Mail

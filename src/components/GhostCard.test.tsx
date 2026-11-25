@@ -22,6 +22,7 @@ beforeEach(() => {
   status = {
     enabled: true,
     quiet_apps: [{ bundle_id: "com.googlecode.iterm2", name: "iTerm" }],
+    chip_offsets: [],
     recent_apps: [{ bundle_id: "com.apple.Notes", name: "Notes" }],
     typo_fixes: true,
     mid_sentence: true,
@@ -66,6 +67,12 @@ beforeEach(() => {
           ...status,
           quiet_apps: args!.quiet ? [...status.quiet_apps, app] : status.quiet_apps.filter((a) => a.bundle_id !== app.bundle_id),
         };
+        return undefined;
+      }
+      case "ghost_set_chip_offset": {
+        const row = { bundle_id: args!.bundleId as string, name: args!.name as string, dx: args!.dx as number, dy: args!.dy as number };
+        const rest = status.chip_offsets.filter((o) => o.bundle_id !== row.bundle_id);
+        status = { ...status, chip_offsets: row.dx === 0 && row.dy === 0 ? rest : [...rest, row] };
         return undefined;
       }
       default:
@@ -143,5 +150,19 @@ describe("GhostCard", () => {
     expect(invoke).toHaveBeenCalledWith("ghost_set_option", { option: "typo_fixes", on: false });
     await userEvent.click(screen.getByRole("switch", { name: "Suggest inside a sentence" }));
     expect(invoke).toHaveBeenCalledWith("ghost_set_option", { option: "mid_sentence", on: false });
+  });
+  it("nudges the chip in one app and resets it", async () => {
+    render(<GhostCard />);
+    const box = await screen.findByTestId("chip-offsets");
+    await userEvent.click(within(box).getByText(/Chip position per app/));
+    expect(within(box).getByText(/No nudges/)).toBeInTheDocument();
+    await userEvent.selectOptions(within(box).getByLabelText("Adjust the chip in another app"), "com.apple.Notes");
+    await userEvent.click(within(box).getByRole("button", { name: "Move the chip down in Notes" }));
+    expect(invoke).toHaveBeenCalledWith("ghost_set_chip_offset", { bundleId: "com.apple.Notes", name: "Notes", dx: 0, dy: 1 });
+    await waitFor(() => expect(within(box).getByTestId("offset-com.apple.Notes")).toHaveTextContent("+0, +1 pt"));
+    await userEvent.click(within(box).getByRole("button", { name: "Move the chip left in Notes" }));
+    await waitFor(() => expect(within(box).getByTestId("offset-com.apple.Notes")).toHaveTextContent("-1, +1 pt"));
+    await userEvent.click(within(box).getByRole("button", { name: "Reset the chip position in Notes" }));
+    expect(invoke).toHaveBeenCalledWith("ghost_set_chip_offset", { bundleId: "com.apple.Notes", name: "Notes", dx: 0, dy: 0 });
   });
 });

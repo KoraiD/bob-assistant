@@ -9,9 +9,21 @@ Mac by default (llama.cpp and whisper.cpp). You can also connect Ollama, LM Stud
 | Feature | What it does |
 |---|---|
 | **Ghost Text** | Suggests the next words at your cursor. `Tab` takes a word, `⇧Tab` takes the rest, `Esc` dismisses. Fixes typos, fills gaps inside a sentence, and stays out of the way of an app's own lists (Slack `@mentions`). |
-| **Selection Actions** | Select text, press `⌘⇧J`, and fix, rephrase, shorten, summarize, translate or run your own action. The result replaces the selection; `⌘Z` undoes it. |
+| **Selection Actions** | Select text, press `⌘⇧J`, and fix, rephrase, shorten, summarize, translate or run your own action (with its own shortcut if you like). The result replaces the selection; `⌘Z` undoes it. Explain and Reply show an answer to copy or insert instead. |
 | **Voice Dictation** | Hold `⌥Space` (or tap it), speak, and the text appears at the cursor. Speak over a selection to edit it. Recognized on your Mac. |
 | **AI agents (MCP)** | Kiro and other MCP clients can use BOB's models and your writing style. Off by default. See [docs/MCP.md](docs/MCP.md). |
+
+## See it
+
+**Ghost Text:** pause while typing and the next words appear at the cursor. `Tab` takes a word, `⇧Tab` the rest.
+
+<p align="center"><img src="assets/ghost-text.gif" alt="Typing in TextEdit: BOB suggests the next words in a dark chip, Tab and Shift+Tab accept them" width="720" /></p>
+
+**Selection Actions:** select a rough sentence, press `⌘⇧J` and choose an action.
+
+<p align="center"><img src="assets/selection-actions.gif" alt="Selecting a sentence in TextEdit, choosing Make professional in BOB's menu, and the sentence being rewritten" width="720" /></p>
+
+Both run on BOB's own model on the Mac, recorded on the build machine with `scripts/record-gifs.sh`.
 
 Built for **Kiroween 2026** (category: Frankenstein) with [Kiro](https://kiro.dev). The `.kiro` folder holds the
 specs, steering, hooks and agents used to build it; [docs/KIRO.md](docs/KIRO.md) explains how.

@@ -250,6 +250,16 @@ impl GhostHandle {
         self.shared.save_settings();
     }
 
+    /// Nudge the chip in one app (persisted); (0, 0) removes the nudge. Applies to the next chip.
+    pub fn set_chip_offset(&self, bundle_id: &str, name: &str, dx: i32, dy: i32) {
+        self.shared
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_chip_offset(bundle_id, name, dx, dy);
+        self.shared.save_settings();
+    }
+
     pub fn settings(&self) -> GhostSettings {
         self.shared
             .settings
@@ -794,7 +804,7 @@ impl Engine {
                     if let TypeThrough::Advance(visible) = chip::type_through(&chip.text, typed) {
                         self.sink.send(CoreCommand::ShowChip {
                             text: visible,
-                            anchor: caret,
+                            anchor: self.nudged(&app, caret),
                         });
                     }
                 }
@@ -931,10 +941,26 @@ impl Engine {
             self.capturing = true;
             self.sink.send(CoreCommand::CaptureKeys { active: true });
         }
+        let app = self.ctx.as_ref().map(|c| c.app.clone()).unwrap_or_default();
         self.sink.send(CoreCommand::ShowChip {
             text: visible,
-            anchor: caret,
+            anchor: self.nudged(&app, caret),
         });
+    }
+
+    /// The caret moved by the user's chip nudge for `app` (proposal 9).
+    fn nudged(&self, app: &str, caret: Rect) -> Rect {
+        let (dx, dy) = self
+            .shared
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .chip_offset(app);
+        Rect {
+            x: caret.x + f64::from(dx),
+            y: caret.y + f64::from(dy),
+            ..caret
+        }
     }
 
     fn hide(&mut self) {
@@ -1233,6 +1259,33 @@ mod tests {
 
     async fn settle(ms: u64) {
         tokio::time::sleep(Duration::from_millis(ms)).await;
+    }
+
+    #[tokio::test]
+    async fn a_per_app_nudge_moves_the_chip_in_that_app_only() {
+        let (g, rec, _server, _root) = setup(&[" soon."], Duration::from_millis(5)).await;
+        g.set_chip_offset("com.apple.TextEdit", "TextEdit", 4, -3);
+        g.native(text("I will get back to you"));
+        settle(400).await;
+        let anchors: Vec<Rect> = rec
+            .take()
+            .iter()
+            .filter_map(|c| match c {
+                CoreCommand::ShowChip { anchor, .. } => Some(*anchor),
+                _ => None,
+            })
+            .collect();
+        assert!(!anchors.is_empty());
+        assert!(anchors
+            .iter()
+            .all(|a| a.x == CARET.x + 4.0 && a.y == CARET.y - 3.0 && a.height == CARET.height));
+        g.set_chip_offset("com.apple.TextEdit", "TextEdit", 0, 0);
+        g.native(text("See you"));
+        settle(400).await;
+        assert!(rec
+            .take()
+            .iter()
+            .any(|c| matches!(c, CoreCommand::ShowChip { anchor, .. } if *anchor == CARET)));
     }
 
     #[tokio::test]

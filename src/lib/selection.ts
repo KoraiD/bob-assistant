@@ -9,6 +9,8 @@ export interface HotkeySetting {
 export interface CustomAction {
   label: string;
   instruction: string;
+  /** Runs this action directly, without the menu. Absent or null: no shortcut. */
+  hotkey?: HotkeySetting | null;
 }
 
 export interface SelectionSettings {
@@ -44,6 +46,19 @@ export const HOTKEYS: { id: string; label: string; hotkey: HotkeySetting }[] = [
   { id: "cmd-shift-e", label: "⌘⇧E", hotkey: { key_code: 14, modifiers: ["cmd", "shift"] } },
 ];
 
+/** Shortcut choices for custom actions: ⌃⌥1 to ⌃⌥9 (key codes of the number row, the same on every layout). */
+const DIGIT_CODES = [18, 19, 20, 21, 23, 22, 26, 28, 25];
+export const ACTION_HOTKEYS: { id: string; label: string; hotkey: HotkeySetting }[] = DIGIT_CODES.map((key_code, i) => ({
+  id: `ctrl-opt-${i + 1}`,
+  label: `⌃⌥${i + 1}`,
+  hotkey: { key_code, modifiers: ["control", "option"] },
+}));
+/** The shortcut choice matching `h`, or undefined (none, or set some other way). */
+export function actionHotkeyPreset(h: HotkeySetting | null | undefined): (typeof ACTION_HOTKEYS)[number] | undefined {
+  if (!h) return undefined;
+  const key = (x: HotkeySetting) => `${x.key_code}:${[...x.modifiers].map((m) => m.toLowerCase()).sort().join("+")}`;
+  return ACTION_HOTKEYS.find((p) => key(p.hotkey) === key(h));
+}
 /** The preset matching `h` (modifier order does not matter), or undefined for a custom one. */
 export function hotkeyPreset(h: HotkeySetting): (typeof HOTKEYS)[number] | undefined {
   const key = (x: HotkeySetting) => `${x.key_code}:${[...x.modifiers].map((m) => m.toLowerCase()).sort().join("+")}`;
@@ -53,7 +68,11 @@ export function hotkeyPreset(h: HotkeySetting): (typeof HOTKEYS)[number] | undef
 /** Custom actions that will be kept on save (both fields filled), mirroring the Rust sanitizer. */
 export function validCustom(list: CustomAction[]): CustomAction[] {
   return list
-    .map((c) => ({ label: c.label.trim().replace(/\s+/g, " ").slice(0, 40), instruction: c.instruction.trim().slice(0, 1000) }))
+    .map((c) => ({
+      label: c.label.trim().replace(/\s+/g, " ").slice(0, 40),
+      instruction: c.instruction.trim().slice(0, 1000),
+      hotkey: c.hotkey ?? null,
+    }))
     .filter((c) => c.label && c.instruction)
     .slice(0, MAX_CUSTOM);
 }

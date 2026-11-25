@@ -33,6 +33,7 @@ feature that changes the answer.
 | Window title, text after the cursor (up to 400 characters) | in memory; to allowed brains, redacted | no |
 | Text recognized on screen (opt-in, up to 4,000 characters, 90 s lifetime) | in memory; to allowed brains, redacted. Screenshots stay in memory for the OCR call only | no |
 | Selected text (Selection Actions) | read only when you press the hotkey; sent to the Selection brain. Cloud brains never receive text with credential-like tokens: the action is refused (redacting would write "[redacted]" into your document) | not stored |
+| Explain and Reply | same as Selection Actions; the answer is shown in BOB's panel and goes to the clipboard only when you choose Copy | not stored |
 | Clipboard (Selection Actions fallback) | borrowed for Cmd+C / Cmd+V when an app hides its selection from Accessibility, then restored item by item | not stored |
 | Audio (Dictation) | recorded only while you hold the dictation key, kept in memory inside BOB's helper and transcribed there by whisper.cpp; a recording is at most 5 minutes | never written to disk, never sent |
 | Transcripts | typed at the cursor; sent to the Dictation brain only when you pick a cleanup preset (and only with personal context if that brain is allowed) | not stored, never logged |

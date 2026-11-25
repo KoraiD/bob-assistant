@@ -12,13 +12,11 @@ Details: [CHANGELOG.md](../CHANGELOG.md).
 
 | Item | Who | Notes |
 |---|---|---|
-| Choose the signing certificate for the public release | owner | The current one shows a company name; see SUBMISSION.md section 4 |
 | Publish the GitHub Release (v0.1.0, DMG and checksum) | owner, or agent on request | `make release`, then a draft release |
 | Owner checks on real apps | owner | List below |
 | Demo video | owner | Shot list in SUBMISSION.md section 2 |
 | Devpost form, student details, ownership | owner | SUBMISSION.md sections 3 and 4 |
 | Notarization (optional, recommended) | owner | `xcrun notarytool store-credentials`, then `BOB_NOTARY_PROFILE=... make release` |
-| README screenshots or a GIF | agent, after the video | From the release build |
 
 **Owner checks** (each takes a minute or two):
 1. Chrome and Gmail: type, pause, Tab; type through a suggestion; switch between two Chrome windows.
@@ -26,19 +24,18 @@ Details: [CHANGELOG.md](../CHANGELOG.md).
 3. Click into the middle of a sentence in Notes and wait for a suggestion.
 4. Type "recieve " and press Tab.
 5. Personalize > What BOB can see > Active window, then turn on "Use the text on screen"; reply to an email.
-6. Selection Actions in Mail and Notes, then ⌘Z.
+6. Selection Actions in Mail and Notes, then ⌘Z. Explain and Reply on a message in Mail (⏎ copies). Give a custom
+   action ⌃⌥1 and press it on a selection.
 7. Voice edit and sounds in TextEdit.
-8. Install the DMG on a second user account (System Settings > Users & Groups) and run the welcome tour.
+8. Ghost Text > Chip position per app: nudge the chip in an app where it sits off, and Reset.
+9. Sleep the Mac for a minute, wake it, and type: the first suggestion should be as fast as usual.
+10. Type fast in a long document and in Chrome: no lost characters (see COMPATIBILITY.md, typing stress check).
+11. Install the DMG on a second user account (System Settings > Users & Groups) and run the welcome tour.
 
-## Possible additions (if time allows)
+## Possible additions
 
-| Idea | Value | Size |
-|---|---|---|
-| Per-app chip offset nudge (proposal 9) | fixes rare misplaced suggestions in odd apps | half a day |
-| A shortcut per custom action (proposal 7) | faster favorite rewrites | 1 day |
-| "Explain" and "Reply" actions on a selection | common requests in the research | 2 hours |
-| Model warm-up after wake from sleep | first suggestion after sleep is slower | 2 hours |
-| README GIFs and a landing section | presentation score | 1 hour |
+All done on 2026-11-25: the per-app chip nudge (proposal 9), a shortcut per custom action (proposal 7), Explain and
+Reply, the warm-up after wake from sleep, and the README GIFs (`scripts/record-gifs.sh`).
 
 ## Out of scope
 

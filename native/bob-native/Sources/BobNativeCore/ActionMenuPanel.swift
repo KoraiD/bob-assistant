@@ -82,9 +82,18 @@ public final class ActionMenuPanel: NSPanel {
     public override var canBecomeKey: Bool { false }
     public override var canBecomeMain: Bool { false }
 
+    /// `centered`: a one-line row taller than its text, drawn vertically centered (menu rows).
     private func label(_ text: String, size: CGFloat = 13, color: NSColor = .white, wraps: Bool = false,
-                       lines: Int = 8) -> NSTextField {
+                       lines: Int = 8, centered: Bool = false) -> NSTextField {
         let l = wraps ? NSTextField(wrappingLabelWithString: text) : NSTextField(labelWithString: text)
+        if centered {
+            let cell = VerticallyCenteredCell(textCell: text)
+            cell.isEditable = false
+            cell.isSelectable = false
+            cell.isBordered = false
+            cell.drawsBackground = false
+            l.cell = cell
+        }
         l.font = .systemFont(ofSize: size)
         l.textColor = color
         l.lineBreakMode = wraps ? .byWordWrapping : .byTruncatingTail
@@ -114,7 +123,7 @@ public final class ActionMenuPanel: NSPanel {
             stack.addArrangedSubview(p)
         }
         for (i, item) in items.enumerated() {
-            let row = label("  \(item)")
+            let row = label("  \(item)", centered: true)
             row.heightAnchor.constraint(equalToConstant: Self.rowHeight).isActive = true
             row.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(rowClicked(_:))))
             row.tag = i
@@ -199,5 +208,15 @@ public final class ActionMenuPanel: NSPanel {
             origin.y = min(max(origin.y, vf.minY + 4), vf.maxY - size.height - 4)
         }
         setFrame(NSRect(origin: origin, size: size), display: true)
+    }
+}
+
+/// A label cell that draws its single line in the vertical middle of a taller row (NSTextField draws at the top).
+final class VerticallyCenteredCell: NSTextFieldCell {
+    override func drawingRect(forBounds rect: NSRect) -> NSRect {
+        let base = super.drawingRect(forBounds: rect)
+        let height = cellSize(forBounds: rect).height
+        guard height < base.height else { return base }
+        return NSRect(x: base.minX, y: base.minY + (base.height - height) / 2, width: base.width, height: height)
     }
 }

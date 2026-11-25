@@ -198,6 +198,23 @@ impl BrainService {
         Ok(())
     }
 
+    /// Evaluate a short prompt on the built-in brain so its weights are back in memory (after the Mac
+    /// woke from sleep, the first suggestion otherwise pays for paging them in). Returns whether it ran;
+    /// does nothing when the built-in brain is not running.
+    pub async fn warm_up_builtin(&self) -> bool {
+        let ep = match self.sidecar.lock().await.as_ref() {
+            Some(s) => s.endpoint().await,
+            None => None,
+        };
+        let Some(ep) = ep else { return false };
+        let http = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap_or_default();
+        sidecar::warm_up(&http, &ep).await;
+        true
+    }
+
     /// A ready-to-use client for `id`. The built-in brain resolves to the running sidecar.
     pub async fn resolve(&self, id: &str) -> Result<HttpBrain, ServiceError> {
         let config = self

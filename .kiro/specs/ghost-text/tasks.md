@@ -25,3 +25,7 @@ Plan tasks 4 to 6. Tick a box in the same commit as the code.
 - [x] No frozen chips: watch the field while a chip is visible, window-change notifications, 300 ms limit for a
       caret moving without new text (engine test; e2e)
 - [x] Screen text as an opt-in Ghost layer (benchmark: 34% to 53% right word)
+- [x] Per-app chip nudge (proposal 9): `GhostSettings::chip_offsets`, applied where the chip is sent (settings, engine and UI tests)
+- [x] Warm-up after wake from sleep: helper `woke` event, built-in brain `n_predict: 0`, speech model warmed on silence (Swift test)
+- [x] Runaway output is never shown: chips stop before a word with a character repeated eight times (chip test; found while recording the README GIFs)
+- [x] Typing never waits for BOB: key tap on its own thread, 0.4 s Accessibility timeout (stress test, docs/PERFORMANCE.md)

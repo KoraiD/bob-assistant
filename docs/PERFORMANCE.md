@@ -265,7 +265,7 @@ real app a capture of the active window took 105 to 146 ms, off the typing path.
 
 ## End-to-end check in the real app (2026-11-25)
 `make e2e` drives TextEdit with real key events while BOB runs, and reads the result through Accessibility.
-12 of 12 checks pass. Two of the bugs it found could not show up in unit tests:
+12 of 12 checks passed (14 of 14 since Explain was added). Two of the bugs it found could not show up in unit tests:
 - No suggestion on the first line of a TextEdit document: TextEdit reports the empty range at the end of the first
   line 13 points higher than the character before it, so the caret was rejected as outside the field. A caret box
   above the previous glyph is now treated as this quirk (a soft wrap only moves the caret down).

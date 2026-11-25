@@ -5,9 +5,21 @@ import Foundation
 /// permission, and the key press is not delivered to the frontmost app. One slot per feature: Selection
 /// Actions (press, SA-1) and Voice Dictation (hold: press and release, VD-1).
 public final class HotkeyCenter {
-    public enum Slot: UInt32, CaseIterable, Sendable {
-        case selection = 1
-        case dictation = 2
+    /// A registered hotkey's role: the Selection Actions menu, dictation, or a custom action's own shortcut.
+    public struct Slot: Hashable, Sendable {
+        public let rawValue: UInt32
+        public init?(rawValue: UInt32) {
+            guard rawValue == 1 || rawValue == 2 || rawValue >= Self.firstAction else { return nil }
+            self.rawValue = rawValue
+        }
+        private init(_ raw: UInt32) { rawValue = raw }
+        public static let selection = Slot(1)
+        public static let dictation = Slot(2)
+        static let firstAction: UInt32 = 100
+        /// The shortcut of custom action `index`.
+        public static func action(_ index: Int) -> Slot { Slot(firstAction + UInt32(max(index, 0))) }
+        /// The custom action index, for an action slot.
+        public var actionIndex: Int? { rawValue >= Self.firstAction ? Int(rawValue - Self.firstAction) : nil }
     }
 
     public static let defaultHotkey = Hotkey(keyCode: kVK_ANSI_J, modifiers: ["cmd", "shift"])
@@ -60,6 +72,14 @@ public final class HotkeyCenter {
 
     public func unregister(_ slot: Slot) {
         if let ref = refs.removeValue(forKey: slot) { UnregisterEventHotKey(ref) }
+    }
+
+    /// Replace all custom action shortcuts. Returns the indexes that could not be registered (invalid, or
+    /// already taken by BOB's other hotkeys or another app).
+    @discardableResult
+    public func registerActions(_ hotkeys: [ActionHotkey]) -> [Int] {
+        for slot in refs.keys where slot.actionIndex != nil { unregister(slot) }
+        return hotkeys.compactMap { register($0.hotkey, slot: .action($0.index)) ? nil : $0.index }
     }
 
     private func installHandlerOnce() {

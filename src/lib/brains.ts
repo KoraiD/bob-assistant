@@ -88,10 +88,19 @@ export interface GhostMemory {
   phrases: Phrase[];
 }
 
+/** Moves the chip in one app (points; dy positive is down). Mirrors `ChipOffset` in Rust. */
+export interface ChipOffset extends AppRef {
+  dx: number;
+  dy: number;
+}
+/** Largest nudge either way, as in Rust. */
+export const MAX_CHIP_OFFSET = 40;
 export interface GhostStatus {
   enabled: boolean;
   /** Apps where Ghost Text stays quiet (terminals and password managers by default). */
   quiet_apps: AppRef[];
+  /** Per-app chip nudges, for apps that report the caret a little off. */
+  chip_offsets: ChipOffset[];
   /** Apps seen recently, most recent first, for the quiet-apps picker. */
   recent_apps: AppRef[];
   typo_fixes: boolean;
@@ -318,6 +327,8 @@ export const api = {
   ghostSetOption: (option: "typo_fixes" | "mid_sentence", on: boolean) => invoke<void>("ghost_set_option", { option, on }),
   ghostSetQuiet: (app: AppRef, quiet: boolean) =>
     invoke<void>("ghost_set_quiet", { bundleId: app.bundle_id, name: app.name, quiet }),
+  ghostSetChipOffset: (app: AppRef, dx: number, dy: number) =>
+    invoke<void>("ghost_set_chip_offset", { bundleId: app.bundle_id, name: app.name, dx, dy }),
   ghostMemory: () => invoke<GhostMemory>("ghost_memory"),
   ghostMemoryClear: () => invoke<void>("ghost_memory_clear"),
   ghostMemoryForget: (text: string) => invoke<boolean>("ghost_memory_forget", { text }),

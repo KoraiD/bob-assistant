@@ -48,6 +48,16 @@ public struct Hotkey: Codable, Equatable, Sendable {
     }
 }
 
+/// A custom action's own shortcut; `index` is its place in the user's custom actions.
+public struct ActionHotkey: Codable, Equatable, Sendable {
+    public var index: Int
+    public var hotkey: Hotkey
+    public init(index: Int, hotkey: Hotkey) {
+        self.index = index
+        self.hotkey = hotkey
+    }
+}
+
 /// What the dictation orb shows (VD-3).
 public enum OrbState: String, Codable, Equatable, Sendable {
     case hidden, listening, thinking, done, error
@@ -77,7 +87,11 @@ public enum NativeEvent: Equatable, Sendable {
     /// Text recognized on screen (PC-4).
     case screenText(scope: ContextScope, appBundleId: String, text: String, ms: Int)
     /// The Selection Actions hotkey was pressed (SA-1); empty text when nothing is selected or secure.
-    case selection(appBundleId: String, text: String, secure: Bool, source: SelectionSource?, anchor: Rect?)
+    /// `action` is set when a custom action's own shortcut was pressed (its index).
+    case selection(appBundleId: String, text: String, secure: Bool, source: SelectionSource?, anchor: Rect?,
+                   action: Int? = nil)
+    /// The Mac woke from sleep.
+    case woke
     case menuChoice(index: Int)
     case menuCancel
     case replaceResult(ok: Bool, method: String?, error: String?)
@@ -110,6 +124,7 @@ public enum CoreCommand: Equatable, Sendable {
     case hideMenu
     case replaceSelection(expected: String, text: String)
     case setHotkey(Hotkey)
+    case setActionHotkeys([ActionHotkey])
     case setDictation(hotkey: Hotkey?, modelPath: String?, language: String, prompt: String?, sounds: Bool)
     case copyText(text: String)
     case replaceBeforeCaret(expected: String, text: String)
@@ -166,7 +181,10 @@ extension NativeEvent: Codable {
                               text: try c.decode(String.self, forKey: Keys("text")),
                               secure: try c.decode(Bool.self, forKey: Keys("secure")),
                               source: try c.decodeIfPresent(SelectionSource.self, forKey: Keys("source")),
-                              anchor: try c.decodeIfPresent(Rect.self, forKey: Keys("anchor")))
+                              anchor: try c.decodeIfPresent(Rect.self, forKey: Keys("anchor")),
+                              action: try c.decodeIfPresent(Int.self, forKey: Keys("action")))
+        case "woke":
+            self = .woke
         case "menu_choice":
             self = .menuChoice(index: try c.decode(Int.self, forKey: Keys("index")))
         case "menu_cancel":
@@ -242,13 +260,16 @@ extension NativeEvent: Codable {
             try c.encode(appBundleId, forKey: Keys("app_bundle_id"))
             try c.encode(text, forKey: Keys("text"))
             try c.encode(ms, forKey: Keys("ms"))
-        case let .selection(appBundleId, text, secure, source, anchor):
+        case let .selection(appBundleId, text, secure, source, anchor, action):
             try c.encode("selection", forKey: Keys("type"))
             try c.encode(appBundleId, forKey: Keys("app_bundle_id"))
             try c.encode(text, forKey: Keys("text"))
             try c.encode(secure, forKey: Keys("secure"))
             try c.encode(source, forKey: Keys("source"))  // explicit null when absent
             try c.encode(anchor, forKey: Keys("anchor"))
+            try c.encodeIfPresent(action, forKey: Keys("action"))
+        case .woke:
+            try c.encode("woke", forKey: Keys("type"))
         case let .menuChoice(index):
             try c.encode("menu_choice", forKey: Keys("type"))
             try c.encode(index, forKey: Keys("index"))
@@ -335,6 +356,8 @@ extension CoreCommand: Codable {
             self = .replaceSelection(expected: try c.decode(String.self, forKey: Keys("expected")),
                                      text: try c.decode(String.self, forKey: Keys("text")))
         case "set_hotkey": self = .setHotkey(try c.decode(Hotkey.self, forKey: Keys("hotkey")))
+        case "set_action_hotkeys":
+            self = .setActionHotkeys(try c.decode([ActionHotkey].self, forKey: Keys("hotkeys")))
         case "set_dictation":
             self = .setDictation(hotkey: try c.decodeIfPresent(Hotkey.self, forKey: Keys("hotkey")),
                                  modelPath: try c.decodeIfPresent(String.self, forKey: Keys("model_path")),
@@ -401,6 +424,9 @@ extension CoreCommand: Codable {
         case let .setHotkey(hotkey):
             try c.encode("set_hotkey", forKey: Keys("type"))
             try c.encode(hotkey, forKey: Keys("hotkey"))
+        case let .setActionHotkeys(hotkeys):
+            try c.encode("set_action_hotkeys", forKey: Keys("type"))
+            try c.encode(hotkeys, forKey: Keys("hotkeys"))
         case let .setDictation(hotkey, modelPath, language, prompt, sounds):
             try c.encode("set_dictation", forKey: Keys("type"))
             try c.encode(hotkey, forKey: Keys("hotkey"))

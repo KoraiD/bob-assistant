@@ -16,6 +16,9 @@ The first release, built for Kiroween 2026.
 - Optional context: remembered phrases, the window title, text on screen, recently copied text and your languages.
 - Suggestions in a language you do not write are dropped.
 - Quiet apps (terminals and password managers by default), never in password fields.
+- A per-app chip nudge for apps that report the cursor a little off.
+- After the Mac wakes from sleep, BOB's own model and the speech model are warmed up again.
+- Runaway model output (a character repeated eight or more times, such as "1000000000000") is never shown.
 - Typing never waits for BOB: the key tap runs on its own thread and Accessibility calls to a busy app time out
   after 0.4 s.
 
@@ -23,6 +26,8 @@ The first release, built for Kiroween 2026.
 - `⌘⇧J` on selected text: fix grammar, rephrase, shorten, friendlier, professional, summarize, translate, or your
   own actions. Paste-based replacement that `⌘Z` undoes in one step.
 - Optional preview before replacing (`⏎` replaces, Copy keeps your text, `Esc` discards).
+- Explain and Reply: the answer appears in the panel to copy or insert after the selection; nothing is replaced.
+- A shortcut per custom action (`⌃⌥1` to `⌃⌥9`) runs it on the selection without the menu.
 - Results are checked for the expected language, retried, and translated if needed.
 
 ### Voice Dictation
@@ -58,6 +63,8 @@ The first release, built for Kiroween 2026.
 - A suggestion could stay frozen after switching windows in the same app.
 - Ghost Text did not appear on the first line of a TextEdit document (the caret was reported one line too high).
 - Selection Actions replacements were not undoable in some apps.
+- Typing could freeze for a second or more and lose characters while an app was slow to answer Accessibility.
+- Menu rows in the action panel were drawn at the top of each row instead of centered.
 - Screen text could leak into rewrites.
 - A Vietnamese suggestion appeared after Hungarian text.
 - The Settings view could freeze the window (a lock taken twice).

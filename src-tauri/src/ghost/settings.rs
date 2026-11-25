@@ -30,6 +30,20 @@ pub const DEFAULT_QUIET: &[(&str, &str)] = &[
 
 /// Upper bound on the quiet list.
 pub const MAX_QUIET_APPS: usize = 500;
+/// Largest chip nudge in points, either way.
+pub const MAX_CHIP_OFFSET: i32 = 40;
+/// Upper bound on per-app chip nudges.
+pub const MAX_CHIP_OFFSETS: usize = 100;
+
+/// Moves the chip in one app, for apps that report the caret a little off (proposal 9). Points, with
+/// `dy` positive downwards.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChipOffset {
+    pub bundle_id: String,
+    pub name: String,
+    pub dx: i32,
+    pub dy: i32,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuietApp {
@@ -46,6 +60,8 @@ pub struct GhostSettings {
     pub typo_fixes: bool,
     /// Suggest inside a sentence too, using the words after the cursor.
     pub mid_sentence: bool,
+    /// Per-app chip nudges.
+    pub chip_offsets: Vec<ChipOffset>,
 }
 
 impl Default for GhostSettings {
@@ -61,6 +77,7 @@ impl Default for GhostSettings {
                 .collect(),
             typo_fixes: true,
             mid_sentence: true,
+            chip_offsets: Vec::new(),
         }
     }
 }
@@ -76,22 +93,40 @@ impl GhostSettings {
     pub fn set_quiet(&mut self, bundle_id: &str, name: &str, quiet: bool) {
         let bundle_id = bundle_id.trim();
         self.quiet_apps.retain(|a| a.bundle_id != bundle_id);
-        let valid = !bundle_id.is_empty()
-            && bundle_id.len() <= 255
-            && bundle_id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c));
-        if quiet && valid && self.quiet_apps.len() < MAX_QUIET_APPS {
-            let name: String = name
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-                .chars()
-                .take(80)
-                .collect();
+        if quiet && valid_bundle_id(bundle_id) && self.quiet_apps.len() < MAX_QUIET_APPS {
             self.quiet_apps.push(QuietApp {
                 bundle_id: bundle_id.into(),
-                name,
+                name: one_line(name, 80),
+            });
+        }
+    }
+
+    /// The chip nudge for an app, (0, 0) when none is set.
+    pub fn chip_offset(&self, bundle_id: &str) -> (i32, i32) {
+        self.chip_offsets
+            .iter()
+            .find(|o| o.bundle_id == bundle_id)
+            .map_or((0, 0), |o| (o.dx, o.dy))
+    }
+
+    /// Set an app's chip nudge, clamped to `MAX_CHIP_OFFSET`; (0, 0) removes it. Bundle ids are checked
+    /// like quiet apps.
+    pub fn set_chip_offset(&mut self, bundle_id: &str, name: &str, dx: i32, dy: i32) {
+        let bundle_id = bundle_id.trim();
+        self.chip_offsets.retain(|o| o.bundle_id != bundle_id);
+        let (dx, dy) = (
+            dx.clamp(-MAX_CHIP_OFFSET, MAX_CHIP_OFFSET),
+            dy.clamp(-MAX_CHIP_OFFSET, MAX_CHIP_OFFSET),
+        );
+        if (dx, dy) != (0, 0)
+            && valid_bundle_id(bundle_id)
+            && self.chip_offsets.len() < MAX_CHIP_OFFSETS
+        {
+            self.chip_offsets.push(ChipOffset {
+                bundle_id: bundle_id.into(),
+                name: one_line(name, 80),
+                dx,
+                dy,
             });
         }
     }
@@ -120,8 +155,45 @@ impl GhostSettings {
     }
 }
 
+/// Letters, digits, `.`, `-` and `_` only, at most 255 characters.
+fn valid_bundle_id(bundle_id: &str) -> bool {
+    !bundle_id.is_empty()
+        && bundle_id.len() <= 255
+        && bundle_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c))
+}
+
+fn one_line(s: &str, max: usize) -> String {
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(max)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chip_offsets_are_clamped_checked_and_removed_at_zero() {
+        let mut g = GhostSettings::default();
+        assert_eq!(g.chip_offset("com.apple.TextEdit"), (0, 0));
+        g.set_chip_offset("com.apple.TextEdit", " Text\nEdit ", 3, -500);
+        assert_eq!(g.chip_offset("com.apple.TextEdit"), (3, -MAX_CHIP_OFFSET));
+        assert_eq!(g.chip_offsets[0].name, "Text Edit");
+        g.set_chip_offset("com.apple.TextEdit", "TextEdit", -2, 4);
+        assert_eq!(g.chip_offsets.len(), 1);
+        assert_eq!(g.chip_offset("com.apple.TextEdit"), (-2, 4));
+        g.set_chip_offset("com.apple.TextEdit", "TextEdit", 0, 0);
+        assert!(g.chip_offsets.is_empty());
+        g.set_chip_offset("../etc", "x", 5, 5);
+        assert!(g.chip_offsets.is_empty());
+        // Old settings files without the field still load.
+        let old: GhostSettings = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert!(old.chip_offsets.is_empty());
+    }
+
     use super::*;
     use proptest::prelude::*;
 

@@ -1,4 +1,4 @@
-{"type":"hello","version":4,"pid":4242}
+{"type":"hello","version":5,"pid":4242}
 {"type":"permissions","accessibility":true,"microphone":"granted","screen_recording":false}
 {"type":"permissions","accessibility":false,"microphone":"undetermined","screen_recording":true}
 {"type":"focus","app_bundle_id":"com.apple.TextEdit","app_name":"TextEdit","secure":false,"editable":true}
@@ -29,3 +29,5 @@
 {"type":"dictation_selection","app_bundle_id":"com.apple.mail","text":"see you at the meeting"}
 {"type":"clipboard_text","text":"Meeting moved to 3 pm"}
 {"type":"typo","word":"teh","fix":"the","trailing":" "}
+{"type":"selection","app_bundle_id":"com.apple.mail","text":"see you","secure":false,"source":"accessibility","anchor":null,"action":2}
+{"type":"woke"}

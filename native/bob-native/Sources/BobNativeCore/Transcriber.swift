@@ -98,6 +98,33 @@ public final class Transcriber: @unchecked Sendable {
 
     public var isLoaded: Bool { queue.sync { ctx != nil } }
 
+    /// Run the loaded model once on half a second of silence, so its weights are back in memory (after
+    /// sleep the first dictation otherwise pays for paging them in). Does nothing without a model.
+    /// `completion` gets the time it took, or nil when no model is loaded.
+    public func warmUp(completion: (@Sendable (Int?) -> Void)? = nil) {
+        queue.async { [self] in
+            guard let ctx else { completion?(nil); return }
+            let started = Date()
+            var p = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
+            p.n_threads = 2
+            p.print_progress = false
+            p.print_realtime = false
+            p.print_special = false
+            p.print_timestamps = false
+            p.no_timestamps = true
+            p.no_context = true
+            p.single_segment = true
+            p.max_tokens = 1
+            p.audio_ctx = 128
+            let silence = [Float](repeating: 0, count: 8000)
+            _ = "en".withCString { lang in
+                p.language = lang
+                return silence.withUnsafeBufferPointer { whisper_full(ctx, p, $0.baseAddress, Int32($0.count)) }
+            }
+            completion?(Int(Date().timeIntervalSince(started) * 1000))
+        }
+    }
+
     /// Free the model now (waits for a running transcription). Must run before the process exits:
     /// ggml's Metal backend asserts in a static destructor if model buffers are still alive at `exit`.
     public func shutdown() {

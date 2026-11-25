@@ -19,6 +19,9 @@ pub struct Action {
     pub sets_language: bool,
     /// Summaries are short; rewrites are about as long as the input.
     pub summary: bool,
+    /// The result is new text about the selection (Explain, Reply), never a replacement: it is shown in the
+    /// panel to copy or insert after the selection.
+    pub answer: bool,
 }
 
 /// A user-defined action ("Custom prompt", SA-3).
@@ -26,6 +29,9 @@ pub struct Action {
 pub struct CustomAction {
     pub label: String,
     pub instruction: String,
+    /// Runs this action on the selection directly, without the menu (proposal 7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hotkey: Option<HotkeySetting>,
 }
 
 /// The hotkey as stored: macOS key code plus modifier names.
@@ -33,6 +39,40 @@ pub struct CustomAction {
 pub struct HotkeySetting {
     pub key_code: u32,
     pub modifiers: Vec<String>,
+}
+
+impl HotkeySetting {
+    /// Usable as a global hotkey: a real key with Cmd, Control or Option, so plain typing never triggers it.
+    pub fn is_acceptable(&self) -> bool {
+        const KNOWN: [&str; 6] = ["cmd", "command", "shift", "option", "alt", "control"];
+        let known = |m: &String| KNOWN.contains(&m.as_str()) || m == "ctrl";
+        self.key_code <= 0x7F
+            && self.modifiers.iter().all(known)
+            && self
+                .modifiers
+                .iter()
+                .any(|m| !matches!(m.as_str(), "shift"))
+    }
+
+    /// The same key combination, whatever the modifier order or spelling.
+    pub fn same_as(&self, other: &Self) -> bool {
+        fn norm(h: &HotkeySetting) -> (u32, Vec<&'static str>) {
+            let mut m: Vec<&'static str> = h
+                .modifiers
+                .iter()
+                .map(|m| match m.as_str() {
+                    "command" | "cmd" => "cmd",
+                    "alt" | "option" => "option",
+                    "ctrl" | "control" => "control",
+                    _ => "shift",
+                })
+                .collect();
+            m.sort_unstable();
+            m.dedup();
+            (h.key_code, m)
+        }
+        norm(self) == norm(other)
+    }
 }
 
 impl Default for HotkeySetting {
@@ -99,11 +139,24 @@ impl SelectionSettings {
                     .chars()
                     .take(MAX_INSTRUCTION_CHARS)
                     .collect();
-                (!label.is_empty() && !instruction.is_empty())
-                    .then_some(CustomAction { label, instruction })
+                (!label.is_empty() && !instruction.is_empty()).then_some(CustomAction {
+                    label,
+                    instruction,
+                    hotkey: c.hotkey,
+                })
             })
             .take(MAX_CUSTOM)
             .collect();
+        // A shortcut must be usable and unique: not the menu hotkey, not another action's.
+        let mut taken = vec![self.hotkey.clone()];
+        for c in &mut self.custom {
+            if let Some(h) = c.hotkey.take() {
+                if h.is_acceptable() && !taken.iter().any(|t| t.same_as(&h)) {
+                    taken.push(h.clone());
+                    c.hotkey = Some(h);
+                }
+            }
+        }
         self
     }
 }
@@ -115,7 +168,20 @@ fn builtin(label: &str, progress: &str, instruction: &str) -> Action {
         instruction: instruction.into(),
         sets_language: false,
         summary: false,
+        answer: false,
     }
+}
+
+/// The action for a custom entry.
+pub fn custom_action(c: &CustomAction) -> Action {
+    builtin(
+        &c.label,
+        &c.label,
+        &format!(
+            "Task (defined by the user): {}\nApply it to the user's text.",
+            c.instruction
+        ),
+    )
 }
 
 /// The menu, in order: built-ins, then the user's custom actions. `language` is the Personalize setting
@@ -163,6 +229,25 @@ pub fn menu(settings: &SelectionSettings, language: &str) -> Vec<Action> {
             )
         },
         Action {
+            answer: true,
+            ..builtin(
+                "Explain",
+                "Explaining",
+                "Task: explain the user's text in plain words: what it means and anything that needs context \
+                 (terms, references, abbreviations). Be brief: a few sentences. Do not rewrite the text.",
+            )
+        },
+        Action {
+            answer: true,
+            ..builtin(
+                "Reply",
+                "Writing a reply",
+                "Task: the user's text is a message someone sent. Write a short, friendly reply to it, as the user, \
+                 in the same language and register. Write only the reply, with no greeting line unless the \
+                 message has one.",
+            )
+        },
+        Action {
             sets_language: true,
             ..builtin(
                 &format!("Translate to {target}"),
@@ -174,23 +259,17 @@ pub fn menu(settings: &SelectionSettings, language: &str) -> Vec<Action> {
             )
         },
     ];
-    v.extend(settings.custom.iter().map(|c| {
-        builtin(
-            &c.label,
-            &c.label,
-            &format!(
-                "Task (defined by the user): {}\nApply it to the user's text.",
-                c.instruction
-            ),
-        )
-    }));
+    v.extend(settings.custom.iter().map(custom_action));
     v
 }
 
 /// Token budget for an action's output: summaries are short, rewrites are about as long as the input.
 pub fn max_tokens(action: &Action, input_chars: usize) -> u32 {
     let approx_tokens = (input_chars / 3) as u32 + 16;
-    if action.summary {
+    if action.answer {
+        // An explanation or reply can be longer than a short selection.
+        (approx_tokens + 160).clamp(200, 600)
+    } else if action.summary {
         (approx_tokens / 2).clamp(64, 400)
     } else {
         (approx_tokens * 3 / 2 + 32).clamp(64, 2048)
@@ -207,6 +286,7 @@ mod tests {
             custom: vec![CustomAction {
                 label: "Make it rhyme".into(),
                 instruction: "Turn it into a rhyming couplet.".into(),
+                hotkey: None,
             }],
             ..Default::default()
         };
@@ -235,10 +315,12 @@ mod tests {
                 .map(|i| CustomAction {
                     label: format!("  Action\n{i}  "),
                     instruction: "x".repeat(5000),
+                    hotkey: None,
                 })
                 .chain([CustomAction {
                     label: " ".into(),
                     instruction: "y".into(),
+                    hotkey: None,
                 }])
                 .collect(),
             ..Default::default()
@@ -274,6 +356,10 @@ mod tests {
             custom: vec![CustomAction {
                 label: "Emoji".into(),
                 instruction: "Add fitting emoji.".into(),
+                hotkey: Some(HotkeySetting {
+                    key_code: 18,
+                    modifiers: vec!["control".into(), "option".into()],
+                }),
             }],
             preview: true,
         };
@@ -282,5 +368,83 @@ mod tests {
         std::fs::write(&p, "{nope").unwrap();
         assert_eq!(SelectionSettings::load(&p), SelectionSettings::default());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn hk(key_code: u32, modifiers: &[&str]) -> HotkeySetting {
+        HotkeySetting {
+            key_code,
+            modifiers: modifiers.iter().map(|m| m.to_string()).collect(),
+        }
+    }
+
+    fn act(label: &str, hotkey: Option<HotkeySetting>) -> CustomAction {
+        CustomAction {
+            label: label.into(),
+            instruction: "Do it.".into(),
+            hotkey,
+        }
+    }
+
+    #[test]
+    fn custom_shortcuts_must_be_usable_and_unique() {
+        let s = SelectionSettings {
+            custom: vec![
+                act("A", Some(hk(18, &["control", "option"]))),
+                act("Same as A", Some(hk(18, &["option", "control"]))),
+                act("Menu hotkey", Some(hk(38, &["shift", "cmd"]))),
+                act("Plain key", Some(hk(19, &[]))),
+                act("Shift only", Some(hk(19, &["shift"]))),
+                act("Unknown modifier", Some(hk(19, &["hyper"]))),
+                act("B", Some(hk(19, &["control", "option"]))),
+            ],
+            ..Default::default()
+        }
+        .sanitized();
+        let kept: Vec<(&str, bool)> = s
+            .custom
+            .iter()
+            .map(|c| (c.label.as_str(), c.hotkey.is_some()))
+            .collect();
+        assert_eq!(
+            kept,
+            vec![
+                ("A", true),
+                ("Same as A", false),
+                ("Menu hotkey", false),
+                ("Plain key", false),
+                ("Shift only", false),
+                ("Unknown modifier", false),
+                ("B", true),
+            ]
+        );
+    }
+
+    #[test]
+    fn old_settings_without_shortcuts_still_load() {
+        let s: SelectionSettings =
+            serde_json::from_str(r#"{"custom":[{"label":"Emoji","instruction":"Add emoji."}]}"#)
+                .unwrap();
+        assert_eq!(s.custom[0].hotkey, None);
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("\"hotkey\":null"), "{json}");
+    }
+
+    #[test]
+    fn explain_and_reply_answer_instead_of_replacing() {
+        let m = menu(&SelectionSettings::default(), "");
+        let answers: Vec<&str> = m
+            .iter()
+            .filter(|a| a.answer)
+            .map(|a| a.label.as_str())
+            .collect();
+        assert_eq!(answers, vec!["Explain", "Reply"]);
+        assert!(m
+            .iter()
+            .filter(|a| a.answer)
+            .all(|a| !a.sets_language && !a.summary));
+        let explain = m.iter().find(|a| a.label == "Explain").unwrap();
+        // A two-word selection still gets room for an explanation.
+        assert!(max_tokens(explain, 10) >= 200);
+        assert!(max_tokens(explain, 1_000_000) <= 600);
     }
 }

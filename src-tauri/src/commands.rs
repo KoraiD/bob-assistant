@@ -307,6 +307,7 @@ pub async fn builtin_stop(app: AppHandle, brains: State<'_, Brains>) -> Result<(
 pub struct GhostStatus {
     pub enabled: bool,
     pub quiet_apps: Vec<QuietApp>,
+    pub chip_offsets: Vec<crate::ghost::settings::ChipOffset>,
     pub recent_apps: Vec<RecentApp>,
     pub typo_fixes: bool,
     pub mid_sentence: bool,
@@ -323,6 +324,7 @@ pub async fn ghost_status(ghost: State<'_, GhostHandle>) -> Result<GhostStatus, 
     Ok(GhostStatus {
         enabled: settings.enabled,
         quiet_apps: settings.quiet_apps,
+        chip_offsets: settings.chip_offsets,
         recent_apps: ghost.recent_apps(),
         typo_fixes: settings.typo_fixes,
         mid_sentence: settings.mid_sentence,
@@ -353,6 +355,23 @@ pub async fn ghost_set_option(
         other => return Err(format!("unknown option {other:?}")),
     }
     crate::audit::record("settings.ghost", serde_json::json!({ option: on }));
+    Ok(())
+}
+
+/// Nudge the chip in one app; 0, 0 removes the nudge.
+#[tauri::command]
+pub async fn ghost_set_chip_offset(
+    ghost: State<'_, GhostHandle>,
+    bundle_id: String,
+    name: String,
+    dx: i32,
+    dy: i32,
+) -> Result<(), String> {
+    ghost.set_chip_offset(&bundle_id, &name, dx, dy);
+    crate::audit::record(
+        "settings.chip_offset",
+        serde_json::json!({ "app": bundle_id, "dx": dx, "dy": dy }),
+    );
     Ok(())
 }
 
@@ -603,6 +622,7 @@ pub async fn selection_set_settings(
         .set_settings(settings)
         .map_err(|e| format!("cannot save the settings: {e}"))?;
     let _ = bridge.send(&selection.hotkey_command());
+    let _ = bridge.send(&selection.action_hotkeys_command());
     Ok(())
 }
 

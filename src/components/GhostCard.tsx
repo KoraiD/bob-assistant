@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { isTauri } from "../lib/appInfo";
 import { api, ghostSummary, type GhostStatus, type Snapshot } from "../lib/brains";
-import { PhraseEditor, QuietAppsEditor } from "./GhostLists";
+import { ChipOffsetEditor, PhraseEditor, QuietAppsEditor } from "./GhostLists";
 import { Group, Row, Toggle } from "./ui";
 import { useTauriEvent } from "../lib/useTauriEvent";
 
@@ -91,6 +91,7 @@ export function GhostCard() {
         <Group title="Apps and phrases" label="Apps and phrases">
           <div className="pb-2">
             <QuietAppsEditor status={status} onChanged={refresh} />
+            <ChipOffsetEditor status={status} onChanged={refresh} />
             <PhraseEditor count={status.memory_count} onChanged={refresh} />
           </div>
         </Group>

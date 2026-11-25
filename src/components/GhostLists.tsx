@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { api, type AppRef, type GhostMemory, type GhostStatus } from "../lib/brains";
+import { api, MAX_CHIP_OFFSET, type AppRef, type ChipOffset, type GhostMemory, type GhostStatus } from "../lib/brains";
 
 const muted = { color: "var(--text-muted)" } as const;
 const field = { background: "var(--surface-raised)", border: "1px solid var(--border)" } as const;
@@ -34,6 +34,102 @@ function ErrorLine({ error }: { error: string | null }) {
       {error}
     </p>
   ) : null;
+}
+
+const clampOffset = (v: number) => Math.max(-MAX_CHIP_OFFSET, Math.min(MAX_CHIP_OFFSET, v));
+
+/** Per-app chip nudges: arrows move the chip by one point in an app that reports the caret a little off. */
+export function ChipOffsetEditor({ status, onChanged }: { status: GhostStatus; onChanged: () => Promise<void> }) {
+  const [picked, setPicked] = useState<AppRef | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const offsets = status.chip_offsets ?? [];
+  const rows: ChipOffset[] = [...offsets];
+  if (picked && !rows.some((r) => r.bundle_id === picked.bundle_id)) rows.push({ ...picked, dx: 0, dy: 0 });
+  const others = suggestions({ quiet_apps: rows, recent_apps: status.recent_apps }, []);
+  const set = async (row: ChipOffset, dx: number, dy: number) => {
+    try {
+      setError(null);
+      await api.ghostSetChipOffset(row, clampOffset(dx), clampOffset(dy));
+      await onChanged();
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+  const arrow = (row: ChipOffset, label: string, symbol: string, dx: number, dy: number) => (
+    <button
+      type="button"
+      aria-label={`Move the chip ${label} in ${row.name || row.bundle_id}`}
+      onClick={() => void set(row, row.dx + dx, row.dy + dy)}
+      className="rounded-md px-1.5 text-xs"
+      style={field}
+    >
+      {symbol}
+    </button>
+  );
+  return (
+    <details className="mt-4" data-testid="chip-offsets">
+      <summary className="cursor-pointer text-sm">
+        Chip position per app <span style={muted}>({offsets.length})</span>
+      </summary>
+      <p className="mt-2 text-xs" style={muted}>
+        If the suggestion sits a little off the cursor in one app, nudge it there. Each arrow moves it one point.
+      </p>
+      <ul className="mt-2 space-y-1" aria-label="Chip positions">
+        {rows.map((row) => (
+          <li key={row.bundle_id} className="flex items-center justify-between gap-3 text-sm">
+            <span className="min-w-0 truncate" title={row.bundle_id}>
+              {row.name || row.bundle_id}
+            </span>
+            <span className="flex shrink-0 items-center gap-1">
+              {arrow(row, "left", "←", -1, 0)}
+              {arrow(row, "right", "→", 1, 0)}
+              {arrow(row, "up", "↑", 0, -1)}
+              {arrow(row, "down", "↓", 0, 1)}
+              <span className="w-24 text-right text-xs tabular-nums" style={muted} data-testid={`offset-${row.bundle_id}`}>
+                {row.dx >= 0 ? "+" : ""}
+                {row.dx}, {row.dy >= 0 ? "+" : ""}
+                {row.dy} pt
+              </span>
+              <button
+                type="button"
+                aria-label={`Reset the chip position in ${row.name || row.bundle_id}`}
+                disabled={row.dx === 0 && row.dy === 0}
+                onClick={() => void set(row, 0, 0)}
+                className="rounded-full px-2.5 py-0.5 text-xs disabled:opacity-50"
+                style={field}
+              >
+                Reset
+              </button>
+            </span>
+          </li>
+        ))}
+        {rows.length === 0 && (
+          <li className="text-xs" style={muted}>
+            No nudges: the chip sits where each app reports the cursor.
+          </li>
+        )}
+      </ul>
+      {others.length > 0 && (
+        <select
+          aria-label="Adjust the chip in another app"
+          value=""
+          onChange={(e) => {
+            const id = e.currentTarget.value;
+            setPicked(others.find((a) => a.bundle_id === id) ?? null);
+          }}
+          className="mac-field mt-2"
+        >
+          <option value="">Adjust another app…</option>
+          {others.map((a) => (
+            <option key={a.bundle_id} value={a.bundle_id}>
+              {a.name || a.bundle_id}
+            </option>
+          ))}
+        </select>
+      )}
+      <ErrorLine error={error} />
+    </details>
+  );
 }
 
 /** Quiet apps: the list with remove buttons, one-click add from running or recent apps, or a bundle id. */

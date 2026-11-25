@@ -236,3 +236,18 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
   Accessibility reads, and those can wait about 6 s for a busy app.
 - **Fix, then re-measured:** the key tap got its own thread, Accessibility calls time out after 0.4 s, and the text
   is read once per snapshot. The same stalls are now lossless (table in `docs/PERFORMANCE.md`).
+## 2026-11-25: The optional features
+- **Explain and Reply** answer instead of rewriting, so they never replace the selection: the panel offers Copy
+  (first, because the selection is often in a message that cannot be edited), Insert after the selection, or
+  Discard. `make e2e` gained an Explain check (14 of 14 pass).
+- **A shortcut per custom action** needed protocol v5: the helper registers one Carbon hotkey per action and sends
+  the action's index with the selection, so the engine skips the menu. Shortcuts that clash with the menu hotkey or
+  another action are dropped by the settings sanitizer, with a test.
+- **Per-app chip nudge** is applied in the engine where the chip is sent, so the helper did not change.
+- **Warm-up after wake:** the helper listens for `NSWorkspace.didWakeNotification`, warms the speech model on half
+  a second of silence and tells the core, which runs the same `n_predict: 0` request as at launch.
+- **Recording the README GIFs found a bug:** after "We will receive " the model produced "1000000000000…" and
+  BOB showed it. Chips now stop before any word with a character repeated eight times. The recording also showed
+  that menu rows were drawn at the top of each row. The recorder captures only its own TextEdit window, never the
+  whole screen.
+

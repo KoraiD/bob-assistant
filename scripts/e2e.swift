@@ -85,6 +85,17 @@ func bobWindows() -> (chip: Bool, menu: Bool) {
     }
     return (chip, menu)
 }
+/// Height of BOB's action panel, 0 when hidden: a status line is short, a menu or an answer is tall.
+func menuHeight() -> Double {
+    let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+    for w in list where ["bob-native", "BOB Helper"].contains(w[kCGWindowOwnerName as String] as? String ?? "") {
+        let alpha = w[kCGWindowAlpha as String] as? Double ?? 0
+        if alpha > 0.1, let b = w[kCGWindowBounds as String] as? [String: Double], (b["Width"] ?? 0) >= 330 {
+            return b["Height"] ?? 0
+        }
+    }
+    return 0
+}
 func waitFor(_ seconds: Double, _ cond: () -> Bool) -> Bool {
     let end = Date().addingTimeInterval(seconds)
     while Date() < end { if cond() { return true }; Thread.sleep(forTimeInterval: 0.05) }
@@ -179,6 +190,25 @@ Thread.sleep(forTimeInterval: 1.5)
 key(code("z"), flags: .maskCommand)  // Cmd+Z
 let undone = waitFor(2) { text() == "teh results was realy good" }
 check("Cmd+Z restores the original in one step", undone, "\"\(text())\"")
+// 6. Explain shows an answer to copy and never touches the document.
+Thread.sleep(forTimeInterval: 1.5)
+let note = "The meeting moved to noon, see the ICS."
+setText(note)
+key(code("a"), flags: .maskCommand)
+Thread.sleep(forTimeInterval: 0.3)
+key(code("j"), flags: [.maskCommand, .maskShift])
+_ = waitFor(2) { bobWindows().menu }
+for _ in 0..<6 { key(125); Thread.sleep(forTimeInterval: 0.05) }  // Down to Explain (the 7th action)
+let clipboardBefore = NSPasteboard.general.changeCount
+key(36)
+let working = waitFor(3) { let h = menuHeight(); return h > 0 && h < 110 }
+let answered = working && waitFor(20) { menuHeight() >= 110 }
+check("Explain shows an answer in the panel", answered)
+key(36)  // Enter copies the answer
+let copied = waitFor(2) { NSPasteboard.general.changeCount != clipboardBefore }
+let answer = NSPasteboard.general.string(forType: .string) ?? ""
+check("Enter copies it and the document is unchanged", copied && !answer.isEmpty && text() == note,
+      "\(answer.count) chars copied")
 
 // Leave TextEdit as we found it: close the scratch document without saving.
 setText("")

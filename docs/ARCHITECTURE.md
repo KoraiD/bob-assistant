@@ -88,7 +88,7 @@ flowchart LR
 | Typo fixes (macOS spell checker) and keyboard-layout lookup | `TypoFinder.swift`, `KeyLayout.swift` | done; Swift tests |
 | Gap prompt for suggestions inside a sentence | `ghost/prompt.rs` (`gap`), `ghost/chip.rs` (`gap_chip`) | done; unit and engine tests |
 | Release build (bundled model server, signing, DMG) | `scripts/build-release.sh` | done, verified (RELEASE.md) |
-| End-to-end check in TextEdit | `scripts/e2e.swift` (`make e2e`) | 12 of 12 pass |
+| End-to-end check in TextEdit | `scripts/e2e.swift` (`make e2e`) | 14 of 14 pass (Ghost Text, typo fix, gap, window switch, Fix grammar, undo, Explain) |
 | Quiet-apps and phrases editors, interactive ghost | `src/components/{GhostLists,GhostMark}.tsx` | done |
 
 ## Decisions log

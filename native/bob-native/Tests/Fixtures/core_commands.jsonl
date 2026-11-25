@@ -1,4 +1,4 @@
-{"type":"hello_ack","version":4}
+{"type":"hello_ack","version":5}
 {"type":"reject","reason":"protocol version mismatch: core 3, helper 2"}
 {"type":"show_chip","text":" the quick brown","anchor":{"x":120.5,"y":340.25,"width":1.5,"height":18.0}}
 {"type":"hide_chip"}
@@ -27,3 +27,5 @@
 {"type":"show_menu","title":"Preview: ⏎ replaces, Esc discards","items":["Replace selection","Copy","Discard"],"anchor":null,"preview":"The quick fox."}
 {"type":"copy_text","text":"The quick fox."}
 {"type":"replace_before_caret","expected":"teh ","text":"the "}
+{"type":"set_action_hotkeys","hotkeys":[{"index":0,"hotkey":{"key_code":18,"modifiers":["control","option"]}}]}
+{"type":"set_action_hotkeys","hotkeys":[]}

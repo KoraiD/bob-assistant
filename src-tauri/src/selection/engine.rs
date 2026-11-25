@@ -13,7 +13,7 @@ use crate::brain::ChatRequest;
 use crate::context::ContextHub;
 use crate::ghost::engine::Sink;
 use crate::ghost::redact;
-use crate::protocol::{CoreCommand, Hotkey, NativeEvent, Rect};
+use crate::protocol::{ActionHotkey, CoreCommand, Hotkey, NativeEvent, Rect};
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -91,6 +91,27 @@ impl SelectionHandle {
         }
     }
 
+    /// The custom actions' own shortcuts (proposal 7); `index` is the action's place in the custom list.
+    pub fn action_hotkeys_command(&self) -> CoreCommand {
+        CoreCommand::SetActionHotkeys {
+            hotkeys: self
+                .settings()
+                .custom
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, c)| {
+                    c.hotkey.map(|h| ActionHotkey {
+                        index: i as u32,
+                        hotkey: Hotkey {
+                            key_code: h.key_code,
+                            modifiers: h.modifiers,
+                        },
+                    })
+                })
+                .collect(),
+        }
+    }
+
     pub fn stats(&self) -> SelectionStats {
         self.shared
             .stats
@@ -122,6 +143,7 @@ pub fn voice_action(instruction: &str) -> Action {
         ),
         sets_language: true,
         summary: false,
+        answer: false,
     }
 }
 
@@ -170,10 +192,18 @@ enum State {
         text: String,
         voice: bool,
     },
+    /// An answer about the selection (Explain, Reply), waiting for Copy, Insert or Discard.
+    Answer {
+        capture: Capture,
+        text: String,
+    },
 }
 
 /// The preview's choices, in order.
 pub const PREVIEW_ITEMS: [&str; 3] = ["Replace selection", "Copy", "Discard"];
+/// The choices for an answer (Explain, Reply), in order. Copy comes first: the selection is often in a
+/// message that cannot be edited.
+pub const ANSWER_ITEMS: [&str; 3] = ["Copy", "Insert after the selection", "Discard"];
 
 pub fn spawn(
     brains: Arc<BrainService>,
@@ -270,15 +300,14 @@ impl Engine {
                 text,
                 secure,
                 anchor,
+                action,
                 ..
-            }) => self.on_selection(text, secure, anchor),
-            Input::Native(NativeEvent::MenuChoice { index }) => {
-                if matches!(self.state, State::Preview { .. }) {
-                    self.on_preview_choice(index as usize)
-                } else {
-                    self.on_choice(index as usize)
-                }
-            }
+            }) => self.on_selection(text, secure, anchor, action),
+            Input::Native(NativeEvent::MenuChoice { index }) => match self.state {
+                State::Preview { .. } => self.on_preview_choice(index as usize),
+                State::Answer { .. } => self.on_answer_choice(index as usize),
+                _ => self.on_choice(index as usize),
+            },
             Input::Native(NativeEvent::MenuCancel) => {
                 self.cancel();
                 self.generation += 1;
@@ -335,13 +364,36 @@ impl Engine {
                     return;
                 }
                 self.task = None;
-                let State::Running { capture, voice, .. } =
-                    std::mem::replace(&mut self.state, State::Idle)
+                let State::Running {
+                    capture,
+                    voice,
+                    action,
+                } = std::mem::replace(&mut self.state, State::Idle)
                 else {
                     return;
                 };
                 match result {
                     Err(e) => self.fail(&e),
+                    Ok(raw) if action.answer => {
+                        let style = self.context.settings();
+                        let text = crate::context::typography::finish(
+                            &clean::clean_core(&raw, ""),
+                            style.spelling,
+                            style.quotes,
+                            None,
+                        );
+                        if text.trim().is_empty() {
+                            return self.fail("The brain returned no text.");
+                        }
+                        self.stats(|s| s.last_ms = Some(ms));
+                        self.sink.send(CoreCommand::ShowMenu {
+                            title: format!("{}: ⏎ copies, Esc closes", action.label),
+                            items: ANSWER_ITEMS.iter().map(|s| s.to_string()).collect(),
+                            anchor: None,
+                            preview: Some(text.clone()),
+                        });
+                        self.state = State::Answer { capture, text };
+                    }
                     Ok(raw) => {
                         let style = self.context.settings();
                         let text = crate::context::typography::finish(
@@ -393,7 +445,14 @@ impl Engine {
         }
     }
 
-    fn on_selection(&mut self, text: String, secure: bool, anchor: Option<Rect>) {
+    /// `action` is a custom action's index when its own shortcut was pressed: it runs without the menu.
+    fn on_selection(
+        &mut self,
+        text: String,
+        secure: bool,
+        anchor: Option<Rect>,
+        action: Option<u32>,
+    ) {
         self.cancel();
         self.generation += 1;
         self.state = State::Idle;
@@ -421,6 +480,19 @@ impl Engine {
                 true,
                 Some(ERROR_HIDE),
             );
+        }
+        if let Some(i) = action {
+            let settings = self.settings();
+            let Some(custom) = settings.custom.get(i as usize) else {
+                return self.status(
+                    "That shortcut has no action any more.",
+                    false,
+                    true,
+                    Some(ERROR_HIDE),
+                );
+            };
+            self.stats(|s| s.menus += 1);
+            return self.start(Capture { text }, actions::custom_action(custom), false);
         }
         let language = self.context.settings().language;
         let menu = actions::menu(&self.settings(), &language);
@@ -482,6 +554,35 @@ impl Engine {
                 );
             }
             _ => self.status("Discarded. Nothing changed.", false, false, Some(DONE_HIDE)),
+        }
+    }
+
+    fn on_answer_choice(&mut self, index: usize) {
+        let State::Answer { capture, text } = std::mem::replace(&mut self.state, State::Idle)
+        else {
+            return;
+        };
+        match index {
+            0 => {
+                self.sink.send(CoreCommand::CopyText { text });
+                self.status(
+                    "Copied. Paste it wherever you need it.",
+                    false,
+                    false,
+                    Some(DONE_HIDE),
+                );
+            }
+            1 => {
+                // Keep the selection and add the answer after it, on its own paragraph.
+                let original = capture.text.trim_end();
+                let tail = &capture.text[original.len()..];
+                self.state = State::Replacing { voice: false };
+                self.sink.send(CoreCommand::ReplaceSelection {
+                    expected: capture.text.clone(),
+                    text: format!("{original}\n\n{text}{tail}"),
+                });
+            }
+            _ => self.status("Closed. Nothing changed.", false, false, Some(DONE_HIDE)),
         }
     }
 
@@ -569,12 +670,13 @@ pub async fn rewrite(
         .await
         .unwrap_or_else(|_| Err("The brain took too long, so BOB stopped waiting.".into()))?;
     let style = context.settings();
-    let out = crate::context::typography::finish(
-        &clean::clean(&raw, text),
-        style.spelling,
-        style.quotes,
-        None,
-    );
+    // An answer (Explain, Reply) is new text: it keeps none of the selection's surrounding spaces.
+    let cleaned = if action.answer {
+        clean::clean_core(&raw, "")
+    } else {
+        clean::clean(&raw, text)
+    };
+    let out = crate::context::typography::finish(&cleaned, style.spelling, style.quotes, None);
     if out.trim().is_empty() {
         return Err("The brain returned no text.".into());
     }
@@ -796,6 +898,7 @@ mod tests {
             secure: false,
             source: Some(crate::protocol::SelectionSource::Accessibility),
             anchor: None,
+            action: None,
         }
     }
 
@@ -856,6 +959,128 @@ mod tests {
         assert_eq!(h.stats().replaced, 1);
         settle(1300).await;
         assert_eq!(rec.take(), vec![CoreCommand::HideMenu]);
+    }
+
+    #[tokio::test]
+    async fn explain_shows_an_answer_to_copy_or_insert_and_never_replaces() {
+        let (h, rec, _server, _root) = setup(
+            &[
+                "Here is the explanation:\n",
+                "It says the meeting moved to noon.",
+            ],
+            "local",
+        )
+        .await;
+        async fn run(h: &SelectionHandle, rec: &Recorder) {
+            h.native(selection("The meeting moved to noon."));
+            settle(50).await;
+            let cmds = rec.take();
+            let Some(CoreCommand::ShowMenu { items, .. }) = cmds.first() else {
+                panic!("{cmds:?}")
+            };
+            let index = items.iter().position(|i| i == "Explain").unwrap() as u32;
+            h.native(NativeEvent::MenuChoice { index });
+        }
+        run(&h, &rec).await;
+        settle(300).await;
+        let cmds = rec.take();
+        assert!(!cmds
+            .iter()
+            .any(|c| matches!(c, CoreCommand::ReplaceSelection { .. })));
+        assert!(
+            cmds.iter().any(|c| matches!(
+                c,
+                CoreCommand::ShowMenu { preview: Some(p), items, title, .. }
+                    if p == "It says the meeting moved to noon." && items[0] == ANSWER_ITEMS[0]
+                        && title.starts_with("Explain")
+            )),
+            "{cmds:?}"
+        );
+        // Enter copies.
+        h.native(NativeEvent::MenuChoice { index: 0 });
+        settle(30).await;
+        assert!(rec.take().contains(&CoreCommand::CopyText {
+            text: "It says the meeting moved to noon.".into()
+        }));
+        // Insert keeps the selection and adds the answer after it.
+        run(&h, &rec).await;
+        settle(300).await;
+        rec.take();
+        h.native(NativeEvent::MenuChoice { index: 1 });
+        settle(30).await;
+        assert!(rec.take().contains(&CoreCommand::ReplaceSelection {
+            expected: "The meeting moved to noon.".into(),
+            text: "The meeting moved to noon.\n\nIt says the meeting moved to noon.".into(),
+        }));
+    }
+
+    #[tokio::test]
+    async fn an_action_shortcut_runs_it_without_the_menu() {
+        let (h, rec, server, _root) = setup(&["SEE YOU"], "local").await;
+        h.set_settings(SelectionSettings {
+            custom: vec![actions::CustomAction {
+                label: "Shout".into(),
+                instruction: "Write it in capitals.".into(),
+                hotkey: Some(actions::HotkeySetting {
+                    key_code: 18,
+                    modifiers: vec!["control".into(), "option".into()],
+                }),
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            h.action_hotkeys_command(),
+            CoreCommand::SetActionHotkeys {
+                hotkeys: vec![ActionHotkey {
+                    index: 0,
+                    hotkey: Hotkey {
+                        key_code: 18,
+                        modifiers: vec!["control".into(), "option".into()],
+                    },
+                }],
+            }
+        );
+        let with_action = |action| NativeEvent::Selection {
+            app_bundle_id: "com.apple.TextEdit".into(),
+            text: "see you".into(),
+            secure: false,
+            source: None,
+            anchor: None,
+            action,
+        };
+        h.native(with_action(Some(0)));
+        settle(300).await;
+        let cmds = rec.take();
+        assert!(!cmds
+            .iter()
+            .any(|c| matches!(c, CoreCommand::ShowMenu { .. })));
+        assert!(
+            matches!(&cmds[0], CoreCommand::MenuStatus { busy: true, text, .. } if text.starts_with("Shout"))
+        );
+        assert!(cmds.contains(&CoreCommand::ReplaceSelection {
+            expected: "see you".into(),
+            text: "SEE YOU".into(),
+        }));
+        let system = server.last_request().json()["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(system.contains("Write it in capitals."));
+        // A shortcut whose action was removed explains itself and sends nothing.
+        h.native(NativeEvent::ReplaceResult {
+            ok: true,
+            method: None,
+            error: None,
+        });
+        let before = server.request_count();
+        h.native(with_action(Some(7)));
+        settle(50).await;
+        assert!(rec
+            .take()
+            .iter()
+            .any(|c| matches!(c, CoreCommand::MenuStatus { error: true, .. })));
+        assert_eq!(server.request_count(), before);
     }
 
     #[tokio::test]
@@ -991,6 +1216,7 @@ mod tests {
             secure: true,
             source: None,
             anchor: None,
+            action: None,
         });
         h.native(selection("   "));
         h.native(selection(&"a".repeat(MAX_CHARS + 1)));

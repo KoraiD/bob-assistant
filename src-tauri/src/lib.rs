@@ -137,6 +137,7 @@ struct Engines {
     selection: selection::engine::SelectionHandle,
     dictation: dictation::engine::DictationHandle,
     pause: std::sync::Arc<pause::Pause>,
+    brains: commands::Brains,
 }
 
 fn start_native_bridge(
@@ -152,6 +153,7 @@ fn start_native_bridge(
         selection,
         dictation,
         pause,
+        brains,
     } = engines;
     let socket = native_ipc::default_socket_path();
     let listener = match native_ipc::bind_socket(&socket) {
@@ -182,7 +184,22 @@ fn start_native_bridge(
             if matches!(event, NativeEvent::Hello { .. }) {
                 commands::push_context_mode(&cmd_bridge, &context, &ghost);
                 let _ = cmd_bridge.send(&selection.hotkey_command());
+                let _ = cmd_bridge.send(&selection.action_hotkeys_command());
                 let _ = cmd_bridge.send(&dictation.command());
+            }
+            // After sleep the model's weights may be paged out: warm the built-in brain up again so the
+            // first suggestion is not slow (the helper warms the speech model itself).
+            if matches!(event, NativeEvent::Woke) {
+                let brains = brains.clone();
+                tauri::async_runtime::spawn(async move {
+                    let started = std::time::Instant::now();
+                    if brains.warm_up_builtin().await {
+                        log::info!(
+                            "woke from sleep: built-in brain warmed up in {} ms",
+                            started.elapsed().as_millis()
+                        );
+                    }
+                });
             }
             // Voice Dictation (focus and text events only tell it whether the field is secure and what
             // precedes the caret; transcripts never reach the UI or logs).
@@ -435,6 +452,7 @@ pub fn run() {
             commands::ghost_status,
             commands::ghost_set_enabled,
             commands::ghost_set_quiet,
+            commands::ghost_set_chip_offset,
             commands::ghost_set_option,
             commands::ghost_memory,
             commands::ghost_memory_clear,
@@ -588,6 +606,7 @@ pub fn run() {
                 selection,
                 dictation,
                 pause,
+                brains: app.state::<commands::Brains>().inner().clone(),
             };
             start_native_bridge(app, bridge, engines, ax, mic);
             // AI agents (MCP): the control socket exists only while the user allows it.

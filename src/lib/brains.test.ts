@@ -58,7 +58,7 @@ describe("brains helpers", () => {
 
 describe("ghostSummary", () => {
   const g = (over: Partial<GhostStatus> = {}): GhostStatus => ({
-    enabled: true, p50_ms: null, p95_ms: null, quiet_apps: [], recent_apps: [], typo_fixes: true, mid_sentence: true, memory_count: 0,
+    enabled: true, p50_ms: null, p95_ms: null, quiet_apps: [], chip_offsets: [], recent_apps: [], typo_fixes: true, mid_sentence: true, memory_count: 0,
     stats: { requests: 0, chips_shown: 0, accepted_words: 0, accepted_all: 0, dismissed: 0, errors: 0, last_error: null, typing_through: 0 },
     ...over,
   });

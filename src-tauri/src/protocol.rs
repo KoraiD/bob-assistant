@@ -20,7 +20,8 @@ use std::fmt;
 /// Dictation (`dictation_key`, `transcript`, `dictation_error`, `dictation_status`, `set_dictation`,
 /// `start_recording`, `stop_recording`, `orb`).
 /// v4: typo fixes (`typo`, `replace_before_caret`), clipboard context, preview, dictation sounds.
-pub const PROTOCOL_VERSION: u32 = 4;
+/// v5: shortcuts for custom actions (`set_action_hotkeys`, `selection.action`) and `woke` after sleep.
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Longest accepted line in bytes. Longer lines are dropped, not buffered without bound.
 pub const MAX_LINE_BYTES: usize = 1 << 20;
@@ -80,6 +81,13 @@ pub enum SelectionSource {
 pub struct Hotkey {
     pub key_code: u32,
     pub modifiers: Vec<String>,
+}
+
+/// A custom action's own shortcut; `index` is its place in the user's custom actions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionHotkey {
+    pub index: u32,
+    pub hotkey: Hotkey,
 }
 
 /// What the dictation orb shows (VD-3).
@@ -143,7 +151,12 @@ pub enum NativeEvent {
         secure: bool,
         source: Option<SelectionSource>,
         anchor: Option<Rect>,
+        /// Set when a custom action's own shortcut was pressed (its index): run it without the menu.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action: Option<u32>,
     },
+    /// The Mac woke from sleep: models may have been paged out, so warm them up again.
+    Woke,
     /// The user picked menu item `index` (Enter or click).
     MenuChoice {
         index: u32,
@@ -277,6 +290,10 @@ pub enum CoreCommand {
     SetHotkey {
         hotkey: Hotkey,
     },
+    /// Register the custom actions' own shortcuts (replaces all previous ones; empty clears them).
+    SetActionHotkeys {
+        hotkeys: Vec<ActionHotkey>,
+    },
     /// Configure Voice Dictation: the hold-to-talk hotkey (None turns dictation off), the whisper model to
     /// keep loaded, and the language ("" = detect).
     SetDictation {
@@ -378,6 +395,7 @@ impl fmt::Debug for NativeEvent {
                 secure,
                 source,
                 anchor,
+                action,
             } => f
                 .debug_struct("Selection")
                 .field("app_bundle_id", app_bundle_id)
@@ -385,7 +403,9 @@ impl fmt::Debug for NativeEvent {
                 .field("secure", secure)
                 .field("source", source)
                 .field("has_anchor", &anchor.is_some())
+                .field("action", action)
                 .finish(),
+            NativeEvent::Woke => f.write_str("Woke"),
             NativeEvent::MenuChoice { index } => {
                 f.debug_struct("MenuChoice").field("index", index).finish()
             }

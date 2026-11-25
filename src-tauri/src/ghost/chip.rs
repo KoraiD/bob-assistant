@@ -9,6 +9,32 @@
 pub const MAX_WORDS: usize = 6;
 /// Most characters in a chip.
 pub const MAX_CHARS: usize = 48;
+/// A character repeated this many times in a row is model degeneration ("1000000000000", "!!!!!!!!"),
+/// not writing: the chip is cut before the word that contains it. Long enough for "10,000,000" and
+/// "1000000" (six zeros).
+pub const DEGENERATE_RUN: usize = 8;
+
+/// Byte index of the start of the first word that contains a run of `DEGENERATE_RUN` identical
+/// non-space characters.
+fn degenerate_at(s: &str) -> Option<usize> {
+    let mut run = 0;
+    let mut prev = None;
+    let mut word_start = 0;
+    for (i, c) in s.char_indices() {
+        if c.is_whitespace() {
+            run = 0;
+            prev = None;
+            word_start = i + c.len_utf8();
+            continue;
+        }
+        run = if prev == Some(c) { run + 1 } else { 1 };
+        prev = Some(c);
+        if run >= DEGENERATE_RUN {
+            return Some(word_start);
+        }
+    }
+    None
+}
 
 /// Coarse Unicode script class, enough to spot a model switching languages mid-suggestion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +124,12 @@ pub fn polish(raw: &str, before_caret: &str) -> Option<String> {
     }
     if s.trim().is_empty() || is_meta(&s) {
         return None;
+    }
+    if let Some(i) = degenerate_at(&s) {
+        s.truncate(i);
+        if s.trim().is_empty() {
+            return None;
+        }
     }
 
     // Script switch: cut at the first letter of a script the user is not writing in.
@@ -243,7 +275,10 @@ pub fn gap_chip(raw: &str, before: &str, after: &str) -> Option<(String, bool)> 
         return None;
     }
     let mut text = answer.trim().to_string();
-    if text.is_empty() || text.split_whitespace().count() > MAX_WORDS {
+    if text.is_empty()
+        || text.split_whitespace().count() > MAX_WORDS
+        || degenerate_at(&text).is_some()
+    {
         return None;
     }
     // The user is in the middle of a word: the answer must complete it.
@@ -458,6 +493,30 @@ mod tests {
         .unwrap();
         assert!(c.chars().count() <= MAX_CHARS, "{c}");
         assert!(!c.ends_with(char::is_whitespace));
+    }
+
+    #[test]
+    fn degenerate_runs_are_never_shown() {
+        // Seen in the real app after "We will receive " (README GIF recording, 2026-11-25).
+        assert_eq!(
+            polish("1000000000000000000000000", "We will receive "),
+            None
+        );
+        assert_eq!(
+            polish(" the 1000000000000 items", "We will receive"),
+            Some(" the".into())
+        );
+        assert_eq!(polish("!!!!!!!!!!", "Wow"), None);
+        // Real numbers and words stay.
+        assert_eq!(
+            polish("1,000,000 dollars.", "We raised "),
+            Some("1,000,000 dollars.".into())
+        );
+        assert_eq!(
+            polish("1000000 users", "We have "),
+            Some("1000000 users".into())
+        );
+        assert_eq!(gap_chip("00000000000]", "the ", " items"), None);
     }
 
     #[test]
