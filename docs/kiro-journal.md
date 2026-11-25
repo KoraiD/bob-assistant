@@ -227,6 +227,12 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
 - **Release:** `make release` builds a signed DMG with the model server inside. A stripped proc-macro library broke
   `tauri build`; the fix exempts build-time code from stripping. Benchmark tools no longer end up in the bundle.
 - **Public-repo audit:** no keys, signing hashes, team IDs or home paths in any revision. The sample name in tests
-  was replaced. The signing certificate's company name is visible in signed builds, so the owner decides which
-  certificate to use for the public release.
+  was replaced. The signing certificate's company name is visible in signed builds; the owner fully owns that
+  company and chose to sign the public release with it.
 - **Tests now:** Rust 259 + 2 end-to-end (+4 ignored), Swift 92, Vitest 128, and the 12 checks of `make e2e`.
+## 2026-11-25: Typing froze or lost characters
+- **Owner report, reproduced first:** a test switch blocks the helper's main thread on purpose. At 1.5 s macOS
+  disabled BOB's key tap and half of the typed characters were lost, because the tap shared the main thread with
+  Accessibility reads, and those can wait about 6 s for a busy app.
+- **Fix, then re-measured:** the key tap got its own thread, Accessibility calls time out after 0.4 s, and the text
+  is read once per snapshot. The same stalls are now lossless (table in `docs/PERFORMANCE.md`).

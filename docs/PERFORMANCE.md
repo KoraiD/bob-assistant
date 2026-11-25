@@ -271,3 +271,34 @@ real app a capture of the active window took 105 to 146 ms, off the typing path.
   above the previous glyph is now treated as this quirk (a soft wrap only moves the caret down).
 - Rewrites were not undoable: writing the selection through Accessibility does not reach TextEdit's undo stack.
   BOB now pastes (with the clipboard restored and marked transient), which every app undoes in one step.
+
+## Typing never waits for BOB (2026-11-25)
+
+**Report:** typing sometimes froze for a few seconds or lost characters while BOB ran.
+
+**Cause, reproduced:** an active `CGEventTap` holds every keystroke in the system until its callback returns. The tap
+lived on the helper's main run loop, which also runs Accessibility reads, the chip and the menus. When the main thread
+was busy, every key waited for it; past about a second macOS disabled the tap (`tapDisabledByTimeout`) and keys were
+lost. Accessibility calls wait up to about 6 s by default for an app that is busy or not responding
+([`AXUIElementSetMessagingTimeout`](https://developer.apple.com/documentation/applicationservices/1462085-axuielementsetmessagingtimeout)),
+and the text was read twice per snapshot, so long documents in slow apps could stall the main thread for that long.
+
+**Method:** a stress tool types 84 characters with real key events into a TextEdit document (5 KB and 200 KB) or a
+Chrome `contenteditable` page (10 KB and 80 KB) and checks that all of them arrive. A test-only switch,
+`BOB_TEST_MAIN_STALL_MS`, blocks the helper's main thread for that many ms every 2.5 s to stand in for a slow app.
+The helper now logs `slow <kind>: N ms` for main-thread work over 30 ms and how long a key waited for the tap.
+
+| Main-thread stall | Before: keys lost | Before: key waited | After: keys lost | After: key waited |
+|---|---|---|---|---|
+| none | 0 of 84 | under 30 ms | 0 of 84 | under 30 ms |
+| 600 ms | 0 of 84 | 592 ms | 0 of 84 | under 30 ms |
+| 1500 ms | 42 of 84, tap disabled | 1471 ms | 0 of 84 | under 30 ms |
+| 3000 ms | not run | | 0 of 84 in 2 of 3 runs | under 30 ms |
+
+One 3000 ms run lost 26 characters with no tap timeout logged; two reruns with trace logging were clean, so it
+remains unexplained (a 3 s stall every 2.5 s is far beyond any real read). Normal BOB afterwards: TextEdit 5 KB and
+200 KB and Chrome 10 KB and 80 KB, 84 of 84 every run. Chrome reads still take 33 to 56 ms on the main thread,
+which now delays only the chip, never a key.
+
+**Changes:** the key tap runs on its own thread (`dev.bob.keytap`, user-interactive) and still only reads atomic
+flags; Accessibility calls time out after 0.4 s; a snapshot reads the text once.

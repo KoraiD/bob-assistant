@@ -87,10 +87,9 @@ submit, check:
   hours or on your own equipment, ask your employer for a short written statement that they claim no rights to BOB.
 - Your **university's IP rules**. Coursework and personal projects are usually yours, but projects that used
   university funding or lab equipment may not be.
-- **The signing certificate.** The Developer ID on the build Mac belongs to a company, and its name is visible to
-  anyone who downloads the signed DMG. If you enter as an individual (required for the student prize), either sign
-  the release with a personal Developer ID, or get the company's written confirmation that it claims no rights.
-  The safest option is your own Apple Developer account.
+- **The signing certificate.** The release is signed with a Developer ID that belongs to a company the entrant
+  fully owns, so the company claims no rights to BOB. The certificate's name is visible to anyone who inspects the
+  signed DMG; that is expected and does not change who owns the project.
 
 Keep any written confirmation; Devpost can ask for it during verification.
 

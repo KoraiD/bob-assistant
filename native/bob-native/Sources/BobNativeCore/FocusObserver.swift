@@ -61,7 +61,7 @@ public final class FocusObserver {
             schedule(.focusChanged)
             return
         }
-        let snap = AXReader.snapshot(of: element)
+        let snap = Stall.measure("Accessibility watch") { AXReader.snapshot(of: element) }
         let key = Key(before: snap.beforeCaret, selectionLen: snap.selectionLen, caret: snap.caret)
         if key != lastDelivered { deliver(snap, .settled) }
     }
@@ -176,7 +176,7 @@ public final class FocusObserver {
             guard let self, let reason = self.pendingReason else { return }
             self.pendingReason = nil
             guard let element = AXReader.focusedElement() else { return }
-            self.deliver(AXReader.snapshot(of: element), reason)
+            self.deliver(Stall.measure("Accessibility read") { AXReader.snapshot(of: element) }, reason)
             self.scheduleSettle()
         }
     }
@@ -193,7 +193,7 @@ public final class FocusObserver {
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(delay)) { [weak self] in
                 guard let self, generation == self.settleGeneration, self.pendingReason == nil,
                       let element = AXReader.focusedElement(), AXReader.pid(of: element) == self.observedPID else { return }
-                let snap = AXReader.snapshot(of: element)
+                let snap = Stall.measure("Accessibility re-read") { AXReader.snapshot(of: element) }
                 let key = Key(before: snap.beforeCaret, selectionLen: snap.selectionLen, caret: snap.caret)
                 if key != self.lastDelivered { self.deliver(snap, .settled) }
             }

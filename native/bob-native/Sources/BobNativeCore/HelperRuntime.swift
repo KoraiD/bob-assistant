@@ -182,7 +182,17 @@ public final class HelperRuntime: @unchecked Sendable {
         }
     }
 
+    /// Test hook: `BOB_TEST_MAIN_STALL_MS` blocks the main thread that long every 2.5 s, to stand in for a slow
+    /// Accessibility read (an app that is busy or not responding). Used to prove typing never waits for it.
+    private func startStallTestIfRequested() {
+        guard let ms = ProcessInfo.processInfo.environment["BOB_TEST_MAIN_STALL_MS"].flatMap(Int.init), ms > 0 else { return }
+        FileHandle.standardError.write(Data("bob-native: test stall of \(ms) ms every 2.5 s is on\n".utf8))
+        Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { _ in usleep(useconds_t(ms) * 1000) }
+    }
+
     private func startObserving() {
+        startStallTestIfRequested()
+        AXReader.limitMessagingTimeout()
         observer.onSnapshot = { [weak self] snap, reason in self?.forward(snap, reason) }
         observer.start()
         keyTap.onKey = { [weak self] key in try? self?.client?.send(NativeEvent.key(key)) }
@@ -344,7 +354,7 @@ public final class HelperRuntime: @unchecked Sendable {
         if (snap.selectionLen ?? 0) == 0, before != lastTypoCheck {
             lastTypoCheck = before
             // Snapshots are delivered on the main run loop.
-            if let t = MainActor.assumeIsolated({ TypoFinder.find(in: before) }) {
+            if let t = Stall.measure("typo check", { MainActor.assumeIsolated { TypoFinder.find(in: before) } }) {
                 try? client?.send(NativeEvent.typo(word: t.word, fix: t.fix, trailing: t.trailing))
             }
         }

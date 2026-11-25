@@ -170,3 +170,10 @@ PERFORMANCE.md. Known limit: shared letters (Hungarian and German "ü") cannot s
   they also work on Dvorak and other layouts.
 - **Typo fixes** use the macOS spell checker. Its autocorrection adapts to how you type, so a slip like "teh" may or
   may not be offered on a given Mac; words the spell check flags ("recieve") always are.
+
+## Typing stress check
+
+To check that BOB never delays keys, type quickly in a long document (TextEdit, 200 KB) and in Chrome while a
+suggestion shows; no character may be lost. `~/Library/Logs/BOB/bob.log` lists `slow key tap (key waited)` if a key
+ever waited more than 30 ms for BOB. For testing only, starting the helper with `BOB_TEST_MAIN_STALL_MS=1500`
+blocks its main thread for 1.5 s every 2.5 s; typing must stay lossless (see `docs/PERFORMANCE.md`).

@@ -59,8 +59,10 @@ public enum KeyDecision: Equatable, Sendable {
 /// Marker stored in `eventSourceUserData` of every event BOB posts, so the tap never captures them.
 public let bobSyntheticEventMarker: Int64 = 0x0B0B_0B0B
 
-/// An active `CGEventTap` on key-down events. The callback only reads an atomic flag and returns,
-/// so it can never stall typing (perf steering). Requires Accessibility permission.
+/// An active `CGEventTap` on key-down events. macOS holds every keystroke until the tap answers, so the tap
+/// runs on its own thread: Accessibility reads, drawing and model loading on the main thread can never delay
+/// typing (measured: a 1.5 s main-thread stall made macOS disable a main-thread tap and drop half the keys).
+/// The callback only reads atomic flags and returns. Requires Accessibility permission.
 public final class KeyTap: @unchecked Sendable {
     private let capturing = OSAllocatedUnfairLock(initialState: false)
     private let menuOpen = OSAllocatedUnfairLock(initialState: false)
@@ -73,6 +75,8 @@ public final class KeyTap: @unchecked Sendable {
     }
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
+    private var tapThread: Thread?
+    private var tapLoop: CFRunLoop?
     /// Called on the main run loop for every swallowed key.
     public var onKey: ((Key) -> Void)?
 
@@ -95,28 +99,49 @@ public final class KeyTap: @unchecked Sendable {
             tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
             eventsOfInterest: mask, callback: keyTapCallback, userInfo: refcon
         ) else { return false }
-        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
-        CGEvent.tapEnable(tap: port, enable: true)
+        guard let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0) else { return false }
         tap = port
         source = src
+        let started = DispatchSemaphore(value: 0)
+        let thread = Thread { [weak self] in
+            guard let self else { started.signal(); return }
+            self.tapLoop = CFRunLoopGetCurrent()
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), src, .commonModes)
+            CGEvent.tapEnable(tap: port, enable: true)
+            started.signal()
+            CFRunLoopRun()
+        }
+        thread.name = "dev.bob.keytap"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        tapThread = thread
+        started.wait()
         return true
     }
 
     public func uninstall() {
         if let port = tap { CGEvent.tapEnable(tap: port, enable: false) }
-        if let src = source { CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .commonModes) }
+        if let loop = tapLoop {
+            if let src = source { CFRunLoopRemoveSource(loop, src, .commonModes) }
+            CFRunLoopStop(loop)
+        }
         tap = nil
         source = nil
+        tapLoop = nil
+        tapThread = nil
     }
 
     fileprivate func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             // macOS disables slow or interrupted taps; turn it back on (macos-native steering).
+            FileHandle.standardError.write(Data("bob-native: key tap was disabled by macOS (\(type == .tapDisabledByTimeout ? "timeout" : "user input")); re-enabled\n".utf8))
             if let port = tap { CGEvent.tapEnable(tap: port, enable: true) }
             return Unmanaged.passUnretained(event)
         }
         guard type == .keyDown else { return Unmanaged.passUnretained(event) }
+        // How long the key waited before the tap saw it (the whole system waits for an active tap).
+        let lagMs = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) &- event.timestamp) / 1e6
+        Stall.report("key tap (key waited)", ms: lagMs, threshold: 30)
         let decision = KeyDecision.decide(
             keyCode: event.getIntegerValueField(.keyboardEventKeycode),
             flags: event.flags,

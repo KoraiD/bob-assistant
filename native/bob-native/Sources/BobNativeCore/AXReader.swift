@@ -42,6 +42,15 @@ public struct AXSnapshot {
 public enum AXReader {
     static let editableRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"]
 
+    /// Longest any Accessibility call may wait for an app (macOS default: about 6 s). An app that is busy or not
+    /// responding then costs BOB at most this much per call, and no suggestion, instead of freezing it.
+    public static let messagingTimeout: Float = 0.4
+
+    /// Apply `messagingTimeout` to every element (setting it on the system-wide element sets the default).
+    public static func limitMessagingTimeout() {
+        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), messagingTimeout)
+    }
+
     public static func focusedElement() -> AXUIElement? {
         var value: CFTypeRef?
         let system = AXUIElementCreateSystemWide()
@@ -198,13 +207,14 @@ public enum AXReader {
         snap.elementFrame = frame(element)
         if let selection = range(element, kAXSelectedTextRangeAttribute) {
             snap.selectionLen = max(selection.length, 0)
-            if let value = string(element, kAXValueAttribute) {
+            // Read the text once: in a long document every read copies all of it from the app.
+            let value = string(element, kAXValueAttribute)
+            if let value {
                 snap.valueLength = value.utf16.count
                 snap.beforeCaret = TextWindow.beforeCaret(value: value, caretUTF16: selection.location)
                 snap.afterCaret = TextWindow.afterCaret(value: value, caretUTF16: selection.location,
                                                         selectionUTF16: selection.length)
             }
-            let value = string(element, kAXValueAttribute)
             if let (rect, source) = caret(element, selection: selection, value: value, frame: snap.elementFrame, app: bundle) {
                 snap.caret = rect
                 snap.caretSource = source
@@ -230,6 +240,7 @@ public enum AXReader {
     /// Chromium and Electron only expose their accessibility tree after being asked (macos-native steering).
     public static func enableManualAccessibility(pid: pid_t) {
         let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, messagingTimeout)
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
     }
 }

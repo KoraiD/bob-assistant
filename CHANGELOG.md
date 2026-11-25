@@ -16,6 +16,8 @@ The first release, built for Kiroween 2026.
 - Optional context: remembered phrases, the window title, text on screen, recently copied text and your languages.
 - Suggestions in a language you do not write are dropped.
 - Quiet apps (terminals and password managers by default), never in password fields.
+- Typing never waits for BOB: the key tap runs on its own thread and Accessibility calls to a busy app time out
+  after 0.4 s.
 
 ### Selection Actions
 - `⌘⇧J` on selected text: fix grammar, rephrase, shorten, friendlier, professional, summarize, translate, or your
