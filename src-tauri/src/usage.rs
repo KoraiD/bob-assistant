@@ -30,6 +30,8 @@ pub struct Day {
     pub rewrites: u64,
     pub rewrite_failures: u64,
     pub voice_edits: u64,
+    /// Typo fixes accepted with Tab.
+    pub typo_fixes: u64,
 }
 
 impl Day {
@@ -43,6 +45,7 @@ impl Day {
         self.rewrites += o.rewrites;
         self.rewrite_failures += o.rewrite_failures;
         self.voice_edits += o.voice_edits;
+        self.typo_fixes += o.typo_fixes;
     }
 
     /// Words BOB produced that you did not type (Ghost and dictation).

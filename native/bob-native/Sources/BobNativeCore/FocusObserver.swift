@@ -37,6 +37,34 @@ public final class FocusObserver {
     }
     private var lastDelivered: Key?
     private var settleGeneration = 0
+    private var watchTimer: Timer?
+
+    /// Re-check the focused field every 250 ms (only while BOB shows a suggestion). Delivers a snapshot when the
+    /// text or caret changed, and re-attaches when focus moved to another field or window without a notification.
+    public func setWatching(_ on: Bool) {
+        if on, watchTimer == nil {
+            watchTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.watch() }
+        } else if !on {
+            watchTimer?.invalidate()
+            watchTimer = nil
+        }
+    }
+
+    private func watch() {
+        guard pendingReason == nil, let element = AXReader.focusedElement() else { return }
+        if AXReader.pid(of: element) != observedPID {
+            schedule(.focusChanged)
+            return
+        }
+        if let old = observedElement, !CFEqual(old, element) {
+            observeFocusedElement()
+            schedule(.focusChanged)
+            return
+        }
+        let snap = AXReader.snapshot(of: element)
+        let key = Key(before: snap.beforeCaret, selectionLen: snap.selectionLen, caret: snap.caret)
+        if key != lastDelivered { deliver(snap, .settled) }
+    }
 
     /// Called (coalesced, main thread) with a fresh snapshot.
     public var onSnapshot: ((AXSnapshot, Reason) -> Void)?
@@ -100,6 +128,9 @@ public final class FocusObserver {
         let appElement = AXUIElementCreateApplication(pid)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         AXObserverAddNotification(obs, appElement, kAXFocusedUIElementChangedNotification as CFString, refcon)
+        // Switching windows inside the same app does not always move focus notifications.
+        AXObserverAddNotification(obs, appElement, kAXFocusedWindowChangedNotification as CFString, refcon)
+        AXObserverAddNotification(obs, appElement, kAXMainWindowChangedNotification as CFString, refcon)
         observeFocusedElement()
         schedule(reason)
     }
@@ -123,7 +154,7 @@ public final class FocusObserver {
     private func handle(element: AXUIElement, notification: String) {
         notificationCounts[notification, default: 0] += 1
         switch notification {
-        case kAXFocusedUIElementChangedNotification:
+        case kAXFocusedUIElementChangedNotification, kAXFocusedWindowChangedNotification, kAXMainWindowChangedNotification:
             observeFocusedElement()
             schedule(.focusChanged)
         case kAXValueChangedNotification:

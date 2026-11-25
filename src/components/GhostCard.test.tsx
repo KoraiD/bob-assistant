@@ -23,6 +23,8 @@ beforeEach(() => {
     enabled: true,
     quiet_apps: [{ bundle_id: "com.googlecode.iterm2", name: "iTerm" }],
     recent_apps: [{ bundle_id: "com.apple.Notes", name: "Notes" }],
+    typo_fixes: true,
+    mid_sentence: true,
     memory_count: 2,
     p50_ms: null,
     p95_ms: null,
@@ -133,5 +135,13 @@ describe("GhostCard", () => {
     expect(invoke).toHaveBeenCalledWith("ghost_memory_clear");
     expect(await screen.findByText("Nothing remembered yet.")).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("button", { name: "Forget all…" })).not.toBeInTheDocument());
+  });
+
+  it("turns typo fixes and mid-sentence suggestions on and off", async () => {
+    render(<GhostCard />);
+    await userEvent.click(await screen.findByRole("switch", { name: "Fix typos" }));
+    expect(invoke).toHaveBeenCalledWith("ghost_set_option", { option: "typo_fixes", on: false });
+    await userEvent.click(screen.getByRole("switch", { name: "Suggest inside a sentence" }));
+    expect(invoke).toHaveBeenCalledWith("ghost_set_option", { option: "mid_sentence", on: false });
   });
 });

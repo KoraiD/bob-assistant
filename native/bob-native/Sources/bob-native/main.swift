@@ -5,7 +5,6 @@ import Foundation
 //   bob-native                  connect to the core at $BOB_SOCKET (started by the app)
 //   bob-native --version        print the protocol version
 //   bob-native --probe [secs]   compatibility spike: observe the focused field, print findings
-//   bob-native --chip-demo      show a ghost chip at the caret in any app
 
 let args = Array(CommandLine.arguments.dropFirst())
 
@@ -19,9 +18,6 @@ if let i = args.firstIndex(of: "--probe") {
     HelperRuntime(mode: .probe(seconds: seconds)).run()
 }
 
-if args.contains("--chip-demo") {
-    HelperRuntime(mode: .chipDemo).run()
-}
 
 //   bob-native --transcribe <audio> --model <ggml.bin> [--lang en] [--audio-ctx N] [--runs N]
 // Measurement tool for dictation models (docs/PERFORMANCE.md). Prints JSON lines with timings and text.
@@ -64,7 +60,7 @@ if let i = args.firstIndex(of: "--transcribe"), args.indices.contains(i + 1) {
 }
 
 guard let socketPath = ProcessInfo.processInfo.environment["BOB_SOCKET"] else {
-    print("bob-native: BOB_SOCKET is not set. Run the BOB app, or use --probe / --chip-demo / --version.")
+    print("bob-native: BOB_SOCKET is not set. Run the BOB app, or use --probe / --version.")
     exit(64)
 }
 HelperRuntime(mode: .connect(socketPath: socketPath)).run()

@@ -304,6 +304,34 @@
 }
 
 /* ---- Mac controls (components/ui.tsx) ---- */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+}
+/* Disclosure rows: a chevron like Finder and System Settings instead of the browser triangle. */
+details > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+details > summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  transform: rotate(-45deg);
+  transition: transform 150ms ease;
+  margin: 0 4px 0 2px;
+}
+details[open] > summary::before {
+  transform: rotate(45deg);
+}
 .mac-group {
   margin-top: 18px;
 }

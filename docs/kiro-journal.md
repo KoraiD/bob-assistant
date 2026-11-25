@@ -210,3 +210,23 @@ what worked, what did not, IDE vs CLI observations, spec vs vibe-coding comparis
 - **MCP both ways:** Kiro used `fetch` while building BOB, and now BOB is an MCP server itself (`bob-mcp`), tested
   end to end against the running app and the local model, plus a Skill file for other tools.
 - **Tests now:** Rust 253 + 2 end-to-end (+4 ignored), Swift 87, Vitest 127.
+
+## 2026-11-25: Task 12, release, and the end-to-end run
+- **Running the real app found what the tests could not.** A new `make e2e` drives TextEdit with real key events.
+  On its first run nothing worked: TextEdit reports the caret one line too high on the first line, so BOB hid every
+  suggestion there. Two typo and clipboard events from the helper were never forwarded to the engine (the unit tests
+  call the engine directly). The undo check failed, first because the script sent Cmd+Y (the owner uses a Hungarian
+  layout), then for real: the Accessibility write was not undoable. All fixed; 12 of 12 checks pass.
+- **Owner reports, reproduced before fixing:** the frozen chip after a window switch came from my own Chrome fix
+  (keep the chip while only the caret moves), which had no time limit. Slack's `@mention` list lost Tab to BOB; now BOB
+  steps aside while the word starts with `@`, `#` or `:`.
+- **Measured before building:** "Active window" seemed to do nothing for Ghost Text because Ghost never used screen
+  text; the benchmark showed it could (34% to 58% right word with memory), so it became an opt-in layer. For
+  suggestions inside a sentence, fill-in-the-middle tokens returned nothing on the default model; a two-example gap
+  prompt works.
+- **Release:** `make release` builds a signed DMG with the model server inside. A stripped proc-macro library broke
+  `tauri build`; the fix exempts build-time code from stripping. Benchmark tools no longer end up in the bundle.
+- **Public-repo audit:** no keys, signing hashes, team IDs or home paths in any revision. The sample name in tests
+  was replaced. The signing certificate's company name is visible in signed builds, so the owner decides which
+  certificate to use for the public release.
+- **Tests now:** Rust 259 + 2 end-to-end (+4 ignored), Swift 92, Vitest 128, and the 12 checks of `make e2e`.

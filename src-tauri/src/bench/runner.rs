@@ -98,6 +98,14 @@ impl Harness {
             window_title: super::corpus::window_title(&trace.id).map(str::to_string),
             after_caret: String::new(),
         });
+        if let Some(text) = super::corpus::screen_text(&trace.id) {
+            self.context.observe(&NativeEvent::ScreenText {
+                scope: self.context.settings().scope,
+                app_bundle_id: "bench".into(),
+                text: text.to_string(),
+                ms: 0,
+            });
+        }
         tokio::time::sleep(Duration::from_millis(50)).await;
         let start = Instant::now();
         for step in &trace.steps {

@@ -64,6 +64,13 @@ struct CaretRectResolverTests {
         #expect(r?.1 == .atCaret)
     }
 
+    @Test func textEditsFirstLineCaretBoxOneLineTooHighIsIgnored() {
+        // Measured in TextEdit (2026-11-24): the glyph before the caret at y 115, the empty range at y 102.
+        let r = CaretRectResolver.compose(atCaret: Rect(x: 406.9, y: 102, width: 0, height: 13),
+                                          previousChar: Rect(x: 400.3, y: 115, width: 6.6, height: 13), nextChar: nil)
+        #expect(r?.1 == .previousChar)
+        #expect(r?.0.y == 115)
+    }
     @Test func aNewlineBeforeTheCaretIsIgnored() {
         let caretBox = Rect(x: 20, y: 222, width: 0, height: 18)
         let r = CaretRectResolver.compose(atCaret: caretBox, previousChar: Rect(x: 400, y: 200, width: 6, height: 18),

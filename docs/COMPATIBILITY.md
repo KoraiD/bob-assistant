@@ -7,12 +7,11 @@ Test machine: Apple M4 Max, macOS 27.2 (record the final machine before submissi
 
 ## How to run the spike (about 15 minutes)
 
-The helper has two standalone modes that need no Rust and print **no typed text** (only lengths and geometry):
+The helper has a standalone mode that need no Rust and print **no typed text** (only lengths and geometry):
 
 ```bash
 make native        # build the helper
 make probe         # observe the focused field for 20 s, print one JSON line per change + a summary
-make chip-demo     # show a ghost chip at the caret in whatever app you type in (Ctrl+C to stop)
 ```
 
 1. **Grant Accessibility to the terminal app, not to `bob-native`.** macOS attributes a command-line tool's
@@ -23,8 +22,7 @@ make chip-demo     # show a ghost chip at the caret in whatever app you type in 
 2. For each app in the table: run `make probe`, click into a **text field of that app within a few seconds**, type a few
    words, move the caret with the arrow keys, then read the summary line.
 3. Fill the row:
-   - **Caret rect**: `samples_with_caret / samples` in the summary (and whether the numbers look right: run
-     `make chip-demo` and check that the chip sits at the caret).
+   - **Caret rect**: `samples_with_caret / samples` in the summary (`make e2e` checks the chip in TextEdit).
    - **Text read**: `value_len` is not null in the sample lines.
    - **AX notifications**: which of `AXFocusedUIElementChanged`, `AXValueChanged`, `AXSelectedTextChanged` appear in
      `ax_notifications`. Apps that send none cannot be observed without polling.
@@ -115,10 +113,8 @@ Cmd+Shift+4. A delayed capture also works: `screencapture -T 5 ~/Desktop/chip.pn
    terminal's grants. `make app` builds BOB.app with the helper at `Contents/MacOS/bob-native`, both signed with the same
    Developer ID and hardened runtime; launched with `open`, the helper ran from inside the bundle and connected. Whether
    macOS shows a single "BOB" entry for both processes needs the owner's grant to confirm.
-   Previous note: Run `make probe` from Terminal (grant goes to Terminal). Then run the packaged
-   `BOB.app` (Task 10) and check that the **helper** shows as granted under BOB, not as a separate entry. Dev note: grants are
-   tied to the signing identity, so use `make sign-dev` (identity from `BOB_SIGN_IDENTITY`, never committed) to keep grants
-   across rebuilds.
+   Grants are tied to the signing identity: `make app` signs with `BOB_SIGN_IDENTITY` (never committed), so grants
+   survive rebuilds.
 2. **whisper.cpp resident server.** Answered (2026-11-23): whisper.cpp publishes no macOS server binary (release assets:
    Windows/Linux binaries and an Apple xcframework). BOB links the official xcframework into the helper (decision log
    in ARCHITECTURE.md).
@@ -151,7 +147,7 @@ Cmd+Shift+4. A delayed capture also works: `screencapture -T 5 ~/Desktop/chip.pn
 - Secure text fields (`AXSecureTextField`) are never read (GT-3).
 - Chromium/Electron apps get `AXManualAccessibility` set when they become frontmost.
 
-## Chrome: caret before text (Task 12a)
+## Chrome: caret before text
 Typing or accepting a suggestion in Chrome produced a chip that repeated text already typed (owner's screenshot,
 2026-11-24). Chrome sends the value-changed notification with the new caret bounds before the value itself has
 changed. The helper now re-reads the focused field 40, 120 and 300 ms after each change and sends only real changes;
@@ -159,6 +155,18 @@ the engine ignores stale text after an accept and keeps the chip in place while 
 `scripts/ax-lag-probe.swift` measures the lag in a page it opens itself. Owner check pending: type and accept in a
 Chrome text area and a contenteditable (Gmail compose).
 
-## Languages (Task 12a)
+## Languages
 With preferred languages set, suggestions in other languages are dropped (letters plus common words). Measured in
 PERFORMANCE.md. Known limit: shared letters (Hungarian and German "ü") cannot separate those two.
+
+## Findings from the end-to-end run (2026-11-25)
+- **TextEdit:** the caret on the first line was reported one line too high; fixed (see PERFORMANCE.md). Rewrites
+  now paste, so `⌘Z` undoes them.
+- **Slack, Teams, Discord, GitHub, Notion:** while the word at the caret starts with `@`, `#` or `:`, or the line
+  starts with `/`, BOB shows no suggestion, so Tab reaches the app's own list.
+- **Window switches inside one app** (several Chrome or TextEdit windows): BOB now listens for focused-window
+  changes and re-checks the field four times a second while a suggestion is visible.
+- **Keyboard layouts:** BOB's copy and paste shortcuts look up the keys for "c" and "v" in the current layout, so
+  they also work on Dvorak and other layouts.
+- **Typo fixes** use the macOS spell checker. Its autocorrection adapts to how you type, so a slip like "teh" may or
+  may not be offered on a given Mac; words the spell check flags ("recieve") always are.

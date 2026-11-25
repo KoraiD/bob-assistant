@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Toggle } from "./ui";
 import { isTauri } from "../lib/appInfo";
 import { api, ghostSummary, type GhostStatus, type Snapshot } from "../lib/brains";
 import { PhraseEditor, QuietAppsEditor } from "./GhostLists";
+import { Group, Row, Toggle } from "./ui";
 import { useTauriEvent } from "../lib/useTauriEvent";
 
 /** Overview card for Ghost Text: on/off and live latency (refreshes every 2 s while visible). */
@@ -38,34 +38,63 @@ export function GhostCard() {
     ? ghostSummary(status, snapshot?.roles.ghost ?? null, snapshot?.builtin.state === "ready")
     : "Open the BOB app to use Ghost Text.";
   const s = status?.stats;
+  const option = async (name: "typo_fixes" | "mid_sentence", on: boolean) => {
+    await api.ghostSetOption(name, on);
+    void refresh();
+  };
   return (
-    <section aria-label="Ghost Text" className="soft-card panel-in mt-6 p-5">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h3 className="sr-only">Ghost Text</h3>
-          <p className="text-sm" style={{ color: "var(--text-muted)" }} data-testid="ghost-summary">
-            {summary}
-          </p>
-        </div>
+    <div className="max-w-3xl">
+      <Group
+        label="Ghost Text"
+        footer={
+          <>
+            <kbd>Tab</kbd> takes a word, <kbd>⇧Tab</kbd> takes the rest, <kbd>Esc</kbd> dismisses. Never in password fields, and never while an app shows its own list
+            (Slack @mentions, #channels, :emoji:, /commands).
+          </>
+        }
+      >
+        <Row title="Suggest as you type" detail={<span data-testid="ghost-summary">{summary}</span>}>
+          {status && <Toggle label="Ghost Text" on={status.enabled} onChange={() => void toggle()} />}
+        </Row>
         {status && (
-          <Toggle label="Ghost Text" on={status.enabled} onChange={() => void toggle()} />
+          <>
+            <Row title="Fix typos" detail="After you finish a misspelled word, BOB offers the fix (teh → the). Tab replaces it. Uses the macOS spell checker on this Mac.">
+              <Toggle label="Fix typos" on={status.typo_fixes} onChange={(v) => void option("typo_fixes", v)} />
+            </Row>
+            <Row title="Suggest inside a sentence" detail="When the cursor is in the middle of a sentence, BOB fills the gap using the words after it.">
+              <Toggle label="Suggest inside a sentence" on={status.mid_sentence} onChange={(v) => void option("mid_sentence", v)} />
+            </Row>
+          </>
         )}
-      </div>
-      {s && s.chips_shown > 0 && (
-        <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }} data-testid="ghost-stats">
-          {s.chips_shown} suggestions · {s.accepted_words} words accepted with Tab · {s.accepted_all} with Shift+Tab · {s.typing_through} typed through · {s.dismissed} dismissed
-        </p>
+        {s && s.chips_shown > 0 && (
+          <Row
+            title="This session"
+            detail={
+              <span data-testid="ghost-stats">
+                {s.chips_shown} suggestions · {s.accepted_words} words taken with Tab · {s.accepted_all} with ⇧Tab · {s.typing_through} typed through · {s.dismissed} dismissed
+              </span>
+            }
+          />
+        )}
+        {s?.last_error && (
+          <Row
+            title="Last problem"
+            detail={
+              <span role="alert" style={{ color: "var(--danger)" }}>
+                {s.last_error}
+              </span>
+            }
+          />
+        )}
+      </Group>
+      {status && (
+        <Group title="Apps and phrases" label="Apps and phrases">
+          <div className="pb-2">
+            <QuietAppsEditor status={status} onChanged={refresh} />
+            <PhraseEditor count={status.memory_count} onChanged={refresh} />
+          </div>
+        </Group>
       )}
-      {s?.last_error && (
-        <p role="alert" className="mt-2 text-xs" style={{ color: "var(--danger)" }}>
-          Last error: {s.last_error}
-        </p>
-      )}
-      {status && <QuietAppsEditor status={status} onChanged={refresh} />}
-      {status && <PhraseEditor count={status.memory_count} onChanged={refresh} />}
-      <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>
-        <kbd>Tab</kbd> accepts a word · <kbd>Shift</kbd>+<kbd>Tab</kbd> accepts all · <kbd>Esc</kbd> dismisses. Never in password fields.
-      </p>
-    </section>
+    </div>
   );
 }

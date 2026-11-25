@@ -48,10 +48,13 @@ public enum CaretRectResolver {
         let at = atCaret.flatMap { isPlausible($0) ? $0 : nil }
         let prev = previousIsNewline ? nil : previousChar.flatMap { isPlausible($0) ? $0 : nil }
         if let p = prev {
-            // A caret box on another visual line (soft wrap) means the previous glyph is not on our line.
+            // A caret box on another visual line (soft wrap) means the previous glyph is not on our line. A
+            // wrap only moves the caret down: a box above the previous glyph is an app quirk (TextEdit reports
+            // the empty range at the end of the first line one line too high), so the glyph wins.
             let onSameLine = at.map { a in
                 let mid = p.y + p.height / 2
-                return mid >= a.y - 1 && mid <= a.y + a.height + 1
+                let above = a.y + a.height <= p.y + 1
+                return above || (mid >= a.y - 1 && mid <= a.y + a.height + 1)
             } ?? true
             if onSameLine {
                 return (Rect(x: p.x + p.width, y: p.y, width: 0, height: p.height), .previousChar)

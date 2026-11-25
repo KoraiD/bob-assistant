@@ -36,7 +36,7 @@ describe("SelectionCard", () => {
     render(<SelectionCard />);
     expect(await screen.findByTestId("selection-summary")).toHaveTextContent("⌘⇧J");
     expect(screen.getByTestId("selection-actions")).toHaveTextContent("Fix grammar · Rephrase");
-    expect(screen.getByTestId("selection-stats")).toHaveTextContent("2 run · 1 replaced · 1 failed · last took 1.5 s");
+    expect(screen.getByTestId("selection-stats")).toHaveTextContent("2 runs · 1 replaced · 1 failed · last took 1.5 s");
     expect(screen.getByRole("alert")).toHaveTextContent("the selection changed");
   });
 
@@ -51,7 +51,7 @@ describe("SelectionCard", () => {
   it("adds and saves a custom action, dropping empty rows", async () => {
     render(<SelectionCard />);
     const box = await screen.findByTestId("custom-actions");
-    await userEvent.click(within(box).getByText(/Your own actions/));
+    await userEvent.click(within(box).getByText(/Edit your actions/));
     await userEvent.click(within(box).getByRole("button", { name: "Add action" }));
     await userEvent.click(within(box).getByRole("button", { name: "Add action" }));
     await userEvent.type(within(box).getByLabelText("Action 1 name"), "Decline politely");

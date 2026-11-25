@@ -42,6 +42,9 @@ feature that changes the answer.
 | Usage statistics | local `usage.json`: per-day counts (words accepted, words dictated, rewrites, speech milliseconds), at most 400 days, never any text; Statistics > Clear | yes, locally |
 | Running apps (quiet-apps picker) | bundle id and name, read when you open the list | not stored |
 | Open at login | macOS Login Items, or `~/Library/LaunchAgents/dev.bob.assistant.login.plist` when macOS refuses the login item; removed when you turn it off | yes, by macOS |
+| Typo fixes | the last word you finished is checked by the macOS spell checker inside BOB's helper | not stored |
+| Text after the cursor (suggestions inside a sentence) | up to 160 characters of the same line, to the Ghost brain, redacted | not stored |
+| Clipboard during a rewrite | BOB pastes the result, marks the clipboard item as transient (clipboard managers skip it) and restores your clipboard | not stored |
 | Copied text (clipboard context, opt-in) | read only while the switch is on: plain text, at most 2,000 characters, kept in memory for two minutes; skipped for items marked private by password managers (nspasteboard.org concealed or transient types), copies in quiet apps and BOB's own copies; to allowed brains only, redacted | no |
 | Per-app modes, preferred languages, style notes | local `context-settings.json` | yes, locally |
 | Logs | `~/Library/Logs/BOB/bob.log` (0600, rotated at 5 MB, 3 old files): states, sizes and timings only; every line is also redacted | yes, locally |

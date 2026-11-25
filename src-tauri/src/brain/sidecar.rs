@@ -265,10 +265,6 @@ impl Sidecar {
         self.state_rx.borrow().clone()
     }
 
-    pub fn subscribe(&self) -> watch::Receiver<SidecarState> {
-        self.state_rx.clone()
-    }
-
     pub async fn endpoint(&self) -> Option<Endpoint> {
         self.endpoint.lock().await.clone()
     }

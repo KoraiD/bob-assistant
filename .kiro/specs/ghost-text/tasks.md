@@ -17,3 +17,11 @@ Plan tasks 4 to 6. Tick a box in the same commit as the code.
   - [ ] 6.3 Personalization context stack (base prompt, settings, profile file, visible context, memory in prompts): waits on the owner's decisions, see docs/PRIVACY.md
 - [x] 7. Benchmark harness and tuning; record results in `docs/PERFORMANCE.md` (_GT-19, GT-20_): `ghost-bench`, oracle CI test, model and settings sweep, prompt-cache evidence
 - [ ] 8. Docs: ARCHITECTURE, PRIVACY, COMPATIBILITY updated; journal entry
+
+## Additions (2026-11-25)
+- [x] Typo fixes from the macOS spell checker (`typo` event, `replace_before_caret`; Swift and engine tests)
+- [x] Suggestions inside a sentence with the gap prompt (engine test; style-bench part D)
+- [x] Leave Tab to the app's own completion (`chip::in_app_autocomplete`; engine test)
+- [x] No frozen chips: watch the field while a chip is visible, window-change notifications, 300 ms limit for a
+      caret moving without new text (engine test; e2e)
+- [x] Screen text as an opt-in Ghost layer (benchmark: 34% to 53% right word)

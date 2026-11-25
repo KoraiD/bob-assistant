@@ -29,7 +29,7 @@ echo "== bob-mcp"
 cargo build --manifest-path src-tauri/Cargo.toml --bin bob-mcp >/dev/null 2>&1
 cp src-tauri/target/debug/bob-mcp "$APP/Contents/MacOS/bob-mcp"
 
-# whisper.cpp for on-device dictation (Task 8): embed the framework and let the helper find it.
+# whisper.cpp for on-device dictation: embed the framework and let the helper find it.
 WHISPER_FW="native/bob-native/Frameworks/whisper.xcframework/macos-arm64_x86_64/whisper.framework"
 [ -d "$WHISPER_FW" ] || { echo "whisper.framework missing: run make whisper" >&2; exit 1; }
 mkdir -p "$APP/Contents/Frameworks"

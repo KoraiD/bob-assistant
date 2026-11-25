@@ -174,7 +174,7 @@ the replay harness (Task 5). Two prompts only, so these are smoke numbers, not p
   exam-style text after the sentence ends. Chip polishing must stop at the sentence boundary and drop script switches
   (Task 4), and Task 5 compares a base model.
 
-## Ghost Text settings matrix and stale updates (Task 12a)
+## Ghost Text settings matrix and stale updates
 - **Matrix** (`ghost::matrix_tests`, CI): 16 layer combinations (memory, window, language hint, clipboard) x 2
   language settings x 3 quote styles x 2 sharing permissions = 192 cases through the real engine and a local test
   server. Every case checks that the prompt carries exactly the allowed notes, never the copied secret, and that the
@@ -192,7 +192,7 @@ the replay harness (Task 5). Two prompts only, so these are smoke numbers, not p
   by three engine tests. `scripts/ax-lag-probe.swift` measures the lag in a page it opens itself (needs the probe page
   focused; owner check pending).
 
-## Writing languages and style (Task 12a, `style-bench`)
+## Writing languages and style (`style-bench`)
 Default model (Qwen2.5-1.5B-Instruct Q4_K_M), Apple M4 Max, 2026-11-24. Three runs before the fixes and one after;
 small samples, so the direction matters more than single counts.
 
@@ -237,3 +237,37 @@ wording works for professional (no contractions) and concise (about a third shor
 Rewrites are now checked with `languages::detect_strong`: in the wrong language BOB asks once more with a firmer
 rule, and if that is still wrong it translates the first answer (a small model handles one task at a time better).
 Unit test: `selection::engine::tests::an_answer_in_the_wrong_language_is_asked_again`.
+
+## Screen text for Ghost Text (2026-11-25)
+`ghost-bench --context none,screen,memory,memory+screen` with per-trace screen text: the message being answered or
+the page being worked on, plus menu and sidebar noise of the kind text recognition picks up (`bench::corpus::screen_text`).
+
+| Layers | p50 | p95 | Right word | Keystrokes saved |
+|---|---|---|---|---|
+| none (default) | 88 ms | 98 ms | 34% | 26% |
+| screen | 89 ms | 104 ms | 53% | 50% |
+| memory | 88 ms | 97 ms | 46% | 34% |
+| memory + screen | 91 ms | 106 ms | **58%** | **54%** |
+
+The screen text in the corpus is relevant to each sentence, so this is an upper bound; unrelated screen text helps
+less. Before this change, "Active window" and "All screens" fed only Selection Actions and dictation cleanup, which is
+why Ghost Text showed no difference. Screen text is now an opt-in Ghost layer that needs a capture scope. In the
+real app a capture of the active window took 105 to 146 ms, off the typing path.
+
+## Suggestions inside a sentence (2026-11-25)
+`style-bench --mid`, default model, cursor inside 8 sentences:
+- Plain continuation ignores the words after the cursor: "Could we move the | to Thursday afternoon?" gave
+  "4th and 5th elements of a list to the".
+- Fill-in-the-middle tokens (`<|fim_prefix|>`...) returned nothing at all: the instruct model was not trained on them.
+- A two-example "fill the gap" prompt (`ghost::prompt::gap`) works: "meeting", "increase", "mistake", "latest
+  report", "beach", "have" for the English cases, 13 to 66 ms. The Hungarian case answered in English ("your"), which
+  the language filter drops.
+
+## End-to-end check in the real app (2026-11-25)
+`make e2e` drives TextEdit with real key events while BOB runs, and reads the result through Accessibility.
+12 of 12 checks pass. Two of the bugs it found could not show up in unit tests:
+- No suggestion on the first line of a TextEdit document: TextEdit reports the empty range at the end of the first
+  line 13 points higher than the character before it, so the caret was rejected as outside the field. A caret box
+  above the previous glyph is now treated as this quirk (a soft wrap only moves the caret down).
+- Rewrites were not undoable: writing the selection through Accessibility does not reach TextEdit's undo stack.
+  BOB now pastes (with the clipboard restored and marked transient), which every app undoes in one step.

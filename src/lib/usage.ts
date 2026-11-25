@@ -10,6 +10,7 @@ export interface Day {
   rewrites: number;
   rewrite_failures: number;
   voice_edits: number;
+  typo_fixes: number;
 }
 export interface UsageView {
   today: Day;

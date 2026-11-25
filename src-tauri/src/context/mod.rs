@@ -158,7 +158,8 @@ pub fn valid_bundle_id(id: &str) -> bool {
 }
 
 impl ContextSettings {
-    /// The Ghost layers the app allows: memory, and the window title only together with memory.
+    /// The Ghost layers the app allows: memory, the window title only together with memory, and screen text
+    /// only with a capture scope.
     pub fn sanitized(mut self) -> Self {
         let g = self.ghost;
         self.languages = languages::sanitize(&self.languages);
@@ -166,7 +167,8 @@ impl ContextSettings {
             profile: false,
             memory: g.memory,
             window: g.memory && g.window,
-            screen: false,
+            // Screen text needs a capture scope (benchmark: +19 points right word, docs/PERFORMANCE.md).
+            screen: g.screen && self.scope != ContextScope::Accessibility,
             language_hint: g.language_hint,
             clipboard: g.clipboard,
         };
@@ -406,6 +408,10 @@ impl ContextHub {
                 text,
                 ms,
             } => {
+                log::debug!(
+                    "screen text: {} chars from {scope:?} in {ms} ms",
+                    text.chars().count()
+                );
                 // Only keep text for the scope the user chose (a late result from an old scope is dropped).
                 let wanted = self
                     .settings
@@ -519,7 +525,44 @@ impl ContextHub {
         let v = self.visible();
         let mode = s.app_mode(&v.app_bundle_id).cloned();
         let mut out = String::from(BASE.trim_end());
-        out.push_str("\n\n");
+        // Background first and the task last: small models follow what is closest to the user's text, and
+        // screen text placed last leaked into rewrites (end-to-end test, 2026-11-24).
+        if share {
+            let profile = self.profile();
+            let profile = profile.trim();
+            if !profile.is_empty() {
+                out.push_str("\n\n## About the user (their own notes)\n");
+                out.push_str(&truncate(profile, CHAT_PROFILE_CHARS));
+            }
+            let mut place = vec![];
+            if !v.app_name.is_empty() {
+                place.push(format!("App: {}", v.app_name));
+            }
+            if let Some(t) = &v.window_title {
+                place.push(format!("Window: {}", one_line(t, 200)));
+            }
+            if !v.after_caret.trim().is_empty() {
+                place.push(format!(
+                    "Text after the cursor: {}",
+                    one_line(&v.after_caret, CHAT_AFTER_CHARS)
+                ));
+            }
+            if !place.is_empty() {
+                out.push_str("\n\n## Where the user is writing\n");
+                out.push_str(&place.join("\n"));
+            }
+            if let Some(screen) = usable_screen(&v) {
+                out.push_str("\n\n## Text visible on screen (may be partial)\n");
+                out.push_str(&truncate(screen, CHAT_SCREEN_CHARS));
+            }
+            if s.ghost.clipboard {
+                if let Some(c) = usable_clipboard(&v) {
+                    out.push_str("\n\n## Text the user copied recently\n");
+                    out.push_str(&truncate(c, CHAT_CLIPBOARD_CHARS));
+                }
+            }
+        }
+        out.push_str("\n\n## Your task\n");
         out.push_str(task.trim());
         let mut style = vec![];
         let tone = mode.as_ref().and_then(|m| m.tone).unwrap_or(s.tone);
@@ -562,41 +605,6 @@ impl ContextHub {
         if let Some(m) = mode.as_ref().filter(|m| !m.instructions.is_empty()) {
             out.push_str("\n\n## The user's instructions for this app\n");
             out.push_str(&m.instructions);
-        }
-        if share {
-            let profile = self.profile();
-            let profile = profile.trim();
-            if !profile.is_empty() {
-                out.push_str("\n\n## About the user (their own notes)\n");
-                out.push_str(&truncate(profile, CHAT_PROFILE_CHARS));
-            }
-            let mut place = vec![];
-            if !v.app_name.is_empty() {
-                place.push(format!("App: {}", v.app_name));
-            }
-            if let Some(t) = &v.window_title {
-                place.push(format!("Window: {}", one_line(t, 200)));
-            }
-            if !v.after_caret.trim().is_empty() {
-                place.push(format!(
-                    "Text after the cursor: {}",
-                    one_line(&v.after_caret, CHAT_AFTER_CHARS)
-                ));
-            }
-            if !place.is_empty() {
-                out.push_str("\n\n## Where the user is writing\n");
-                out.push_str(&place.join("\n"));
-            }
-            if let Some(screen) = usable_screen(&v) {
-                out.push_str("\n\n## Text visible on screen (may be partial)\n");
-                out.push_str(&truncate(screen, CHAT_SCREEN_CHARS));
-            }
-            if s.ghost.clipboard {
-                if let Some(c) = usable_clipboard(&v) {
-                    out.push_str("\n\n## Text the user copied recently\n");
-                    out.push_str(&truncate(c, CHAT_CLIPBOARD_CHARS));
-                }
-            }
         }
         redact::scrub(&out)
     }
@@ -649,7 +657,7 @@ mod tests {
                 ghost: layers,
                 ..Default::default()
             },
-            "# Me\n- **Name:** Dávid\n- I write short emails",
+            "# Me\n- **Name:** Zsófi\n- I write short emails",
         )
     }
 
@@ -663,7 +671,7 @@ mod tests {
         h.observe(&NativeEvent::ContextState {
             app_bundle_id: "com.apple.mail".into(),
             window_title: Some("Re: Dinner on Friday".into()),
-            after_caret: "\n\nBest,\nDávid".into(),
+            after_caret: "\n\nBest,\nZsófi".into(),
         });
     }
 
@@ -773,7 +781,8 @@ mod tests {
             .chat_system("Task.", true)
             .contains("## Text the user copied recently"));
         assert!(
-            !h.chat_system("Task.", false).contains("copied"),
+            !h.chat_system("Task.", false)
+                .contains("## Text the user copied"),
             "only for allowed brains"
         );
         // Copied secrets are redacted like everything else.
@@ -803,7 +812,7 @@ mod tests {
         let p = h.ghost_preamble(&["see you soon".into()]);
         assert_eq!(
             p,
-            "[Notes, not part of the text]\nAbout me: Me; Name: Dávid; I write short emails\n\
+            "[Notes, not part of the text]\nAbout me: Me; Name: Zsófi; I write short emails\n\
              Phrases I often use: \"see you soon\"\nWriting in Mail: Re: Dinner on Friday\n[Text]\n"
         );
     }
@@ -878,12 +887,12 @@ mod tests {
         assert!(private.starts_with("You are BOB"));
         assert!(private.contains("Fix the grammar."));
         assert!(private.contains("language of the user's text"));
-        assert!(!private.contains("Dávid"));
+        assert!(!private.contains("Zsófi"));
         assert!(!private.contains("Dinner"));
         let shared = h.chat_system("Fix the grammar.", true);
         assert!(shared.contains("## About the user"));
         assert!(shared.contains("Window: Re: Dinner on Friday"));
-        assert!(shared.contains("Text after the cursor: Best, Dávid"));
+        assert!(shared.contains("Text after the cursor: Best, Zsófi"));
     }
 
     #[test]

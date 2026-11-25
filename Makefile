@@ -3,7 +3,7 @@
 CARGO_MANIFEST := src-tauri/Cargo.toml
 NATIVE_DIR := native/bob-native
 
-.PHONY: audit help setup dev build whisper native app sidecars probe chip-demo sign-dev test test-rust test-swift test-ui screenshot bench lint fmt check-kiro check clean
+.PHONY: audit help setup dev build whisper native app release sidecars probe test test-rust test-swift test-ui screenshot bench style-bench e2e lint fmt check-kiro check clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[35m%-12s\033[0m %s\n", $$1, $$2}'
@@ -25,18 +25,14 @@ native: whisper ## Build the Swift helper (debug)
 
 app: native ## Build a signed BOB.app with the helper inside (set BOB_SIGN_IDENTITY to keep permission grants)
 	bash scripts/build-app.sh
+release: ## Build the signed release DMG in release/ (needs BOB_SIGN_IDENTITY; notarizes with BOB_NOTARY_PROFILE)
+	bash scripts/build-release.sh
 
 sidecars: ## Fetch the pinned, SHA-256-verified llama-server build into src-tauri/binaries/llama
 	bash scripts/fetch-sidecars.sh
 
 probe: native ## Compatibility spike: observe the focused field for 20s (see docs/COMPATIBILITY.md)
 	$(NATIVE_DIR)/.build/debug/bob-native --probe 20
-
-chip-demo: native ## Show a ghost chip at the caret in any app (needs Accessibility)
-	$(NATIVE_DIR)/.build/debug/bob-native --chip-demo
-
-sign-dev: native ## Sign the dev helper with $$BOB_SIGN_IDENTITY so macOS keeps its permission grants
-	bash scripts/sign-dev.sh
 
 test: native test-rust test-swift test-ui ## Run every test suite
 
@@ -50,13 +46,19 @@ test-ui: ## Frontend tests
 	npm test
 
 bench: ## Ghost Text benchmark with the real model (about 3 min per model/setting; MODELS="id ..." to override)
-	cargo run --release --manifest-path $(CARGO_MANIFEST) --bin ghost-bench -- $(foreach m,$(or $(MODELS),qwen2.5-1.5b-instruct-q4km),--model $(m))
+	cargo run --release --features bench --manifest-path $(CARGO_MANIFEST) --bin ghost-bench -- $(foreach m,$(or $(MODELS),qwen2.5-1.5b-instruct-q4km),--model $(m))
+
+style-bench: ## What the language and style settings change on the real model (add -- --mid for gap filling)
+	cargo run --release --features bench --manifest-path $(CARGO_MANIFEST) --bin style-bench
+
+e2e: ## End-to-end check of the running BOB in TextEdit with real key events (takes over the keyboard for a minute)
+	swiftc -O scripts/e2e.swift -o /tmp/bob-e2e && /tmp/bob-e2e
 
 screenshot: ## Capture the UI with headless Chrome into bench-results/local/ (visual review)
 	bash scripts/screenshot.sh
 
 lint: ## Clippy (deny warnings) + TypeScript typecheck
-	cargo clippy --manifest-path $(CARGO_MANIFEST) --all-targets -- -D warnings
+	cargo clippy --manifest-path $(CARGO_MANIFEST) --all-targets --all-features -- -D warnings
 	npm run typecheck
 
 audit: ## Security advisories: Rust crates (cargo-audit) and npm packages

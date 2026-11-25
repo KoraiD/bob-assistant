@@ -1,85 +1,73 @@
 # BOB: Bring Your Own Brain
 
-<p align="center"><img src="assets/bob-icon.png" alt="BOB, the friendly ghost" width="140" /></p>
+<p align="center"><img src="assets/bob-icon.png" alt="BOB, a friendly ghost" width="140" /></p>
+<p align="center"><em>A friendly ghost that helps you write in every Mac app, with the AI model you choose.</em></p>
 
-<p align="center"><em>A friendly ghost that haunts every app you type in, powered by any model you choose.</em></p>
+BOB is a privacy-first writing assistant for macOS. It works in any app you type in and runs on a model on your
+Mac by default (llama.cpp and whisper.cpp). You can also connect Ollama, LM Studio or any OpenAI-compatible service.
 
-BOB is a privacy-first macOS assistant. It adds three capabilities to every app, using a local model
-(llama.cpp on Apple Silicon, Ollama, LM Studio) or any OpenAI-compatible cloud model:
+| Feature | What it does |
+|---|---|
+| **Ghost Text** | Suggests the next words at your cursor. `Tab` takes a word, `⇧Tab` takes the rest, `Esc` dismisses. Fixes typos, fills gaps inside a sentence, and stays out of the way of an app's own lists (Slack `@mentions`). |
+| **Selection Actions** | Select text, press `⌘⇧J`, and fix, rephrase, shorten, summarize, translate or run your own action. The result replaces the selection; `⌘Z` undoes it. |
+| **Voice Dictation** | Hold `⌥Space` (or tap it), speak, and the text appears at the cursor. Speak over a selection to edit it. Recognized on your Mac. |
+| **AI agents (MCP)** | Kiro and other MCP clients can use BOB's models and your writing style. Off by default. See [docs/MCP.md](docs/MCP.md). |
 
-| Capability | What it does | Status |
-|---|---|---|
-| **Ghost Text** | Inline next-word predictions at your caret. `Tab` accepts a word, `Shift+Tab` accepts all, `Esc` dismisses. Drops suggestions in languages you do not write. | Working (keystroke to chip p50 about 90 ms on M4 Max) |
-| **Selection Actions** | Highlight text, press `⌘⇧J`, then fix / rephrase / shorten / summarize / translate or your own action, in place. Optional preview. | Working |
-| **Voice Dictation** | Hold `⌥Space` (or tap to toggle), speak, and the text lands at the caret. Speak over a selection to edit it. Fully offline with whisper.cpp. | Working |
-| **AI agents (MCP)** | Kiro and other agents can use BOB's brains and your writing style (off by default). See [docs/MCP.md](docs/MCP.md). | Working |
+Built for **Kiroween 2026** (category: Frankenstein) with [Kiro](https://kiro.dev). The `.kiro` folder holds the
+specs, steering, hooks and agents used to build it; [docs/KIRO.md](docs/KIRO.md) explains how.
 
-> Built for **Kiroween 2026** (category: Frankenstein) with [Kiro](https://kiro.dev). The `/.kiro` directory
-> contains the specs, steering, hooks and custom agents used to build it. See [docs/KIRO.md](docs/KIRO.md).
+## Install
 
-## Status
-All three capabilities work end to end, with per-app modes, preferred languages, statistics, an activity trail and
-an MCP server. What is left (packaging a notarized release, the demo video) is in [docs/ROADMAP.md](docs/ROADMAP.md);
-the submission checklist is [docs/SUBMISSION.md](docs/SUBMISSION.md).
+Requirements: macOS 14 or later on Apple Silicon. 16 GB of memory is recommended for the default models.
 
-## Requirements
+1. Download `BOB-<version>-arm64.dmg` from [Releases](https://github.com/KoraiD/bob-assistant/releases) and check
+   its SHA-256 against the `.sha256` file.
+2. Drag BOB to Applications and open it.
+   The current release is signed with a Developer ID but not notarized yet. If macOS blocks it, open
+   **System Settings > Privacy & Security** and click **Open Anyway** next to the BOB message.
+3. The welcome tour asks for **Accessibility** and **Microphone** access and downloads the models it recommends
+   for your Mac (about 1.1 GB for writing and 0.6 GB for speech).
 
-- macOS 14+ on Apple Silicon (tested target: M3 with 16 GB or better)
-- Node.js 20+, Rust 1.80+ (stable), Xcode command line tools with Swift 6
+## Privacy in short
 
-## Quickstart (from source)
+- No accounts, no telemetry. Your text goes only to the model you choose; cloud models are labeled.
+- BOB reads the text around your cursor through Accessibility. Reading the screen is opt-in and recognized on
+  your Mac; images are never saved or sent.
+- Audio stays in memory and is transcribed on your Mac. API keys live in the macOS Keychain.
+- Logs and the activity list (Settings) contain sizes and timings, never your text.
+
+Details: [docs/PRIVACY.md](docs/PRIVACY.md) and [docs/SECURITY.md](docs/SECURITY.md).
+
+## Build from source
+
+You need Node.js 20+, Rust 1.89+ and the Xcode command line tools (Swift 6).
 
 ```bash
-git clone https://github.com/KoraiD/bob-assistant.git
-cd bob-assistant
-make setup        # installs JS dependencies
-make dev          # runs the app (Tauri + Vite)
-make test         # Rust, Swift and UI tests
-make check        # everything CI runs
-make bench        # Ghost Text benchmark with the real local model (see docs/PERFORMANCE.md)
+git clone https://github.com/KoraiD/bob-assistant.git && cd bob-assistant
+make setup        # JavaScript dependencies
+make sidecars     # llama.cpp server, pinned and SHA-256 verified
+make whisper      # whisper.cpp framework, pinned and SHA-256 verified
+make app          # signed BOB.app in src-tauri/target/debug/bundle/macos
+make check        # everything CI runs: formatting, lints and all tests
 ```
 
-`make help` lists all tasks.
+`make app` signs with `BOB_SIGN_IDENTITY` when it is set, so macOS keeps your permission grants between builds.
+`make release` builds the DMG ([docs/RELEASE.md](docs/RELEASE.md)). `make help` lists every task.
 
-### Local model (BOB's own brain)
-```bash
-make sidecars     # downloads the pinned llama.cpp server (SHA-256 verified) into src-tauri/binaries/llama
-make dev          # then open Brains > "BOB's own brain" > Download, then Use
-```
-The default model is Qwen2.5-1.5B-Instruct (Q4_K_M, 1.1 GB, Apache-2.0). You can also add Ollama, LM Studio or any
-OpenAI-compatible endpoint in the Brains tab. Models and binaries are never committed.
-
-### Run BOB as a real app (needed for permissions)
-`make dev` runs a bare binary from your terminal, so macOS attributes its permissions to the terminal app.
-To give BOB its own Accessibility and Microphone permissions, build the signed bundle:
-```bash
-export BOB_SIGN_IDENTITY="Developer ID Application: <Name> (<TEAMID>)"   # optional; keeps grants across rebuilds
-make app
-open src-tauri/target/debug/bundle/macos/BOB.app
-```
-Then Overview > Grant permissions, and switch BOB on in System Settings > Privacy & Security.
-
-### Permissions (added as features land)
-BOB asks for **Accessibility** (read the caret, insert text) and **Microphone** (dictation). It asks for
-**Screen Recording** only if you let it read the active window or all screens (Personalize tab). See
-[docs/PRIVACY.md](docs/PRIVACY.md).
-
-## Architecture in one picture
+## How it fits together
 
 ```
-React/TS UI  <--IPC-->  Rust core (Tauri 2)  <--Unix socket-->  Swift helper (AX, event tap, overlays, mic)
-                           |   brain router
-                           +-- llama-server sidecar (local)   +-- Ollama / LM Studio / cloud (OpenAI-compatible)
-                           +-- whisper sidecar (local)
+React UI  ── Tauri IPC ──  Rust core  ── Unix socket ──  Swift helper (Accessibility, keys, overlays, microphone, whisper.cpp)
+                              │
+                              ├── llama.cpp server on this Mac (127.0.0.1, per-launch key)
+                              ├── Ollama, LM Studio or a cloud API
+                              └── MCP control socket (only while AI agents are allowed)
 ```
 
-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Performance targets and measurements:
-[docs/PERFORMANCE.md](docs/PERFORMANCE.md).
-
-## Repository layout
-
-See `.kiro/steering/structure.md`.
+More: [ARCHITECTURE](docs/ARCHITECTURE.md) · [PERFORMANCE](docs/PERFORMANCE.md) ·
+[COMPATIBILITY](docs/COMPATIBILITY.md) · [DESIGN](docs/DESIGN.md) · [ROADMAP](docs/ROADMAP.md) ·
+[CHANGELOG](CHANGELOG.md)
 
 ## License
 
-[MIT](LICENSE). Third-party components and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Third-party components and model licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

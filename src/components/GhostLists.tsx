@@ -242,7 +242,7 @@ export function PhraseEditor({ count, onChanged }: { count: number; onChanged: (
       >
         <input
           aria-label="New phrase"
-          placeholder="Add a phrase, e.g. Best regards, Dávid"
+          placeholder="Add a phrase, e.g. Best regards, Zsófi"
           value={draft}
           maxLength={64}
           onChange={(e) => setDraft(e.currentTarget.value)}

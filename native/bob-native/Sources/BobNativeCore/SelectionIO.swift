@@ -102,7 +102,7 @@ public enum SelectionIO {
         let pb = NSPasteboard.general
         let saved = PasteboardSnapshot.capture(pb)
         let before = pb.changeCount
-        postShortcut(keyCode: CGKeyCode(kVK_ANSI_C))
+        postShortcut(keyCode: KeyLayout.code(for: "c", fallback: kVK_ANSI_C))
         let deadline = Date().addingTimeInterval(copyTimeout)
         func poll() {
             if pb.changeCount != before {
@@ -147,14 +147,8 @@ public enum SelectionIO {
                 completion(false, nil, "the selection changed, so nothing was replaced")
                 return
             }
-            let valueBefore = AXReader.string(element, kAXValueAttribute)
-            let status = AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString)
-            let valueAfter = AXReader.string(element, kAXValueAttribute)
-            // Some apps report success and ignore the write; a readable, unchanged value means "ignored".
-            if status == .success, valueBefore == nil || valueAfter != valueBefore {
-                completion(true, "accessibility", nil)
-                return
-            }
+            // Paste rather than writing AXSelectedText: apps put a paste on their undo stack (Cmd+Z restores the
+            // original in one step); an Accessibility write is not undoable in TextEdit and others.
             paste(text, completion: completion)
             return
         }
@@ -175,7 +169,9 @@ public enum SelectionIO {
         let saved = PasteboardSnapshot.capture(pb)
         pb.clearContents()
         pb.setString(text, forType: .string)
-        postShortcut(keyCode: CGKeyCode(kVK_ANSI_V))
+        // Clipboard managers skip transient items (nspasteboard.org), so the rewrite is not recorded there.
+        pb.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+        postShortcut(keyCode: KeyLayout.code(for: "v", fallback: kVK_ANSI_V))
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(450)) {
             saved.restore(to: pb)
             completion(true, "paste", nil)

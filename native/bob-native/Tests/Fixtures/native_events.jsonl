@@ -1,10 +1,10 @@
-{"type":"hello","version":3,"pid":4242}
+{"type":"hello","version":4,"pid":4242}
 {"type":"permissions","accessibility":true,"microphone":"granted","screen_recording":false}
 {"type":"permissions","accessibility":false,"microphone":"undetermined","screen_recording":true}
 {"type":"focus","app_bundle_id":"com.apple.TextEdit","app_name":"TextEdit","secure":false,"editable":true}
 {"type":"text_state","app_bundle_id":"com.apple.Notes","secure":false,"before_caret":"Hello wor","selection_len":0,"caret":{"x":120.5,"y":340.25,"width":1.5,"height":18.0}}
 {"type":"text_state","app_bundle_id":"com.apple.Safari","secure":true,"before_caret":"","selection_len":0,"caret":null}
-{"type":"context_state","app_bundle_id":"com.apple.mail","window_title":"Re: Dinner on Friday","after_caret":"\n\nBest,\nDávid"}
+{"type":"context_state","app_bundle_id":"com.apple.mail","window_title":"Re: Dinner on Friday","after_caret":"\n\nBest,\nZsófi"}
 {"type":"context_state","app_bundle_id":"com.apple.Notes","window_title":null,"after_caret":""}
 {"type":"screen_text","scope":"active_window","app_bundle_id":"com.apple.mail","text":"From: Anna\nAre you free on Friday? 🍝","ms":182}
 {"type":"screen_text","scope":"all_screens","app_bundle_id":"com.apple.Safari","text":"","ms":0}
@@ -28,3 +28,4 @@
 {"type":"dictation_status","model_loaded":false,"error":"cannot load the dictation model ggml-base.bin"}
 {"type":"dictation_selection","app_bundle_id":"com.apple.mail","text":"see you at the meeting"}
 {"type":"clipboard_text","text":"Meeting moved to 3 pm"}
+{"type":"typo","word":"teh","fix":"the","trailing":" "}

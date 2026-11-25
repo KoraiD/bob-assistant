@@ -1,4 +1,4 @@
-{"type":"hello_ack","version":3}
+{"type":"hello_ack","version":4}
 {"type":"reject","reason":"protocol version mismatch: core 3, helper 2"}
 {"type":"show_chip","text":" the quick brown","anchor":{"x":120.5,"y":340.25,"width":1.5,"height":18.0}}
 {"type":"hide_chip"}
@@ -16,7 +16,7 @@
 {"type":"hide_menu"}
 {"type":"replace_selection","expected":"teh quick","text":"the quick"}
 {"type":"set_hotkey","hotkey":{"key_code":38,"modifiers":["cmd","shift"]}}
-{"type":"set_dictation","hotkey":{"key_code":49,"modifiers":["option"]},"model_path":"/Users/me/Library/Application Support/dev.bob.assistant/models/ggml-large-v3-turbo-q5_0.bin","language":"","prompt":"Glossary: Kiroween, Dávid, llama.cpp.","sounds":true}
+{"type":"set_dictation","hotkey":{"key_code":49,"modifiers":["option"]},"model_path":"/Users/me/Library/Application Support/dev.bob.assistant/models/ggml-large-v3-turbo-q5_0.bin","language":"","prompt":"Glossary: Kiroween, Zsófi, llama.cpp.","sounds":true}
 {"type":"set_dictation","hotkey":null,"model_path":null,"language":"hu","prompt":null,"sounds":true}
 {"type":"start_recording"}
 {"type":"stop_recording","transcribe":true}
@@ -26,3 +26,4 @@
 {"type":"set_context_mode","scope":"accessibility","exclude":["com.1password.1password"],"clipboard":true}
 {"type":"show_menu","title":"Preview: ⏎ replaces, Esc discards","items":["Replace selection","Copy","Discard"],"anchor":null,"preview":"The quick fox."}
 {"type":"copy_text","text":"The quick fox."}
+{"type":"replace_before_caret","expected":"teh ","text":"the "}

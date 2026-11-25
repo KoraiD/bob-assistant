@@ -1,4 +1,4 @@
-//! Ghost Text benchmark (Task 5, perf steering): replay synthetic typing traces through the real engine and
+//! Ghost Text benchmark (perf steering): replay synthetic typing traces through the real engine and
 //! score latency and suggestion quality against what the "user" types next.
 //!
 //! Traces are generated, not recorded: no real person's keystrokes are needed or stored. Timing follows a

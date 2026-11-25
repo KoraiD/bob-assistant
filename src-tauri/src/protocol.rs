@@ -19,7 +19,8 @@ use std::fmt;
 /// `replace_result`, `show_menu`, `menu_status`, `hide_menu`, `replace_selection`, `set_hotkey`) and Voice
 /// Dictation (`dictation_key`, `transcript`, `dictation_error`, `dictation_status`, `set_dictation`,
 /// `start_recording`, `stop_recording`, `orb`).
-pub const PROTOCOL_VERSION: u32 = 3;
+/// v4: typo fixes (`typo`, `replace_before_caret`), clipboard context, preview, dictation sounds.
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// Longest accepted line in bytes. Longer lines are dropped, not buffered without bound.
 pub const MAX_LINE_BYTES: usize = 1 << 20;
@@ -174,6 +175,13 @@ pub enum NativeEvent {
         app_bundle_id: String,
         text: String,
     },
+    /// The word just finished before the caret looks misspelled (macOS spell checker, on this Mac). Sent
+    /// right after the `text_state` it belongs to. `before_word` is the text between the word and the caret.
+    Typo {
+        word: String,
+        fix: String,
+        trailing: String,
+    },
     /// Text the user copied (proposal 16), only while the core enabled the clipboard layer. Never sent for
     /// concealed or transient pasteboard items (password managers), bounded to 2,000 characters.
     ClipboardText {
@@ -252,6 +260,12 @@ pub enum CoreCommand {
     HideMenu,
     /// Replace the selection with `text`, only if it still equals `expected` (SA-6, SA-7).
     ReplaceSelection {
+        expected: String,
+        text: String,
+    },
+    /// Replace the text right before the caret: delete `expected` (only if it is still there) and type `text`.
+    /// Used for typo fixes.
+    ReplaceBeforeCaret {
         expected: String,
         text: String,
     },
@@ -399,6 +413,10 @@ impl fmt::Debug for NativeEvent {
                 .field("audio_ms", audio_ms)
                 .field("transcribe_ms", transcribe_ms)
                 .finish(),
+            NativeEvent::Typo { word, .. } => f
+                .debug_struct("Typo")
+                .field("word_chars", &word.chars().count())
+                .finish_non_exhaustive(),
             NativeEvent::ClipboardText { text } => f
                 .debug_struct("ClipboardText")
                 .field("text_chars", &text.chars().count())

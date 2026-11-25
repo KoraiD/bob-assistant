@@ -1,7 +1,6 @@
 import AppKit
 
-/// BOB's palette for native overlays. Mirrors the CSS tokens in `src/styles/globals.css`
-/// (a test in Task 9 will assert they stay in sync).
+/// BOB's palette for native overlays. Mirrors the CSS tokens in `src/styles/globals.css`.
 public enum Palette {
     public static let ectoplasm = NSColor(srgbRed: 0x8A / 255, green: 0xFF / 255, blue: 0xC1 / 255, alpha: 1)
     public static let midnight = NSColor(srgbRed: 0x0C / 255, green: 0x0B / 255, blue: 0x16 / 255, alpha: 1)

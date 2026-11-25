@@ -1,4 +1,4 @@
-//! Ghost Text across setting combinations (Task 12 test brief): every context layer, language, quote style
+//! Ghost Text across setting combinations: every context layer, language, quote style
 //! and sharing permission, every quiet zone, plus a randomized typing session. Each case runs the real engine
 //! against a local test server and checks what reached the "model" and what reached the screen.
 

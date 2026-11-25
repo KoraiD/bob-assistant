@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! make sidecars                                    # llama-server
-//! cargo run --release --bin ghost-bench -- \
+//! cargo run --release --features bench --bin ghost-bench -- \
 //!   --model qwen2.5-1.5b-instruct-q4km --model qwen3-1.7b-base-q4km \
 //!   --quiet-ms 70 --temperature 0.2 --max-tokens 12
 //! ```
@@ -196,6 +196,8 @@ async fn main() {
                         let hub = Arc::new(ContextHub::in_memory(
                             ContextSettings {
                                 ghost: layers(ctx).expect("validated"),
+                                // Screen text is only kept for a capture scope.
+                                scope: bob_lib::protocol::ContextScope::ActiveWindow,
                                 ..Default::default()
                             },
                             corpus::PROFILE,

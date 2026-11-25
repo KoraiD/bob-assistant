@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fetch the pinned whisper.cpp xcframework (MIT), verify its SHA-256 and unpack it into
 # native/bob-native/Frameworks/whisper.xcframework (gitignored). The Swift helper links it for on-device
-# dictation (Task 8); build-app.sh embeds the macOS framework in BOB.app/Contents/Frameworks.
+# dictation; build-app.sh embeds the macOS framework in BOB.app/Contents/Frameworks.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=versions.env

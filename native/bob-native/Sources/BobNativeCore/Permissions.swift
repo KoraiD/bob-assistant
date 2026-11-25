@@ -61,7 +61,7 @@ public enum Permissions {
         }
     }
 
-    /// Step-by-step help printed when a standalone mode (`--probe`, `--chip-demo`) is not trusted.
+    /// Step-by-step help printed when a standalone mode (`--probe`) is not trusted.
     public static func accessibilityHelp(termProgram: String?) -> String {
         let app = hostAppName(termProgram: termProgram)
         return """

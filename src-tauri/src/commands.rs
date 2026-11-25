@@ -308,6 +308,8 @@ pub struct GhostStatus {
     pub enabled: bool,
     pub quiet_apps: Vec<QuietApp>,
     pub recent_apps: Vec<RecentApp>,
+    pub typo_fixes: bool,
+    pub mid_sentence: bool,
     pub memory_count: usize,
     pub stats: GhostStats,
     pub p50_ms: Option<u64>,
@@ -322,6 +324,8 @@ pub async fn ghost_status(ghost: State<'_, GhostHandle>) -> Result<GhostStatus, 
         enabled: settings.enabled,
         quiet_apps: settings.quiet_apps,
         recent_apps: ghost.recent_apps(),
+        typo_fixes: settings.typo_fixes,
+        mid_sentence: settings.mid_sentence,
         memory_count: ghost.memory().phrases.len(),
         p50_ms: stats.percentile(50.0),
         p95_ms: stats.percentile(95.0),
@@ -333,6 +337,22 @@ pub async fn ghost_status(ghost: State<'_, GhostHandle>) -> Result<GhostStatus, 
 pub async fn ghost_set_enabled(ghost: State<'_, GhostHandle>, enabled: bool) -> Result<(), String> {
     crate::audit::record("settings.ghost", serde_json::json!({ "enabled": enabled }));
     ghost.set_enabled(enabled);
+    Ok(())
+}
+
+/// `option`: "typo_fixes" or "mid_sentence".
+#[tauri::command]
+pub async fn ghost_set_option(
+    ghost: State<'_, GhostHandle>,
+    option: String,
+    on: bool,
+) -> Result<(), String> {
+    match option.as_str() {
+        "typo_fixes" => ghost.set_option(Some(on), None),
+        "mid_sentence" => ghost.set_option(None, Some(on)),
+        other => return Err(format!("unknown option {other:?}")),
+    }
+    crate::audit::record("settings.ghost", serde_json::json!({ option: on }));
     Ok(())
 }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { isTauri } from "../lib/appInfo";
+import { Group, Row, Toggle } from "./ui";
 import { HOTKEYS, hotkeyPreset, MAX_CUSTOM, selectionApi, validCustom, type CustomAction, type SelectionView } from "../lib/selection";
 
 const muted = { color: "var(--text-muted)" } as const;
@@ -52,26 +53,27 @@ export function SelectionCard() {
   const edit = (i: number, patch: Partial<CustomAction>) => setDrafts(custom.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   const s = view.stats;
 
+  const runs = `${s.runs} ${s.runs === 1 ? "run" : "runs"}`;
   return (
-    <section aria-label="Selection Actions" className="soft-card panel-in mt-6 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="sr-only">Selection Actions</h3>
-          <p className="text-sm" style={muted} data-testid="selection-summary">
-            Select text in any app and press <kbd>{preset?.label ?? "your hotkey"}</kbd>. Pick an action with ↑↓ and ⏎; the result replaces the selection (⌘Z undoes it).
-          </p>
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          Hotkey
+    <div className="max-w-3xl">
+      <Group
+        label="Selection Actions"
+        footer={
+          <span data-testid="selection-summary">
+            Select text in any app and press <kbd>{preset?.label ?? "your hotkey"}</kbd>. Choose with ↑↓ and ⏎; the result replaces the selection, and ⌘Z undoes it.
+          </span>
+        }
+      >
+        <Row title="Hotkey" htmlFor="selection-hotkey">
           <select
+            id="selection-hotkey"
             aria-label="Selection Actions hotkey"
             value={preset?.id ?? "custom"}
             onChange={(e) => {
               const p = HOTKEYS.find((h) => h.id === e.currentTarget.value);
               if (p) void save({ hotkey: p.hotkey });
             }}
-            className="rounded-lg px-2 py-1"
-            style={field}
+            className="mac-field"
           >
             {HOTKEYS.map((h) => (
               <option key={h.id} value={h.id}>
@@ -80,33 +82,38 @@ export function SelectionCard() {
             ))}
             {!preset && <option value="custom">Custom</option>}
           </select>
-        </label>
-      </div>
+        </Row>
+        <Row title="Preview before replacing" detail="The result shows in the panel first: ⏎ replaces it, Copy keeps your text, Esc discards.">
+          <Toggle label="Preview before replacing" on={view.settings.preview} onChange={(v) => void save({ preview: v })} />
+        </Row>
+        <Row title="Actions" detail={<span data-testid="selection-actions">{view.actions.join(" · ")}</span>} />
+        {s.menus > 0 && (
+          <Row
+            title="This session"
+            detail={
+              <span data-testid="selection-stats">
+                {runs} · {s.replaced} replaced · {s.failed} failed{s.last_ms !== null ? ` · last took ${(s.last_ms / 1000).toFixed(1)} s` : ""}
+              </span>
+            }
+          />
+        )}
+        {s.last_error && (
+          <Row
+            title="Last problem"
+            detail={
+              <span role="alert" style={{ color: "var(--danger)" }}>
+                {s.last_error}
+              </span>
+            }
+          />
+        )}
+      </Group>
 
-      <p className="mt-3 text-xs" style={muted} data-testid="selection-actions">
-        Actions: {view.actions.join(" · ")}
-      </p>
-      {s.menus > 0 && (
-        <p className="mt-1 text-xs" style={muted} data-testid="selection-stats">
-          {s.runs} run · {s.replaced} replaced · {s.failed} failed{s.last_ms !== null ? ` · last took ${(s.last_ms / 1000).toFixed(1)} s` : ""}
-        </p>
-      )}
-      {s.last_error && (
-        <p role="alert" className="mt-1 text-xs" style={{ color: "var(--danger)" }}>
-          Last problem: {s.last_error}
-        </p>
-      )}
-
-      <label className="mt-3 flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={view.settings.preview} onChange={(e) => void save({ preview: e.currentTarget.checked })} aria-label="Preview before replacing" />
-        Preview before replacing
-        <span className="text-xs" style={muted}>
-          The result appears in the panel first: ⏎ replaces, Copy keeps the selection, Esc discards.
-        </span>
-      </label>
-      <details className="mt-4" data-testid="custom-actions">
+      <Group title="Your own actions" label="Your own actions">
+        <div className="py-1">
+      <details data-testid="custom-actions">
         <summary className="cursor-pointer text-sm">
-          Your own actions <span style={muted}>({view.settings.custom.length})</span>
+          Edit your actions <span style={muted}>({view.settings.custom.length})</span>
         </summary>
         <p className="mt-2 text-xs" style={muted}>
           Give each action a name and tell BOB what to do, for example “Reply politely and decline”. They appear after the built-in actions.
@@ -138,6 +145,8 @@ export function SelectionCard() {
           {status && <span role="status">{status}</span>}
         </div>
       </details>
-    </section>
+        </div>
+      </Group>
+    </div>
   );
 }

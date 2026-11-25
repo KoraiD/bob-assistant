@@ -41,6 +41,25 @@ pub fn build(before_caret: &str) -> &str {
     &before_caret[window_start(before_caret)..]
 }
 
+/// A few-shot prompt for a gap inside a sentence (the cursor is in the middle of the text). The default model
+/// does not support fill-in-the-middle tokens (measured: it returns nothing), but continues this pattern.
+/// The answer ends at the first `]`.
+pub fn gap(before: &str, after: &str) -> String {
+    let before: String = window_tail(before, 300);
+    let after: String = after.chars().take(160).collect();
+    format!(
+        "Fill in the missing words marked [...] so the sentence reads naturally.\n\
+         Text: Thank you for [...] me the report yesterday.\nMissing: [sending]\n\
+         Text: Could we meet [...] to discuss the budget?\nMissing: [on Thursday afternoon]\n\
+         Text: {before}[...]{after}\nMissing: ["
+    )
+}
+
+fn window_tail(s: &str, max_chars: usize) -> String {
+    let n = s.chars().count();
+    s.chars().skip(n.saturating_sub(max_chars)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

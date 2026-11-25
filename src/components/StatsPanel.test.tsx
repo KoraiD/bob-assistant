@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 
 import { StatsPanel } from "./StatsPanel";
 
-const zero: Day = { ghost_words: 0, ghost_accepts: 0, ghost_shown: 0, dictated_words: 0, dictations: 0, dictated_ms: 0, rewrites: 0, rewrite_failures: 0, voice_edits: 0 };
+const zero: Day = { ghost_words: 0, ghost_accepts: 0, ghost_shown: 0, dictated_words: 0, dictations: 0, dictated_ms: 0, rewrites: 0, rewrite_failures: 0, voice_edits: 0, typo_fixes: 0 };
 const day = (p: Partial<Day>): Day => ({ ...zero, ...p });
 let usage: UsageView;
 

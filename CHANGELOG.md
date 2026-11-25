@@ -1,127 +1,61 @@
 # Changelog
 
-All notable changes to BOB. Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer.
+All notable changes to BOB. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
+[Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
-### Added (Task 12a, features and hardening)
-- Per-app modes (Personalize): tone, answer language and instructions per app for Selection Actions and dictation cleanup, plus a Ghost Text switch per app.
-- Preview before replace (Selection Actions, optional): the result appears in the panel; Enter replaces, Copy keeps the selection, Esc discards.
-- Soft start and stop sounds for dictation, synthesized by BOB (no sound files), with a switch to turn them off.
-- Clipboard context (opt-in): text copied in the last two minutes helps Ghost Text and, for allowed brains, Selection Actions. Items password managers mark as private, copies in quiet apps and BOB's own copies are skipped.
-- AI agents (MCP): `bob-mcp` lets Kiro, Claude Desktop and other MCP clients rewrite text, get suggestions, check status and pause BOB. Off by default (Settings > AI agents). A Skill file (`skills/bob/SKILL.md`) explains BOB to other tools. See docs/MCP.md.
-- Preferred writing languages (up to four) and style notes (Personalize). Ghost Text drops suggestions in other languages; rewrites keep to them and are checked, retried once and, if needed, translated.
-- Logging with five levels (Settings > Logs), a rotating `~/Library/Logs/BOB/bob.log`, recent lines in the app, and the helper's messages in the same log.
-- Activity trail (Settings > Activity, `audit.jsonl`): settings changes, brains, permissions, text sent to brains (sizes only), AI agent calls.
-- `style-bench` measures what the language and style settings change on the real model; a 192-case Ghost Text settings matrix and randomized typing sessions run in CI.
-### Changed
-- A Mac-style window: inset traffic lights, no title bar, a sidebar with line icons, System Settings style groups, switches and segmented controls; SF Pro for text, the rounded face only for BOB's name.
-- Tone presets are stronger (friendly uses contractions, professional none, concise about two thirds of the length), measured in docs/PERFORMANCE.md.
-- US or UK spelling is applied by BOB to everything it types (the model ignored the instruction).
-### Fixed
-- Ghost Text in Chrome showed text you had already typed (owner's screenshot "Investigate the | te the possibility of using"): Chrome reports the new caret before the new text. BOB now re-reads the field shortly after each change, ignores stale text after an accept, keeps the chip in place until the text arrives, and treats Chrome's no-break spaces as spaces.
-- Ghost Text suggested another language in the same script (owner's screenshot: Vietnamese after the Hungarian "Hát."). Such suggestions are now taken back.
-- A suggestion with a quoted word mid-sentence (`it's "fine" today`) stopped at the closing quote.
-- Hardening: settings, memory, profile and usage files are created 0600 and synced before replacing; the settings folder is 0700; brain answers are capped (8 MB per answer, 64 KB per error page); the helper socket refuses other users and has a handshake deadline; a panicked thread no longer poisons shared state for the rest of the app; panics are logged.
-### Added (Task 11, from user research)
-- Voice edit: select text, hold ⌥Space and say what to change ("make this friendlier", "translate to German"); the Selection brain rewrites the selection (⌘Z undoes it).
-- Dictation vocabulary (names and terms whisper should expect) and text replacements ("my email" → your address).
-- Tap to toggle: a quick tap of the dictation hotkey starts hands-free recording, the next press stops it. Holding still works.
-- Last dictation kept in memory for two minutes: Type Last Dictation Again (menu bar) and Copy last dictation (card).
-- Optional idle unload of the speech model (5, 15 or 60 minutes) to free about 0.9 GB; the next press reloads it.
-- Writing style: straight or curly quotes for everything BOB types; American or British spelling for brains.
-- Statistics panel (⌘7): words BOB typed for you today, this week and overall, time saved, a 14-day chart, Ghost acceptance rate, dictation and rewrite counts. Counts only, clearable.
-- The welcome tour recommends models for your Mac (chip and memory).
-- Quiet apps editor: search, one-click add from running and recent apps, add by bundle id, remove. Phrases editor: add, edit inline, delete, search, forget all with confirmation.
-- The sidebar ghost follows the mouse with its eyes, blushes and wiggles on hover, and bounces and talks when clicked (reduced motion respected).
-### Fixed
-- Open at login did nothing in builds macOS does not register as login items; BOB now falls back to a LaunchAgent.
-- Hand-typed quiet-app bundle ids are validated in the core (letters, digits, `.`, `-`, `_`; at most 255 characters).
-### Changed
-- Settings moved to ⌘8 (⌘, still opens it).
+## [0.1.0] - unreleased
 
-### Added (Task 10, polish and hardening)
-- Settings panel (⌘,): open at login (macOS Login Items), Dock icon on/off, open the window at launch, pause, theme, keyboard shortcuts.
-- Pause BOB for an hour, until tomorrow morning or until resumed, from the menu bar or Settings; a sidebar banner resumes it.
-- Menu bar: Ghost Text and Voice Dictation toggles, pause and resume, Settings.
-- ⌘1 to ⌘7 switch panels; the window remembers its size and position.
-- Edit a brain (name, endpoint, model, key) and confirm before removing one; forget a single remembered phrase.
-- The profile autosaves (800 ms after typing stops, and when leaving the panel).
-- `make audit` and a CI job for RustSec and npm advisories; docs/SECURITY.md.
+The first release, built for Kiroween 2026.
 
-### Fixed
-- The window froze when the Settings view loaded (a mutex locked twice in one statement); found with a stack sample, fixed and covered by a test.
-- Two BOB instances could run at once (two helpers, two model servers, a contested socket); now one per user.
-- API keys could be sent over plain http to a server outside this Mac; now refused, with a clear message in the form.
-- Cloud brains ignored the system proxy; only local brains bypass it now.
-- Dependency advisories: rustls, rustls-webpki, quinn-proto, quinn-udp, cookie updated; Vitest 3 to 5.
+### Ghost Text
+- Suggestions at the caret in any app: `Tab` takes a word, `⇧Tab` the rest, `Esc` dismisses. Typing the suggested
+  characters keeps it, without a new model call.
+- Typo fixes from the macOS spell checker: after a misspelled word, Tab replaces it.
+- Suggestions inside a sentence that fill the gap using the words after the cursor.
+- Stays out of the way of an app's own completion: `@mentions`, `#channels`, `:emoji:` and `/commands`.
+- Optional context: remembered phrases, the window title, text on screen, recently copied text and your languages.
+- Suggestions in a language you do not write are dropped.
+- Quiet apps (terminals and password managers by default), never in password fields.
 
-### Added (Task 9, haunted UI)
-- Sidebar navigation with a panel per feature (Overview, Ghost Text, Selection Actions, Voice Dictation, Brains, Personalize, About).
-- A live orb in the sidebar (floating, listening, thinking, haunting, needs a hand), driven by the core; the tray tooltip follows it.
-- First-run welcome tour: permissions, BOB's own brain, the speech model and a cheat sheet; reopen it from About.
-- Themes: Midnight (default), Daylight, Match macOS.
-- Accessibility: WCAG AA contrast proven from the tokens in both themes, axe-core audit of every panel, visible focus ring.
+### Selection Actions
+- `⌘⇧J` on selected text: fix grammar, rephrase, shorten, friendlier, professional, summarize, translate, or your
+  own actions. Paste-based replacement that `⌘Z` undoes in one step.
+- Optional preview before replacing (`⏎` replaces, Copy keeps your text, `Esc` discards).
+- Results are checked for the expected language, retried, and translated if needed.
 
-### Fixed
-- Daylight theme: accent, pumpkin and status colors failed WCAG AA on white; darkened to pass.
+### Voice Dictation
+- Hold or tap `⌥Space`, speak, and the text appears at the cursor; whisper.cpp runs on the Mac.
+- Voice edit: speak over a selection to change it ("make this friendlier").
+- Vocabulary, text replacements, cleanup presets, start and stop sounds, the last dictation kept for two minutes,
+  and an optional idle unload of the speech model.
 
-### Added (Task 8, Voice Dictation)
-- Hold Option+Space (configurable), speak, release: the text is typed at the cursor. Speech is recognized on the Mac by whisper.cpp inside BOB's helper; audio is never saved or sent.
-- Speech models in Overview > Voice Dictation: Whisper large-v3 turbo Q5_0 (default, about 0.3 s for a short phrase) and Whisper base (light); language choice or automatic detection.
-- Optional cleanup presets on the Dictation brain (clean up fillers, translate to English, meeting notes) with a fallback to the raw transcript.
-- A native ghost orb near the cursor: listening (breathes with your voice), thinking, done, or a short message.
-- Taps under 250 ms are ignored, silence is detected, recordings stop at 5 minutes, and password fields are never typed into.
+### Brains and personalization
+- BOB's own model (llama.cpp), Ollama, LM Studio or any OpenAI-compatible service; one brain per feature.
+- A Markdown profile, tone, languages, US or UK spelling, quote style, style notes and per-app modes.
+- Personal context goes only to brains you allow; cloud brains start with it off.
 
-### Changed
-- Ghost Text context: remembered phrases (off by default) can be switched on alone, with the window title as an optional addition. Profile and screen text are no longer offered for Ghost Text.
+### App
+- A Mac-style window with the haunted theme (Midnight, Daylight, Match macOS), a ghost that follows the mouse, and
+  a live status orb.
+- Welcome tour with permissions and a model recommendation for your Mac.
+- Menu bar controls, pause (an hour, until tomorrow, until resumed), open at login, Dock icon option, ⌘1 to ⌘8.
+- Statistics: words BOB typed for you and time saved (counts only).
+- AI agents (MCP): `bob-mcp` and a Skill file for Kiro and other agents, off by default.
+- Logs with five levels and an activity list of everything that matters for privacy, without your text.
+- Signed release DMG with the model server and speech engine inside.
 
-### Fixed
-- The helper no longer crashes on quit once a speech model is loaded (ggml Metal assertion at exit).
+### Privacy and security
+- No accounts and no telemetry. API keys only in the Keychain. Local servers bind to `127.0.0.1` with a
+  per-launch key.
+- Credential-like text is redacted from prompts and never sent to cloud brains by Selection Actions.
+- Private (0600) settings files written atomically; local sockets accept only your own user; answers from a
+  brain are size-limited; a crashed task cannot break the rest of the app.
 
-### Added (Task 7, Selection Actions)
-- Select text in any app, press Cmd+Shift+J (configurable), pick an action with the arrow keys, and the result replaces the selection: Fix grammar, Rephrase, Make shorter, Make friendlier, Make professional, Summarize, Translate, and up to 12 of your own actions.
-- Native: Carbon hotkey, selection via Accessibility or Cmd+C (clipboard restored), a non-activating menu panel with streamed preview, and replacement only if the selection is unchanged (Accessibility write, paste fallback).
-- Cloud brains never receive text that looks like it contains a key or password; the action is refused instead of redacted.
-
-### Added (personal context)
-- Personalize tab: `profile.md` editor (Markdown toolbar, preview with GitHub-flavored Markdown and emoji), tone and language, and a preview of exactly what BOB adds to prompts.
-- Visible context: Accessibility only by default (window title, text after the cursor). Opt-in "Active window" or "All screens" reads on-screen text with ScreenCaptureKit and on-device Vision OCR (Screen Recording asked only then; BOB and quiet apps never captured).
-- Per-brain "share personal context" switch: on by default for brains on this Mac, off for cloud brains.
-- Ghost Text context layers (profile, memory, window, screen), all off by default; `ghost-bench --context` measures each.
-- Protocol v3.
-
-### Fixed
-- Cmd+Q: traced to a third-party quit-protection utility (Vorssaint) filtering Cmd+Q before it reaches BOB; documented in COMPATIBILITY. BOB also handles Cmd+Q in an AppKit key monitor.
-
-### Added (Task 6)
-- Quiet apps: Ghost Text stays silent in terminals, password managers and BOB by default; the Ghost card lists quiet and recently used apps with one switch each. Saved in `ghost-settings.json`, together with Ghost on/off.
-- Accepted-phrase memory: phrases accepted with Tab / Shift+Tab are kept locally in `ghost-memory.json` (bounded, secret-free); the Ghost card shows the count, lists them on demand and can forget all. Not yet used in prompts.
-
-### Added
-- Ghost Text benchmark: `make bench` / `ghost-bench` replays seeded typing traces through the real engine and model; scores latency, pause coverage, right-word rate and Tab-accurate keystroke savings; oracle test in CI; `scripts/cache-probe.sh` for prompt-cache reuse; Stop hook with a benchmark smoke test.
-
-### Fixed
-- Cmd+Q now quits BOB (own app menu named BOB, plus an in-page fallback).
-
-### Added (Task 4)
-- Ghost Text v1: polished inline suggestions (sentence boundary, 6 words, script-switch and repeat filters), 70 ms quiet gate, cancellation on every keystroke, typing-through, Tab / Shift+Tab / Esc, quiet zones, redaction, latency stats; Ghost card with on/off and p50/p95; Try it shows the polished chip.
-- Protocol v2: `key`, `insert_text`, `capture_keys`; conditional key tap and Unicode text insertion in the helper.
-- `make app`: signed BOB.app (Developer ID from `BOB_SIGN_IDENTITY`, hardened runtime, microphone entitlement) with the helper bundled.
-
-### Fixed
-- "Try it" showed every token twice (event listener leaked under React StrictMode).
-
-### Added (earlier)
-- Brain layer: provider registry with roles, OpenAI-compatible and llama.cpp dialects, streaming with cancellation, connection test, Keychain secrets, verified resumable model downloads, supervised llama-server sidecar (loopback, key file, crash cleanup).
-- Brain panel: model catalog with download progress, brain list with local/cloud labels, role routing, "Try it" with first-token latency.
-- `make sidecars` (pinned, SHA-256 verified llama.cpp b12633); stderr logging; clean shutdown on SIGTERM/SIGINT.
-- Native bridge: JSON-lines protocol (Rust + Swift, shared fixtures), Unix-socket server with version handshake, helper supervisor with backoff.
-- Swift helper: Accessibility focus/text/caret observer, native chip panel, permission checks, `--probe` and `--chip-demo` modes.
-- Permissions card in the UI and permission status in the tray menu.
-- `make native|probe|chip-demo|sign-dev`; `scripts/sign-dev.sh` (identity from the environment, never committed).
-- Project foundation: Tauri 2 shell with tray icon, hide-on-close, `app_info` IPC command.
-- Haunted design tokens (dark default, optional daylight), ghost mark, capability cards.
-- Swift helper package `bob-native` (library + executable + tests).
-- Kiro workspace: steering, hooks, custom agents, seven specs with EARS requirements.
-- Guards and CI: `scripts/check-kiro.sh` (Kiroween rules), GitHub Actions workflow.
-- Docs: architecture, privacy, performance method, compatibility matrix, design system, submission checklist.
+### Fixed before release (found by tests and the owner's reports)
+- In Chrome, a suggestion could repeat text already typed, because Chrome reports the caret before the text.
+- A suggestion could stay frozen after switching windows in the same app.
+- Ghost Text did not appear on the first line of a TextEdit document (the caret was reported one line too high).
+- Selection Actions replacements were not undoable in some apps.
+- Screen text could leak into rewrites.
+- A Vietnamese suggestion appeared after Hungarian text.
+- The Settings view could freeze the window (a lock taken twice).

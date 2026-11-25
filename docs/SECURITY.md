@@ -33,6 +33,8 @@ What BOB protects, how, and how it is checked. Privacy (what data goes where) is
 | Logs and the activity trail never contain text; every log line and audit value is redacted as a safety net | `logging.rs`, `audit.rs` (tests) |
 | One panicked thread cannot take the rest of BOB down through poisoned locks; panics are logged and audited | all `Mutex` use, `install_panic_hook` |
 | Clipboard context skips concealed and transient pasteboard items and quiet apps | `ClipboardWatcher.swift` (tests) |
+| Release builds: Developer ID signature with hardened runtime and secure timestamp; credentials stay in the keychain, never in files or CI | `scripts/build-release.sh`, docs/RELEASE.md |
+| Typo fixes delete only the exact word they were made for, and never in a password field | `HelperRuntime.swift` (`replace_before_caret`) |
 
 ## Dependency advisories
 `make audit` runs `cargo audit` (RustSec) and `npm audit`; CI runs both on every push.

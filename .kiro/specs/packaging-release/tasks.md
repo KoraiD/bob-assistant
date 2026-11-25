@@ -4,11 +4,12 @@ Plan tasks 10 and 12 (repo hygiene).
 
 - [x] 1. MIT LICENSE, `.gitignore` that never ignores `.kiro`, `scripts/check-kiro.sh` guard (_PR-6, PR-9_) (Task 1)
 - [x] 2. CI workflow for Rust, Swift, UI and Kiro guard (_PR-7_) (Task 1; audit job added in Task 10)
-- [ ] 3. `scripts/versions.env` + `scripts/build-sidecars.sh` (pinned, Metal, arm64) (_PR-2, PR-3_)
-- [ ] 4. `externalBin` config and scoped shell capabilities (_PR-2_)
+- [x] 3. `scripts/versions.env` and pinned, SHA-256-verified downloads of llama.cpp and whisper.cpp (_PR-2, PR-3_)
+- [x] 4. The model server ships in `Contents/Resources/llama` and is started by the Rust core; no shell capability (_PR-2_)
 - [x] 5. Bundle the Swift helper; signing identity strategy (_PR-4_): `scripts/build-app.sh` (helper, whisper.framework, bob-mcp); identity from the environment
-- [ ] 5.1 Bundle llama-server and its dylibs (Task 12b, see docs/ROADMAP.md)
+- [x] 5.1 Bundle llama-server and its dylibs (`scripts/build-release.sh`)
 - [x] 6. First-run model download (_PR-5_): welcome tour with the recommendation for this Mac (Task 11)
-- [ ] 7. DMG build, notarization or documented ad-hoc path (_PR-4_)
+- [x] 7. Signed DMG; notarization ready behind `BOB_NOTARY_PROFILE`, not run yet (_PR-4_, docs/RELEASE.md)
 - [ ] 8. Clean-account install test; record in docs (_PR-1_)
-- [ ] 9. README quickstart, screenshots/GIFs, THIRD_PARTY_NOTICES.md (_PR-3, PR-8_)
+- [x] 9. README install and build steps, THIRD_PARTY_NOTICES.md (_PR-3, PR-8_)
+  - [ ] 9.1 Screenshots or a GIF in the README (after the demo recording)

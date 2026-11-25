@@ -1,5 +1,5 @@
 //! `style-bench`: what the writing-language and writing-style settings change, measured on the real local
-//! model (Task 12 test brief). Three parts:
+//! model. Parts:
 //!
 //! A. Ghost Text language on short Hungarian and English openings (where small models drift, like the
 //!    Vietnamese suggestion after "Hát."): no preference, preferred languages (filter), and filter + hint.
@@ -7,7 +7,7 @@
 //! C. Rewrites of Hungarian text: with and without preferred languages, and a per-app mode answering in English.
 //!
 //! ```text
-//! cargo run --release --bin style-bench            # model: qwen2.5-1.5b-instruct-q4km
+//! make style-bench                                   # model: qwen2.5-1.5b-instruct-q4km
 //! ```
 //! Prints tables and writes JSON to bench-results/local/. Curated numbers go to docs/PERFORMANCE.md.
 
@@ -45,6 +45,17 @@ const GHOST_EN: &[&str] = &[
     "See you",
 ];
 
+/// Cursor positions inside a sentence: "before|after".
+const MID: &[&str] = &[
+    "Thanks for the |, I will review it tomorrow.",
+    "Could we move the | to Thursday afternoon?",
+    "I am sorry for the | in my last email.",
+    "The results show a clear | over the baseline.",
+    "Please send me the | before the meeting.",
+    "We had a great time at the | last weekend.",
+    "Köszönöm a | segítséget, nagyon hasznos volt.",
+    "Let me know if you | any questions.",
+];
 const STYLE: &[&str] = &[
     "I think we should organize the meeting about the new color scheme next week.",
     "Can you send me the report when you have a minute, it is kind of urgent.",
@@ -229,6 +240,24 @@ async fn main() {
             r.chips_wrong_language,
             r.p50_ms
         );
+    }
+
+    // ---- D. Mid-sentence: plain continuation vs fill-in-the-middle (FIM tokens)
+    if std::env::args().any(|a| a == "--mid") {
+        println!("\nD. Mid-sentence (cursor inside a sentence)");
+        for case in MID {
+            let (pre, suf) = case.split_once('|').unwrap();
+            let (plain, t1) = raw_completion(&svc, pre.to_string()).await;
+            let fim_prompt = bob_lib::ghost::prompt::gap(pre, suf);
+            let (fim, t2) = raw_completion(&svc, fim_prompt).await;
+            println!(
+                "  {case:?}\n    plain {t1:>4} ms: {:?}\n    fim   {t2:>4} ms: {:?}",
+                plain.trim_end(),
+                fim.trim_end()
+            );
+        }
+        svc.stop_builtin().await;
+        return;
     }
 
     // ---- B. Writing style on Rephrase

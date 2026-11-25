@@ -173,6 +173,7 @@ fn start_native_bridge(
                 NativeEvent::Focus { .. }
                     | NativeEvent::ContextState { .. }
                     | NativeEvent::ScreenText { .. }
+                    | NativeEvent::ClipboardText { .. }
             ) {
                 context.observe(event);
             }
@@ -227,6 +228,7 @@ fn start_native_bridge(
                 NativeEvent::TextState { .. }
                     | NativeEvent::Focus { .. }
                     | NativeEvent::Key { .. }
+                    | NativeEvent::Typo { .. }
                     | NativeEvent::Hello { .. }
             ) {
                 ghost.native(event.clone());
@@ -433,6 +435,7 @@ pub fn run() {
             commands::ghost_status,
             commands::ghost_set_enabled,
             commands::ghost_set_quiet,
+            commands::ghost_set_option,
             commands::ghost_memory,
             commands::ghost_memory_clear,
             commands::ghost_memory_forget,
@@ -629,7 +632,7 @@ mod tests {
     use super::*;
 
     /// Every IPC command the UI calls must be registered in `generate_handler!` (a missing one fails
-    /// only at runtime, silently). Regression guard for a real slip during Task 3.
+    /// only at runtime, silently). Regression guard for a real slip.
     #[test]
     fn every_command_the_ui_invokes_is_registered() {
         let lib = include_str!("lib.rs");

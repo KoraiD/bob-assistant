@@ -45,13 +45,8 @@ function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { primary
     <button
       type="button"
       {...rest}
-      className={`rounded-xl px-3 py-1.5 text-sm font-medium disabled:opacity-50 ${rest.className ?? ""}`}
-      style={{
-        background: primary ? "var(--accent)" : "var(--surface-raised)",
-        color: primary ? "var(--accent-fg)" : "var(--text)",
-        border: primary ? "none" : "1px solid var(--border-strong)",
-        ...style,
-      }}
+      className={`mac-button ${primary ? "primary" : "secondary"} ${rest.className ?? ""}`}
+      style={style}
     />
   );
 }
@@ -83,7 +78,7 @@ function ModelCatalog({ models, snapshot, refresh }: { models: ModelInfo[]; snap
   };
 
   return (
-    <section className="soft-card p-5" aria-label="Built-in models">
+    <section className="mac-group-body panel-in mb-4 py-4" aria-label="Built-in models">
       <div className="mb-3 flex items-center justify-between">
         <div>
           <h3 className="font-medium">BOB's own brain</h3>
@@ -397,7 +392,7 @@ function AddBrain({ taken, onAdded }: { taken: string[]; onAdded: () => void }) 
 function Roles({ snapshot, onChanged }: { snapshot: Snapshot; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
   return (
-    <section className="soft-card p-5" aria-label="Which brain does what">
+    <section className="mac-group-body panel-in mb-4 py-4" aria-label="Which brain does what">
       <h3 className="mb-3 font-medium">Which brain does what</h3>
       <div className="grid gap-3 md:grid-cols-3">
         {ROLES.map((r) => (
@@ -468,7 +463,7 @@ function TryIt({ snapshot }: { snapshot: Snapshot }) {
   };
 
   return (
-    <section className="soft-card p-5" aria-label="Try a brain">
+    <section className="mac-group-body panel-in mb-4 py-4" aria-label="Try a brain">
       <h3 className="mb-3 font-medium">Try it</h3>
       <div className="mb-2 flex flex-wrap gap-2">
         <select aria-label="Brain to try" className="rounded-lg px-2 py-1.5 text-sm" style={{ background: "var(--bg)", border: "1px solid var(--border-strong)", color: "var(--text)" }} value={brainId} onChange={(e) => setBrainId(e.target.value)}>
@@ -543,7 +538,7 @@ export function BrainPanel() {
 
   if (!isTauri()) {
     return (
-      <section className="soft-card p-5" aria-label="Brains">
+      <section className="mac-group-body panel-in mb-4 py-4" aria-label="Brains">
         <h3 className="sr-only">Brains</h3>
         <p className="text-sm" style={muted} data-testid="brains-preview">
           Open the BOB app to manage brains. This browser preview cannot reach models.
@@ -556,8 +551,8 @@ export function BrainPanel() {
   return (
     <div className="space-y-4">
       <ModelCatalog models={models} snapshot={snapshot} refresh={refresh} />
-      <section className="soft-card p-5" aria-label="Brains">
-        <h3 className="mb-3 font-medium">Brains</h3>
+      <section className="mac-group-body panel-in mb-4 py-4" aria-label="Brains">
+        <h3 className="mb-3 font-medium">Your brains</h3>
         <ul className="space-y-2">
           {snapshot.brains.map((b) => (
             <BrainCard key={b.id} brain={b} onChanged={refresh} />

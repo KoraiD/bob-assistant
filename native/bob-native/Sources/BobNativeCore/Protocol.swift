@@ -85,6 +85,7 @@ public enum NativeEvent: Equatable, Sendable {
     case transcript(text: String, language: String?, speech: Bool, audioMs: Int, transcribeMs: Int)
     case dictationSelection(appBundleId: String, text: String)
     case clipboardText(text: String)
+    case typo(word: String, fix: String, trailing: String)
     case dictationError(reason: String)
     case dictationStatus(modelLoaded: Bool, error: String?)
     case error(message: String)
@@ -111,6 +112,7 @@ public enum CoreCommand: Equatable, Sendable {
     case setHotkey(Hotkey)
     case setDictation(hotkey: Hotkey?, modelPath: String?, language: String, prompt: String?, sounds: Bool)
     case copyText(text: String)
+    case replaceBeforeCaret(expected: String, text: String)
     case startRecording
     case stopRecording(transcribe: Bool)
     case orb(state: OrbState, text: String?)
@@ -186,6 +188,10 @@ extension NativeEvent: Codable {
                                        text: try c.decode(String.self, forKey: Keys("text")))
         case "clipboard_text":
             self = .clipboardText(text: try c.decode(String.self, forKey: Keys("text")))
+        case "typo":
+            self = .typo(word: try c.decode(String.self, forKey: Keys("word")),
+                         fix: try c.decode(String.self, forKey: Keys("fix")),
+                         trailing: try c.decode(String.self, forKey: Keys("trailing")))
         case "dictation_error":
             self = .dictationError(reason: try c.decode(String.self, forKey: Keys("reason")))
         case "dictation_status":
@@ -270,6 +276,11 @@ extension NativeEvent: Codable {
         case let .clipboardText(text):
             try c.encode("clipboard_text", forKey: Keys("type"))
             try c.encode(text, forKey: Keys("text"))
+        case let .typo(word, fix, trailing):
+            try c.encode("typo", forKey: Keys("type"))
+            try c.encode(word, forKey: Keys("word"))
+            try c.encode(fix, forKey: Keys("fix"))
+            try c.encode(trailing, forKey: Keys("trailing"))
         case let .dictationError(reason):
             try c.encode("dictation_error", forKey: Keys("type"))
             try c.encode(reason, forKey: Keys("reason"))
@@ -331,6 +342,9 @@ extension CoreCommand: Codable {
                                  prompt: try c.decodeIfPresent(String.self, forKey: Keys("prompt")),
                                  sounds: try c.decodeIfPresent(Bool.self, forKey: Keys("sounds")) ?? false)
         case "copy_text": self = .copyText(text: try c.decode(String.self, forKey: Keys("text")))
+        case "replace_before_caret":
+            self = .replaceBeforeCaret(expected: try c.decode(String.self, forKey: Keys("expected")),
+                                       text: try c.decode(String.self, forKey: Keys("text")))
         case "start_recording": self = .startRecording
         case "stop_recording": self = .stopRecording(transcribe: try c.decode(Bool.self, forKey: Keys("transcribe")))
         case "orb":
@@ -396,6 +410,10 @@ extension CoreCommand: Codable {
             try c.encode(sounds, forKey: Keys("sounds"))
         case let .copyText(text):
             try c.encode("copy_text", forKey: Keys("type"))
+            try c.encode(text, forKey: Keys("text"))
+        case let .replaceBeforeCaret(expected, text):
+            try c.encode("replace_before_caret", forKey: Keys("type"))
+            try c.encode(expected, forKey: Keys("expected"))
             try c.encode(text, forKey: Keys("text"))
         case .startRecording: try c.encode("start_recording", forKey: Keys("type"))
         case let .stopRecording(transcribe):

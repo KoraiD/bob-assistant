@@ -32,9 +32,9 @@ const muted = { color: "var(--text-muted)" } as const;
 
 function Card({ title, children, label }: { title: string; children: ReactNode; label: string }) {
   return (
-    <section aria-label={label} className="soft-card panel-in mt-4 p-5">
-      <h2 className="mb-2 text-lg font-medium">{title}</h2>
-      {children}
+    <section aria-label={label} className="mac-group panel-in">
+      <h2 className="mac-group-title">{title}</h2>
+      <div className="mac-group-body py-3">{children}</div>
     </section>
   );
 }
@@ -201,7 +201,7 @@ export function PersonalizePanel() {
 
       <Card title="Ghost Text context (experimental)" label="Ghost Text context">
         <p className="mb-2 text-xs" style={muted}>
-          Off by default. In BOB's benchmark, remembered phrases raised the share of right next words from 32% to about 40% and cost about 4 ms per suggestion (docs/PERFORMANCE.md).
+          Off by default. In BOB's benchmark, remembered phrases raised the share of right next words from 34% to 46%, and relevant text on screen to 53% (docs/PERFORMANCE.md).
         </p>
         <div className="space-y-2 text-sm">
           <label className="flex items-center gap-2">
@@ -220,6 +220,15 @@ export function PersonalizePanel() {
               onChange={(e) => void update({ ghost: { ...s.ghost, language_hint: e.currentTarget.checked } })}
             />
             Tell the brain which languages I write in {s.languages.length === 0 && "(pick them under Writing style)"}
+          </label>
+          <label className="flex items-center gap-2" style={captureScope ? undefined : muted}>
+            <input
+              type="checkbox"
+              disabled={!captureScope}
+              checked={s.ghost.screen}
+              onChange={(e) => void update({ ghost: { ...s.ghost, screen: e.currentTarget.checked } })}
+            />
+            Use the text on screen {captureScope ? "(about 1 ms more)" : "(choose Active window or All screens above)"}
           </label>
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={s.ghost.clipboard} onChange={(e) => void update({ ghost: { ...s.ghost, clipboard: e.currentTarget.checked } })} />
@@ -294,7 +303,7 @@ function StyleNotes({ value, onCommit }: { value: string; onCommit: (v: string) 
     <label className="mt-4 block">
       <span className="text-sm font-medium">Style notes</span>
       <span className="block text-xs" style={muted}>
-        For rewrites and dictation cleanup, for example “short sentences, no emoji, sign as Dávid”.
+        For rewrites and dictation cleanup, for example “short sentences, no emoji, sign as Zsófi”.
       </span>
       <textarea
         aria-label="Style notes"

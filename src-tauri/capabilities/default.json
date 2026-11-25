@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Least-privilege capability for the BOB main window. Sidecar/shell permissions are added in Task 3, scoped to exact binaries.",
+  "description": "Least-privilege capability for the BOB main window: core APIs and window dragging only. The model server is started by the Rust core, not through a shell permission.",
   "windows": [
     "main"
   ],

@@ -71,11 +71,11 @@ describe("DictationCard", () => {
   it("edits vocabulary, replacements, tap-to-toggle and the idle unload", async () => {
     render(<DictationCard />);
     await userEvent.click(await screen.findByText("Vocabulary"));
-    await userEvent.type(screen.getByLabelText("New word"), "Dávid, kiroween, Tauri{Enter}");
-    expect(invoke).toHaveBeenCalledWith("dictation_set_settings", { settings: expect.objectContaining({ vocabulary: ["Kiroween", "Dávid", "Tauri"] }) });
+    await userEvent.type(screen.getByLabelText("New word"), "Zsófi, kiroween, Tauri{Enter}");
+    expect(invoke).toHaveBeenCalledWith("dictation_set_settings", { settings: expect.objectContaining({ vocabulary: ["Kiroween", "Zsófi", "Tauri"] }) });
     await waitFor(() => expect(screen.getByRole("button", { name: "Remove Tauri" })).toBeInTheDocument());
     await userEvent.click(screen.getByRole("button", { name: "Remove Tauri" }));
-    expect(invoke).toHaveBeenCalledWith("dictation_set_settings", { settings: expect.objectContaining({ vocabulary: ["Kiroween", "Dávid"] }) });
+    expect(invoke).toHaveBeenCalledWith("dictation_set_settings", { settings: expect.objectContaining({ vocabulary: ["Kiroween", "Zsófi"] }) });
 
     await userEvent.click(screen.getByText("Text replacements"));
     await userEvent.click(screen.getByRole("button", { name: "Add replacement" }));

@@ -302,8 +302,8 @@ mod tests {
     fn vocabulary_becomes_a_bounded_whisper_hint_and_settings_are_cleaned() {
         assert_eq!(vocabulary_prompt(&[]), None);
         assert_eq!(
-            vocabulary_prompt(&["Kiroween".into(), "Dávid".into()]).as_deref(),
-            Some("Glossary: Kiroween, Dávid.")
+            vocabulary_prompt(&["Kiroween".into(), "Zsófi".into()]).as_deref(),
+            Some("Glossary: Kiroween, Zsófi.")
         );
         let many: Vec<String> = (0..300).map(|i| format!("word{i}")).collect();
         assert!(vocabulary_prompt(&many).unwrap().len() <= 620);

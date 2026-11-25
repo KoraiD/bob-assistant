@@ -215,6 +215,71 @@ fn split_keep_spaces(s: &str) -> Vec<&str> {
     pieces
 }
 
+/// The app is likely showing its own completion list, and Tab belongs to it: a mention (`@ann`), a channel
+/// or tag (`#gen`), an emoji code (`:smi`), or a slash command at the start of a line (`/rem`). Slack,
+/// Teams, Discord, GitHub and Notion all use these. BOB stays out of the way until the word is done.
+pub fn in_app_autocomplete(before_caret: &str) -> bool {
+    let line = before_caret.rsplit('\n').next().unwrap_or("");
+    let word = line.rsplit(char::is_whitespace).next().unwrap_or("");
+    let command =
+        line.trim_start().starts_with('/') && !line.trim_start().contains(char::is_whitespace);
+    command || (word.len() > 1 || word == "@" || word == "#") && word.starts_with(['@', '#', ':'])
+}
+
+/// The rest of the line after the caret, when it contains words (the cursor is inside a sentence).
+pub fn words_after(after_caret: &str) -> Option<&str> {
+    let line = after_caret.split('\n').next().unwrap_or("");
+    line.chars().any(char::is_alphanumeric).then_some(line)
+}
+
+/// Turn the answer to [`super::prompt::gap`] into a chip for the gap between `before` and `after`.
+/// `done` is true once the closing `]` arrived. Returns `None` while nothing usable is there yet.
+pub fn gap_chip(raw: &str, before: &str, after: &str) -> Option<(String, bool)> {
+    let (answer, done) = match raw.find(']') {
+        Some(i) => (&raw[..i], true),
+        None => (raw, false),
+    };
+    if answer.contains(['[', '\n']) || answer.contains("...") {
+        return None;
+    }
+    let mut text = answer.trim().to_string();
+    if text.is_empty() || text.split_whitespace().count() > MAX_WORDS {
+        return None;
+    }
+    // The user is in the middle of a word: the answer must complete it.
+    if mid_word(before) {
+        let partial = before
+            .rsplit(|c: char| !c.is_alphanumeric() && c != '\'')
+            .next()
+            .unwrap_or("");
+        let lower = text.to_lowercase();
+        if !lower.starts_with(&partial.to_lowercase()) || lower.len() == partial.len() {
+            return None;
+        }
+        text = text[partial.len()..].to_string();
+    } else if !before.is_empty() && !before.ends_with(char::is_whitespace) {
+        text.insert(0, ' ');
+    }
+    // Never repeat the word that follows the gap ("the meeting meeting").
+    let next = after
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .trim_matches(|c: char| !c.is_alphanumeric());
+    let last = text
+        .split_whitespace()
+        .last()
+        .unwrap_or("")
+        .trim_matches(|c: char| !c.is_alphanumeric());
+    if !next.is_empty() && next.eq_ignore_ascii_case(last) {
+        return None;
+    }
+    if after.starts_with(char::is_alphanumeric) && text.ends_with(char::is_alphanumeric) {
+        text.push(' ');
+    }
+    Some((text, done))
+}
+
 /// Whether the polished chip is complete, so the stream can be dropped early (saves generation time).
 pub fn is_final(chip: &str) -> bool {
     // A closing quote or bracket ends the chip only after sentence punctuation (`done."`), not in the
@@ -265,6 +330,77 @@ pub fn accept_word(chip: &str) -> (String, String) {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn mentions_channels_emoji_and_commands_belong_to_the_app() {
+        for t in [
+            "Hi @an",
+            "@",
+            "see #gen",
+            "#",
+            "nice :smi",
+            "/rem",
+            "line\n/gif",
+        ] {
+            assert!(in_app_autocomplete(t), "{t}");
+        }
+        for t in [
+            "Hi @anna thanks",
+            "Note: the",
+            "10:30 is",
+            "and/or",
+            "a / b",
+            "/remind me in",
+            "email me at",
+        ] {
+            assert!(!in_app_autocomplete(t), "{t}");
+        }
+    }
+
+    #[test]
+    fn gap_answers_fit_between_the_words() {
+        let after = " to Thursday afternoon?";
+        assert_eq!(
+            gap_chip("meeting]", "Could we move the ", after),
+            Some(("meeting".into(), true))
+        );
+        assert_eq!(
+            gap_chip("next meeting]", "Could we move it,", " please?"),
+            Some((" next meeting".into(), true))
+        );
+        // Completing a partial word.
+        assert_eq!(
+            gap_chip("meeting]", "Could we move the mee", after),
+            Some(("ting".into(), true))
+        );
+        assert_eq!(gap_chip("call]", "Could we move the mee", after), None);
+        // Text right after the gap: add a space.
+        assert_eq!(
+            gap_chip("latest]", "Send me the ", "report today."),
+            Some(("latest ".into(), true))
+        );
+        // Still streaming, or drifting into the next example.
+        assert_eq!(
+            gap_chip("mee", "Could we move the ", after),
+            Some(("mee".into(), false))
+        );
+        assert_eq!(
+            gap_chip("email] Text: I am", "Thanks for the ", ", I will"),
+            Some(("email".into(), true))
+        );
+        assert_eq!(gap_chip("x\nText: [...]", "a ", "b"), None);
+        // Repeating the next word is refused.
+        assert_eq!(
+            gap_chip("the meeting]", "move ", "meeting to Thursday"),
+            None
+        );
+        assert_eq!(
+            words_after(" to Thursday.\nNext line"),
+            Some(" to Thursday.")
+        );
+        assert_eq!(words_after(".\nmore"), None);
+        assert_eq!(words_after(""), None);
+    }
 
     #[test]
     fn a_quote_ends_a_chip_only_after_sentence_punctuation() {

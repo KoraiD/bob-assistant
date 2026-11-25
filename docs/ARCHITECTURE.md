@@ -85,6 +85,10 @@ flowchart LR
 | Clipboard watcher, dictation sounds, settle re-reads | `ClipboardWatcher.swift`, `DictationSounds.swift`, `FocusObserver.swift` | done; Swift tests |
 | Ghost Text settings matrix and randomized sessions | `src-tauri/src/ghost/matrix_tests.rs` | done |
 | Mac-style controls (groups, rows, switches, segmented, icons) | `src/components/ui.tsx` | done |
+| Typo fixes (macOS spell checker) and keyboard-layout lookup | `TypoFinder.swift`, `KeyLayout.swift` | done; Swift tests |
+| Gap prompt for suggestions inside a sentence | `ghost/prompt.rs` (`gap`), `ghost/chip.rs` (`gap_chip`) | done; unit and engine tests |
+| Release build (bundled model server, signing, DMG) | `scripts/build-release.sh` | done, verified (RELEASE.md) |
+| End-to-end check in TextEdit | `scripts/e2e.swift` (`make e2e`) | 12 of 12 pass |
 | Quiet-apps and phrases editors, interactive ghost | `src/components/{GhostLists,GhostMark}.tsx` | done |
 
 ## Decisions log
@@ -115,6 +119,9 @@ flowchart LR
 | 2026-11-24 | Tap-to-toggle in the pure machine (`Latched` state) | the 250 ms "tap" that used to be discarded now latches recording; P1 still holds with the toggle on and off |
 | 2026-11-24 | Idle unload sends `set_dictation` with no model; the next press reloads | the helper's whisper queue is serial, so a recording made during the reload is transcribed after it, with no new protocol |
 | 2026-11-24 | Open at login falls back to a LaunchAgent plist (`/usr/bin/open` the bundle) | `SMAppService.mainApp` reports "not found" for this development build (logged at startup); the plist works for any build and is removed when the switch is turned off |
+| 2026-11-25 | Suggestions inside a sentence use a worked-example gap prompt | the default model ignores fill-in-the-middle tokens (measured); two examples were enough |
+| 2026-11-25 | Rewrites paste instead of writing the selection through Accessibility | pastes are undoable in one step in every app; the Accessibility write was not undoable in TextEdit |
+| 2026-11-25 | Background first and the task last in chat prompts | screen text placed last leaked into rewrites in the end-to-end run |
 | 2026-11-24 | MCP as a separate stdio binary that talks to the app over a same-user socket, off by default | agents launch MCP servers as child processes; the running app owns the engines and models, so `bob-mcp` stays a thin forwarder and nothing listens unless the user allows it |
 | 2026-11-24 | Own logger instead of `env_logger` | one place for levels that change at runtime, a rotating 0600 file, an in-app tail and redaction of every line |
 | 2026-11-24 | Language filter from letters plus common words, no language-ID model | catches the measured drifts (Vietnamese, French) in microseconds; a model would cost memory and latency on the Ghost Text hot path |

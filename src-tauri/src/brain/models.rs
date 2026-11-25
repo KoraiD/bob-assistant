@@ -68,7 +68,7 @@ pub const CATALOG: &[ModelEntry] = &[
 
 /// Speech-to-text models for Voice Dictation (whisper.cpp, run inside the Swift helper). Pinned to one
 /// revision of `ggerganov/whisper.cpp` (MIT); sizes and SHA-256 from the Hugging Face API, read 2026-11-23.
-/// Measured in docs/PERFORMANCE.md (Task 8).
+/// Measured in docs/PERFORMANCE.md.
 pub const SPEECH_CATALOG: &[ModelEntry] = &[
     ModelEntry {
         id: "whisper-large-v3-turbo-q5",

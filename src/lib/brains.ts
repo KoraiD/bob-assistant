@@ -94,6 +94,8 @@ export interface GhostStatus {
   quiet_apps: AppRef[];
   /** Apps seen recently, most recent first, for the quiet-apps picker. */
   recent_apps: AppRef[];
+  typo_fixes: boolean;
+  mid_sentence: boolean;
   memory_count: number;
   p50_ms: number | null;
   p95_ms: number | null;
@@ -313,6 +315,7 @@ export const api = {
   stopBuiltin: () => invoke<void>("builtin_stop"),
   ghostStatus: () => invoke<GhostStatus>("ghost_status"),
   ghostSetEnabled: (enabled: boolean) => invoke<void>("ghost_set_enabled", { enabled }),
+  ghostSetOption: (option: "typo_fixes" | "mid_sentence", on: boolean) => invoke<void>("ghost_set_option", { option, on }),
   ghostSetQuiet: (app: AppRef, quiet: boolean) =>
     invoke<void>("ghost_set_quiet", { bundleId: app.bundle_id, name: app.name, quiet }),
   ghostMemory: () => invoke<GhostMemory>("ghost_memory"),

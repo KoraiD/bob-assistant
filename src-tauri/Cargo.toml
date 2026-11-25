@@ -13,6 +13,20 @@ default-run = "bob"
 name = "bob_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Measurement tools: built only with `--features bench`, so the app bundle never contains them.
+[features]
+bench = []
+
+[[bin]]
+name = "ghost-bench"
+path = "src/bin/ghost-bench.rs"
+required-features = ["bench"]
+
+[[bin]]
+name = "style-bench"
+path = "src/bin/style-bench.rs"
+required-features = ["bench"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -53,3 +67,7 @@ tokio = { version = "1.53.3", features = ["test-util"] }
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Proc macros are dynamic libraries; stripping them broke `tauri build` ("can't find crate for tauri_macros").
+[profile.release.build-override]
+strip = false

@@ -44,3 +44,44 @@ struct DictationSoundsTests {
         #expect(DictationSounds.notes(.stop).first! > DictationSounds.notes(.stop).last!, "stop falls")
     }
 }
+
+@Suite("Typo fixes")
+struct TypoFinderTests {
+    @Test func onlyFinishedPlainWordsAreChecked() {
+        #expect(TypoFinder.lastWord("I saw teh ")?.word == "teh")
+        #expect(TypoFinder.lastWord("I saw teh, ")?.trailing == ", ")
+        #expect(TypoFinder.lastWord("I saw teh") == nil, "still typing")
+        #expect(TypoFinder.lastWord("mail me at bob@exmaple.com ") == nil)
+        #expect(TypoFinder.lastWord("see src/lib/foo.rs ") == nil)
+        #expect(TypoFinder.lastWord("Hello Dzsenifer ") == nil, "a name mid-sentence")
+        #expect(TypoFinder.lastWord("Teh ")?.sentenceStart == true)
+        #expect(TypoFinder.lastWord("use getValue ") == nil)
+        #expect(TypoFinder.lastWord("an ") == nil, "too short")
+    }
+
+    @Test @MainActor func theMacSpellCheckerFindsCommonTypos() {
+        // Words the spelling check always flags. ("teh" is left out: macOS's autocorrection adapts to recent
+        // use, so whether it offers "the" depends on the Mac's history.)
+        #expect(TypoFinder.find(in: "We will recieve ")?.fix == "receive")
+        #expect(TypoFinder.find(in: "Recieve ")?.fix == "Receive")
+        #expect(TypoFinder.find(in: "It was definately ")?.fix == "definitely")
+        #expect(TypoFinder.find(in: "This is fine ") == nil)
+    }
+
+    @Test func distanceAndCase() {
+        #expect(TypoFinder.distance("teh", "the") == 2)
+        #expect(TypoFinder.distance("recieve", "receive") == 2)
+        #expect(TypoFinder.matchCase("the", like: "Teh") == "The")
+    }
+}
+
+@Suite("Keyboard layout")
+struct KeyLayoutTests {
+    @Test func lettersMapToKeysInTheCurrentLayout() {
+        // C and V are in the same place on QWERTY, QWERTZ and AZERTY; the lookup must find a key for each.
+        for letter in ["c", "v", "z", "a"] as [Character] {
+            let code = KeyLayout.code(for: letter, fallback: 999)
+            #expect(code != 999, "no key types \(letter)")
+        }
+    }
+}

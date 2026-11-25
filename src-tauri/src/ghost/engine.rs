@@ -70,6 +70,7 @@ pub enum Input {
         generation: u64,
         before: String,
         text: String,
+        fix: Option<Fix>,
     },
     /// Request `generation` finished (or failed) without a newer chip.
     Done {
@@ -84,7 +85,7 @@ pub enum Input {
     SettingsChanged,
 }
 
-/// Recent first-chip latencies (keystroke -> first chip on screen), for the UI and Task 5's benchmark.
+/// Recent first-chip latencies (keystroke -> first chip on screen), for the UI and the benchmark.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct GhostStats {
     pub requests: u64,
@@ -123,7 +124,23 @@ struct Chip {
     text: String,
     /// The text before the caret that this chip continues.
     before: String,
+    /// A typo fix instead of a continuation: Tab replaces the word.
+    fix: Option<Fix>,
 }
+
+/// A spelling fix for the word just before the caret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fix {
+    /// The misspelled word, lowercased (for "Esc: never offer this again").
+    word: String,
+    /// What must still be before the caret: the word and what follows it (a space, punctuation).
+    expected: String,
+    /// What replaces it.
+    text: String,
+}
+
+/// How long a caret that moved without new text is trusted to be an app lagging behind (Chrome).
+pub const SIDEWAYS_WINDOW: Duration = Duration::from_millis(300);
 
 /// An app seen recently (from focus events), for the quiet-apps picker in the UI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -213,6 +230,24 @@ impl GhostHandle {
             .set_quiet(bundle_id, name, quiet);
         self.shared.save_settings();
         let _ = self.tx.send(Input::SettingsChanged);
+    }
+
+    /// Turn typo fixes or mid-sentence suggestions on or off (persisted).
+    pub fn set_option(&self, typo_fixes: Option<bool>, mid_sentence: Option<bool>) {
+        {
+            let mut s = self
+                .shared
+                .settings
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(v) = typo_fixes {
+                s.typo_fixes = v;
+            }
+            if let Some(v) = mid_sentence {
+                s.mid_sentence = v;
+            }
+        }
+        self.shared.save_settings();
     }
 
     pub fn settings(&self) -> GhostSettings {
@@ -425,6 +460,8 @@ pub fn spawn_ctx(
         capturing: false,
         first_chip_pending: None,
         expect: None,
+        sideways_since: None,
+        dismissed_typos: Default::default(),
     };
     tokio::spawn(engine.run(rx));
     GhostHandle { tx, stats, shared }
@@ -454,6 +491,10 @@ struct Engine {
     /// After BOB inserted accepted text: the text expected before the caret, and when. Text events that
     /// still show an older prefix of it are stale (the app updated Accessibility late) and are ignored.
     expect: Option<(String, Instant)>,
+    /// Since when the caret has moved while the text stayed the same.
+    sideways_since: Option<Instant>,
+    /// Words whose fix the user dismissed with Esc (this session only).
+    dismissed_typos: std::collections::HashSet<String>,
 }
 
 /// How long a stale text event after an insertion is ignored before BOB believes the app.
@@ -564,6 +605,11 @@ impl Engine {
                 self.on_text(app_bundle_id, secure, before_caret, selection_len, caret);
             }
             Input::Native(NativeEvent::Key { key }) => self.on_key(key),
+            Input::Native(NativeEvent::Typo {
+                word,
+                fix,
+                trailing,
+            }) => self.on_typo(word, fix, trailing),
             Input::Native(NativeEvent::Hello { .. }) => {
                 // A (re)started helper shows no chip and does not capture keys: forget ours.
                 self.cancel();
@@ -576,10 +622,14 @@ impl Engine {
                 generation,
                 before,
                 text,
+                fix,
             } => {
                 let current = self.ctx.as_ref().is_some_and(|c| c.before == before);
                 if generation != self.generation || !current || !self.enabled || self.paused {
-                    return; // stale
+                    log::trace!(
+                        "ghost: stale chip dropped (generation {generation}, current {current})"
+                    );
+                    return;
                 }
                 let Some(caret) = self.ctx.as_ref().map(|c| c.caret) else {
                     return;
@@ -616,12 +666,14 @@ impl Engine {
                     Chip {
                         text: text.clone(),
                         before,
+                        fix,
                     },
                     caret,
                     text,
                 );
             }
             Input::Done { generation, error } => {
+                log::trace!("ghost: request {generation} done");
                 if let Some(e) = error {
                     if generation == self.generation {
                         log::warn!("ghost: request failed: {e}");
@@ -662,11 +714,25 @@ impl Engine {
         let Some(caret) = caret
             .filter(|_| !secure && selection_len == 0 && self.enabled && !self.paused && !quiet)
         else {
+            log::trace!(
+                "ghost: quiet (secure={secure} selection={selection_len} enabled={} paused={} quiet_app={quiet} caret={})",
+                self.enabled,
+                self.paused,
+                caret.is_some()
+            );
             self.hide();
             self.cancel();
             self.ctx = None;
             return;
         };
+        // The app's own completion list (Slack mentions, channels, emoji, slash commands) owns Tab.
+        if chip::in_app_autocomplete(&before) {
+            log::trace!("ghost: the app's own completion owns Tab");
+            self.hide();
+            self.cancel();
+            self.ctx = None;
+            return;
+        }
         let now = Instant::now();
         let prev = self.ctx.replace(Context {
             app: app.clone(),
@@ -676,21 +742,32 @@ impl Engine {
 
         // A caret that moved sideways on the same line while the text stayed the same is an app reporting
         // the caret before the text (typing in Chrome): keep the chip where it is until the text arrives.
+        // Only for a short while: if the text never follows (a missed update, a window switch), the chip is
+        // hidden instead of staying frozen at the old caret.
         if let (Some(_), Some(p)) = (&self.chip, prev.as_ref()) {
             if p.app == app
                 && p.before == before
                 && (p.caret.y - caret.y).abs() < 1.0
                 && p.caret.x != caret.x
             {
-                if let Some(c) = self.ctx.as_mut() {
-                    c.caret = p.caret;
+                let since = *self.sideways_since.get_or_insert(now);
+                if since.elapsed() < SIDEWAYS_WINDOW {
+                    if let Some(c) = self.ctx.as_mut() {
+                        c.caret = p.caret;
+                    }
+                    return;
                 }
+                self.sideways_since = None;
+                self.hide();
+                self.cancel();
+                self.dismissed_for = Some(before);
                 return;
             }
         }
+        self.sideways_since = None;
         // Typing-through (GT-7, GT-8): the new text extends the old one.
         if let (Some(chip), Some(prev)) = (self.chip.clone(), prev.as_ref()) {
-            if prev.app == app && before.starts_with(&chip.before) {
+            if prev.app == app && chip.fix.is_none() && before.starts_with(&chip.before) {
                 let typed = &before[chip.before.len()..];
                 match chip::type_through(&chip.text, typed) {
                     TypeThrough::Advance(rest) => {
@@ -745,6 +822,24 @@ impl Engine {
         } else {
             return;
         };
+        if let Some(fix) = &chip.fix {
+            match key {
+                Key::Tab | Key::ShiftTab => {
+                    crate::usage::record(|d| d.typo_fixes += 1);
+                    self.sink.send(CoreCommand::ReplaceBeforeCaret {
+                        expected: fix.expected.clone(),
+                        text: fix.text.clone(),
+                    });
+                }
+                Key::Escape => {
+                    self.dismissed_typos.insert(fix.word.clone());
+                    self.dismissed_for = Some(ctx.before);
+                }
+            }
+            self.hide();
+            self.cancel();
+            return;
+        }
         match key {
             Key::Tab => {
                 let (word, _) = chip::accept_word(&visible);
@@ -779,6 +874,55 @@ impl Engine {
         }
     }
 
+    /// A misspelled word was just finished: offer the fix instead of a continuation (no model call).
+    fn on_typo(&mut self, word: String, fix: String, trailing: String) {
+        let enabled = self
+            .shared
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .typo_fixes;
+        let Some(ctx) = self.ctx.clone() else {
+            return;
+        };
+        let expected = format!("{word}{trailing}");
+        let key = word.to_lowercase();
+        if !enabled
+            || !self.enabled
+            || self.paused
+            || fix.trim().is_empty()
+            || fix == word
+            || !ctx.before.ends_with(&expected)
+            || self.dismissed_typos.contains(&key)
+            || self.dismissed_for.as_deref() == Some(ctx.before.as_str())
+        {
+            return;
+        }
+        // Replaces the continuation request scheduled for the same text.
+        self.cancel();
+        self.generation += 1;
+        let (generation, tx, quiet, before) = (
+            self.generation,
+            self.tx.clone(),
+            self.config.quiet,
+            ctx.before,
+        );
+        let chip = Fix {
+            word: key,
+            text: format!("{fix}{trailing}"),
+            expected,
+        };
+        self.pending = Some(tokio::spawn(async move {
+            tokio::time::sleep(quiet).await;
+            let _ = tx.send(Input::Chip {
+                generation,
+                before,
+                text: format!("{word} → {fix}"),
+                fix: Some(chip),
+            });
+        }));
+    }
+
     /// Record `chip` as current and display `visible` (the chip minus anything already typed through).
     /// Every call repaints, so a chip that grows token by token reaches the screen each time.
     fn show(&mut self, chip: Chip, caret: Rect, visible: String) {
@@ -811,6 +955,11 @@ impl Engine {
     }
 
     fn schedule(&mut self, before: String, keystroke: Instant) {
+        log::trace!(
+            "ghost: request {} for {} chars",
+            self.generation + 1,
+            before.chars().count()
+        );
         self.cancel();
         self.generation += 1;
         let generation = self.generation;
@@ -823,6 +972,13 @@ impl Engine {
             self.context.clone(),
         );
         let languages = context.settings().languages;
+        let app = self.ctx.as_ref().map(|c| c.app.clone()).unwrap_or_default();
+        let mid_sentence = self
+            .shared
+            .settings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .mid_sentence;
         let memory = if context.settings().ghost.memory {
             self.shared
                 .memory
@@ -848,9 +1004,22 @@ impl Engine {
             if typed.trim().is_empty() {
                 return send_done(None);
             }
+            // Words after the cursor (read after the quiet gate, so they belong to this text): fill the gap
+            // instead of continuing as if the sentence ended at the cursor.
+            let visible = context.visible();
+            let after_text = (visible.app_bundle_id == app)
+                .then(|| chip::words_after(&visible.after_caret).map(str::to_string))
+                .flatten();
+            let after = match after_text {
+                Some(a) if mid_sentence => Some(redact::scrub(&a)),
+                Some(_) => return send_done(None), // inside a sentence, but the user turned this off
+                None => None,
+            };
             // Personal context only for brains allowed to receive it (PC-6). Stable layers come first, so
             // the server's prompt cache still covers everything up to the typed text.
-            let prompt_text = if brain.config.shares_context() {
+            let prompt_text = if let Some(after) = &after {
+                prompt::gap(&typed, after)
+            } else if brain.config.shares_context() {
                 format!("{}{typed}", context.ghost_preamble(&memory))
             } else {
                 typed
@@ -886,8 +1055,22 @@ impl Engine {
                     Ok(tok) => raw.push_str(&tok),
                     Err(e) => return send_done(Some(e.to_string())),
                 }
-                let Some(polished) = chip::polish(&raw, &before) else {
-                    continue;
+                let (polished, gap_done) = match &after {
+                    Some(after) => match chip::gap_chip(&raw, &before, after) {
+                        Some((c, done)) => (c, done),
+                        None if raw.contains(']') => break,
+                        None => continue,
+                    },
+                    None => match chip::polish(&raw, &before) {
+                        Some(c) => (c, false),
+                        None => {
+                            log::trace!(
+                                "ghost: {} raw chars, nothing worth showing yet",
+                                raw.chars().count()
+                            );
+                            continue;
+                        }
+                    },
                 };
                 // Wrong language inside the same script (owner's screenshot: Vietnamese after "Hát.").
                 let filtered =
@@ -901,18 +1084,20 @@ impl Engine {
                             generation,
                             before: before.clone(),
                             text: String::new(),
+                            fix: None,
                         });
                     }
                     break;
                 }
                 if let Some(chip) = filtered {
-                    let done = cut || chip::is_final(&chip);
+                    let done = cut || gap_done || (after.is_none() && chip::is_final(&chip));
                     if last_sent.as_deref() != Some(chip.as_str()) {
                         last_sent = Some(chip.clone());
                         let _ = tx.send(Input::Chip {
                             generation,
                             before: before.clone(),
                             text: chip,
+                            fix: None,
                         });
                     }
                     if done {
@@ -1261,6 +1446,139 @@ mod tests {
             .any(|c| matches!(c, CoreCommand::ShowChip { text, .. } if text.contains("một"))));
     }
 
+    /// Owner report: in Slack, Tab after "@" picks a name from Slack's own list; BOB must not take it.
+    #[tokio::test]
+    async fn mentions_and_slash_commands_leave_tab_to_the_app() {
+        let (g, rec, server, _root) = setup(&[" there."], Duration::ZERO).await;
+        g.native(text("Hi"));
+        settle(300).await;
+        assert!(rec
+            .take()
+            .contains(&CoreCommand::CaptureKeys { active: true }));
+        for t in ["Hi @an", "Thanks #gen", "/rem"] {
+            g.native(text(t));
+            settle(150).await;
+            let cmds = rec.take();
+            assert!(
+                !cmds
+                    .iter()
+                    .any(|c| matches!(c, CoreCommand::ShowChip { .. })),
+                "{t}: {cmds:?}"
+            );
+        }
+        assert_eq!(
+            server.request_count(),
+            1,
+            "no model call while the app completes"
+        );
+        g.native(NativeEvent::Key { key: Key::Tab });
+        settle(30).await;
+        assert!(!rec
+            .take()
+            .iter()
+            .any(|c| matches!(c, CoreCommand::InsertText { .. })));
+    }
+
+    #[tokio::test]
+    async fn a_typo_fix_replaces_the_word_and_can_be_dismissed() {
+        let (g, rec, server, _root) = setup(&[" fox."], Duration::ZERO).await;
+        g.native(text("I saw teh "));
+        g.native(NativeEvent::Typo {
+            word: "teh".into(),
+            fix: "the".into(),
+            trailing: " ".into(),
+        });
+        settle(200).await;
+        assert_eq!(rec.chips(), vec!["teh → the".to_string()]);
+        assert_eq!(server.request_count(), 0, "a typo fix needs no model call");
+        rec.take();
+        g.native(NativeEvent::Key { key: Key::Tab });
+        settle(30).await;
+        assert!(rec.take().contains(&CoreCommand::ReplaceBeforeCaret {
+            expected: "teh ".into(),
+            text: "the ".into()
+        }));
+        // Esc: never offered for this word again in this session.
+        g.native(text("and teh "));
+        g.native(NativeEvent::Typo {
+            word: "teh".into(),
+            fix: "the".into(),
+            trailing: " ".into(),
+        });
+        settle(200).await;
+        g.native(NativeEvent::Key { key: Key::Escape });
+        settle(30).await;
+        rec.take();
+        g.native(text("so teh "));
+        g.native(NativeEvent::Typo {
+            word: "Teh".into(),
+            fix: "The".into(),
+            trailing: " ".into(),
+        });
+        settle(200).await;
+        assert!(
+            !rec.chips().iter().any(|c| c.contains('→')),
+            "{:?}",
+            rec.chips()
+        );
+    }
+
+    #[tokio::test]
+    async fn inside_a_sentence_the_words_after_the_cursor_shape_the_suggestion() {
+        let ctx = Arc::new(ContextHub::in_memory(Default::default(), ""));
+        let (g, rec, server, _root, _svc) = setup_ctx(
+            &["meet", "ing]", " Text: more"],
+            Duration::ZERO,
+            ctx.clone(),
+        )
+        .await;
+        ctx.observe(&NativeEvent::ContextState {
+            app_bundle_id: "com.apple.TextEdit".into(),
+            window_title: None,
+            after_caret: " to Thursday afternoon?".into(),
+        });
+        // The context hub only counts text after the caret for the app that reported it.
+        ctx.observe(&NativeEvent::Focus {
+            app_bundle_id: "com.apple.TextEdit".into(),
+            app_name: "TextEdit".into(),
+            secure: false,
+            editable: true,
+        });
+        ctx.observe(&NativeEvent::ContextState {
+            app_bundle_id: "com.apple.TextEdit".into(),
+            window_title: None,
+            after_caret: " to Thursday afternoon?".into(),
+        });
+        g.native(text("Could we move the "));
+        settle(300).await;
+        assert_eq!(rec.chips().last().map(String::as_str), Some("meeting"));
+        let prompt = server.last_request().json()["prompt"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            prompt.contains("Could we move the [...] to Thursday afternoon?"),
+            "{prompt}"
+        );
+    }
+
+    /// Owner report: after switching windows the chip stayed frozen. A caret that moves without new text is
+    /// trusted only briefly; then the chip goes away.
+    #[tokio::test]
+    async fn a_caret_that_keeps_moving_without_new_text_hides_the_chip() {
+        let (g, rec, _server, _root) = setup(&[" lazy", " dog."], Duration::ZERO).await;
+        g.native(text_caret("over the", 100.0));
+        settle(300).await;
+        rec.take();
+        g.native(text_caret("over the", 108.0));
+        settle(20).await;
+        assert!(rec.take().is_empty(), "briefly kept in place");
+        settle(SIDEWAYS_WINDOW.as_millis() as u64).await;
+        g.native(text_caret("over the", 116.0));
+        settle(20).await;
+        assert!(rec.take().contains(&CoreCommand::HideChip));
+    }
+
     /// Chrome reports typed spaces as no-break spaces; typing through a space must still match.
     #[tokio::test]
     async fn no_break_spaces_from_the_app_type_through() {
@@ -1367,7 +1685,7 @@ mod tests {
                 },
                 ..Default::default()
             },
-            "- **Name:** Dávid",
+            "- **Name:** Zsófi",
         ));
         let (g, _rec, server, _root, svc) = setup_ctx(&[" ok"], Duration::ZERO, ctx).await;
         let prompt = || {
@@ -1380,7 +1698,7 @@ mod tests {
         settle(300).await;
         assert_eq!(
             prompt(),
-            "[Notes, not part of the text]\nAbout me: Name: Dávid\n[Text]\nSee you"
+            "[Notes, not part of the text]\nAbout me: Name: Zsófi\n[Text]\nSee you"
         );
         svc.set_share_context("local", false).await.unwrap();
         g.native(text("See you at"));
@@ -1576,7 +1894,7 @@ mod tests {
             .memory
             .lock()
             .unwrap()
-            .record("Best regards, Dávid");
+            .record("Best regards, Zsófi");
         g.shared.save_memory();
         g.native(NativeEvent::Focus {
             app_bundle_id: "com.apple.Mail".into(),
@@ -1601,7 +1919,7 @@ mod tests {
         );
         assert!(!again.settings().enabled);
         assert!(again.settings().is_quiet("com.apple.Notes"));
-        assert_eq!(again.memory().phrases[0].text, "Best regards, Dávid");
+        assert_eq!(again.memory().phrases[0].text, "Best regards, Zsófi");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

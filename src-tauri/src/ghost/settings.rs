@@ -1,4 +1,5 @@
-//! Persisted Ghost Text settings: on/off and the apps where BOB stays quiet (Task 6, GT-3).
+//! Persisted Ghost Text settings: on/off, typo fixes, mid-sentence suggestions and the apps where BOB stays
+//! quiet (GT-3).
 //!
 //! Quiet by default:
 //! * terminals: Tab is shell completion there, and the "text before the caret" is the whole scrollback;
@@ -37,9 +38,14 @@ pub struct QuietApp {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GhostSettings {
     pub enabled: bool,
     pub quiet_apps: Vec<QuietApp>,
+    /// Offer a fix for a misspelled word right after you finish it (Tab replaces it).
+    pub typo_fixes: bool,
+    /// Suggest inside a sentence too, using the words after the cursor.
+    pub mid_sentence: bool,
 }
 
 impl Default for GhostSettings {
@@ -53,6 +59,8 @@ impl Default for GhostSettings {
                     name: (*n).into(),
                 })
                 .collect(),
+            typo_fixes: true,
+            mid_sentence: true,
         }
     }
 }
@@ -191,7 +199,7 @@ mod tests {
         /// Whatever the edits, each bundle id appears at most once, and the last edit wins.
         #[test]
         fn edits_keep_ids_unique_and_last_edit_wins(ops in proptest::collection::vec(("[a-c]", any::<bool>()), 0..40)) {
-            let mut s = GhostSettings { enabled: true, quiet_apps: vec![] };
+            let mut s = GhostSettings { enabled: true, quiet_apps: vec![], ..Default::default() };
             let mut expected = std::collections::HashMap::new();
             for (id, q) in &ops {
                 s.set_quiet(id, id, *q);

@@ -134,10 +134,10 @@ mod tests {
 
     #[test]
     fn condense_strips_markdown_comments_and_empty_fields() {
-        let md = "# About me ✍️\n<!-- private note -->\n- **Name:** Dávid\n- **Role:** \n- I write `emails`\n\n## Sign-offs\n- Best,\n";
+        let md = "# About me ✍️\n<!-- private note -->\n- **Name:** Zsófi\n- **Role:** \n- I write `emails`\n\n## Sign-offs\n- Best,\n";
         assert_eq!(
             condense(md, 200),
-            "About me ✍️; Name: Dávid; I write emails; Sign-offs; Best,"
+            "About me ✍️; Name: Zsófi; I write emails; Sign-offs; Best,"
         );
     }
 

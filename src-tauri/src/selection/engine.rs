@@ -783,7 +783,7 @@ mod tests {
         .await
         .unwrap();
         svc.set_role(Role::Selection, Some("chat")).await.unwrap();
-        let ctx = Arc::new(ContextHub::in_memory(Default::default(), "- Name: Dávid"));
+        let ctx = Arc::new(ContextHub::in_memory(Default::default(), "- Name: Zsófi"));
         let rec = Arc::new(Recorder::default());
         let h = spawn(svc, ctx, rec.clone(), Some(root.join("c")));
         (h, rec, server, root)
@@ -837,7 +837,7 @@ mod tests {
         let system = body["messages"][0]["content"].as_str().unwrap().to_string();
         assert!(system.starts_with("You are BOB"));
         assert!(system.contains("correct the spelling"));
-        assert!(system.contains("Dávid"));
+        assert!(system.contains("Zsófi"));
         assert_eq!(body["messages"][1]["content"], " teh quick fox ");
         h.native(NativeEvent::ReplaceResult {
             ok: true,

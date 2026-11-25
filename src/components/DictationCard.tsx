@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { Toggle } from "./ui";
 import { isTauri } from "../lib/appInfo";
 import { api, formatBytes, percent, type ProgressEvent } from "../lib/brains";
 import {
@@ -17,6 +16,7 @@ import {
 } from "../lib/dictation";
 import { hotkeyPreset } from "../lib/selection";
 import { useTauriEvent } from "../lib/useTauriEvent";
+import { Button, Group, Row, Toggle } from "./ui";
 
 const muted = { color: "var(--text-muted)" } as const;
 const field = { background: "var(--surface-raised)", border: "1px solid var(--border)" } as const;
@@ -77,128 +77,121 @@ export function DictationCard() {
   };
   const st = view.stats;
 
+  const select = (label: string, value: string | number, onChange: (v: string) => void, options: { value: string | number; label: string }[]) => (
+    <select aria-label={label} value={value} onChange={(e) => onChange(e.currentTarget.value)} className="mac-field">
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+  const hotkeys = DICTATION_HOTKEYS.map((h) => ({ value: h.id, label: h.label }));
+  if (!presetFor(s.hotkey)) hotkeys.push({ value: "custom", label: "Custom" });
+  const unload = UNLOAD_CHOICES.map((c) => ({ value: c.minutes, label: c.label }));
+  if (!UNLOAD_CHOICES.some((c) => c.minutes === s.unload_after_min)) unload.push({ value: s.unload_after_min, label: `After ${s.unload_after_min} idle minutes` });
+
   return (
-    <section aria-label="Voice Dictation" className="soft-card panel-in mt-6 p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="sr-only">Voice Dictation</h3>
-          <p className="text-sm" style={muted} data-testid="dictation-summary">
-            {dictationSummary(view, preset?.label ?? "your hotkey")}
-          </p>
-        </div>
-        <Toggle label="Voice Dictation" on={s.enabled} onChange={(v) => void save({ enabled: v })} />
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-4 text-sm">
-        <label className="flex items-center gap-2">
-          Hotkey
-          <select aria-label="Dictation hotkey" value={presetFor(s.hotkey)?.id ?? "custom"} onChange={(e) => {
-            const p = DICTATION_HOTKEYS.find((h) => h.id === e.currentTarget.value);
+    <div className="max-w-3xl">
+      <Group
+        label="Voice Dictation"
+        footer="Speech is recognized on this Mac by whisper.cpp. Audio is never saved or sent anywhere, and BOB never types into password fields."
+      >
+        <Row title="Voice Dictation" detail={<span data-testid="dictation-summary">{dictationSummary(view, preset?.label ?? "your hotkey")}</span>}>
+          <Toggle label="Voice Dictation" on={s.enabled} onChange={(v) => void save({ enabled: v })} />
+        </Row>
+        <Row title="Hotkey">
+          {select("Dictation hotkey", presetFor(s.hotkey)?.id ?? "custom", (v) => {
+            const p = DICTATION_HOTKEYS.find((h) => h.id === v);
             if (p) void save({ hotkey: p.hotkey });
-          }} className="rounded-lg px-2 py-1" style={field}>
-            {DICTATION_HOTKEYS.map((h) => (
-              <option key={h.id} value={h.id}>{h.label}</option>
-            ))}
-            {!presetFor(s.hotkey) && <option value="custom">Custom</option>}
-          </select>
-        </label>
-        <label className="flex items-center gap-2">
-          Language
-          <select aria-label="Dictation language" value={s.language} onChange={(e) => void save({ language: e.currentTarget.value })} className="rounded-lg px-2 py-1" style={field}>
-            {LANGUAGES.map((l) => (
-              <option key={l.code} value={l.code}>{l.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-2">
-          After speaking
-          <select aria-label="Dictation cleanup" value={s.cleanup} onChange={(e) => void save({ cleanup: e.currentTarget.value as DictationSettings["cleanup"] })} className="rounded-lg px-2 py-1" style={field}>
-            {CLEANUPS.map((c) => (
-              <option key={c.id} value={c.id}>{c.label}</option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {s.cleanup !== "none" && (
-        <p className="mt-1 text-xs" style={muted}>
-          Uses the Dictation brain (Brains tab). If it is not ready, BOB types what you said unchanged.
-        </p>
-      )}
-      <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={s.tap_to_toggle} onChange={(e) => void save({ tap_to_toggle: e.currentTarget.checked })} aria-label="Tap to start and stop" />
-          Tap to start, tap again to stop
-        </label>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={s.sounds} onChange={(e) => void save({ sounds: e.currentTarget.checked })} aria-label="Start and stop sounds" />
-          Start and stop sounds
-        </label>
-        <label className="flex items-center gap-2">
-          Free the model's memory
-          <select aria-label="Unload the speech model" value={s.unload_after_min} onChange={(e) => void save({ unload_after_min: Number(e.currentTarget.value) })} className="rounded-lg px-2 py-1" style={field}>
-            {UNLOAD_CHOICES.map((c) => (
-              <option key={c.minutes} value={c.minutes}>{c.label}</option>
-            ))}
-            {!UNLOAD_CHOICES.some((c) => c.minutes === s.unload_after_min) && <option value={s.unload_after_min}>After {s.unload_after_min} idle minutes</option>}
-          </select>
-        </label>
-      </div>
-      <p className="mt-2 text-xs" style={muted} data-testid="voice-edit-hint">
-        Voice edit: select text first, then hold {preset?.label ?? "the hotkey"} and say what to change, for example “make this friendlier” or “translate to German”. Uses the Selection Actions brain.
-      </p>
-      {st.last_available && <LastDictation onError={setError} />}
-      <Vocabulary words={s.vocabulary} onSave={(vocabulary) => save({ vocabulary })} />
-      <Replacements rules={s.replacements} onSave={(replacements) => save({ replacements })} />
+          }, hotkeys)}
+        </Row>
+        <Row title="Tap to start, tap again to stop" detail="Holding the hotkey always works too.">
+          <Toggle label="Tap to start and stop" on={s.tap_to_toggle} onChange={(v) => void save({ tap_to_toggle: v })} />
+        </Row>
+        <Row title="Start and stop sounds">
+          <Toggle label="Start and stop sounds" on={s.sounds} onChange={(v) => void save({ sounds: v })} />
+        </Row>
+        <Row title="Language">
+          {select("Dictation language", s.language, (v) => void save({ language: v }), LANGUAGES.map((l) => ({ value: l.code, label: l.label })))}
+        </Row>
+        <Row title="After speaking" detail={s.cleanup !== "none" ? "Uses the Dictation brain (Brains). If it is not ready, BOB types what you said unchanged." : undefined}>
+          {select("Dictation cleanup", s.cleanup, (v) => void save({ cleanup: v as DictationSettings["cleanup"] }), CLEANUPS.map((c) => ({ value: c.id, label: c.label })))}
+        </Row>
+        <Row title="Free the model's memory" detail="The first dictation after that takes about half a second longer.">
+          {select("Unload the speech model", s.unload_after_min, (v) => void save({ unload_after_min: Number(v) }), unload)}
+        </Row>
+        {st.dictations > 0 && (
+          <Row
+            title="This session"
+            detail={
+              <span data-testid="dictation-stats">
+                {st.dictations} dictated · last: {((st.last_audio_ms ?? 0) / 1000).toFixed(1)} s of speech, transcribed in {st.last_transcribe_ms ?? "-"} ms, typed {st.last_release_to_insert_ms ?? "-"} ms after release
+              </span>
+            }
+          />
+        )}
+        {(error || st.last_error) && (
+          <Row
+            title="Last problem"
+            detail={
+              <span role="alert" style={{ color: "var(--danger)" }}>
+                {error ?? st.last_error}
+              </span>
+            }
+          />
+        )}
+        {st.last_available && <LastDictation onError={setError} />}
+      </Group>
 
-      <ul className="mt-4 space-y-2" aria-label="Speech models">
-        {view.models.map((m) => {
-          const p = progress[m.id];
-          const downloading = p && !p.done;
-          const chosen = m.id === s.model;
-          return (
-            <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl p-2 text-sm" style={{ background: "var(--surface-raised)" }} data-testid={`speech-${m.id}`}>
-              <label className="flex items-center gap-2">
+      <Group title="Speech model" label="Speech models">
+        <ul aria-label="Speech models">
+          {view.models.map((m) => {
+            const p = progress[m.id];
+            const downloading = p && !p.done;
+            const chosen = m.id === s.model;
+            return (
+              <li key={m.id} className="mac-row" data-testid={`speech-${m.id}`}>
                 <input type="radio" name="speech-model" checked={chosen} onChange={() => void save({ model: m.id })} aria-label={`Use ${m.name}`} />
-                <span>
-                  <span className="font-medium">{m.name}</span>{" "}
-                  <span className="text-xs" style={muted}>
+                <div className="min-w-0 flex-1">
+                  <div className="mac-row-title">{m.name}</div>
+                  <div className="mac-row-detail">
                     {formatBytes(m.size)} · {m.license} · {m.role}
+                  </div>
+                </div>
+                {m.installed ? (
+                  <span className="shrink-0 text-xs" style={muted}>
+                    {chosen && st.model_loaded ? "loaded" : "installed"}
                   </span>
-                </span>
-              </label>
-              {m.installed ? (
-                <span className="text-xs" style={muted}>{chosen ? (st.model_loaded ? "loaded" : "installed") : "installed"}</span>
-              ) : downloading ? (
-                <span className="flex items-center gap-2 text-xs">
-                  {percent(p.downloaded, p.total)}%
-                  <button type="button" onClick={() => void api.cancel(m.id)} className="rounded-full px-3" style={field}>
-                    Cancel
-                  </button>
-                </span>
-              ) : (
-                <button type="button" onClick={() => void api.download(m.id).catch((e) => setError(String(e)))} className="rounded-full px-3 py-0.5 text-xs" style={field}>
-                  Download
-                </button>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                ) : downloading ? (
+                  <span className="flex shrink-0 items-center gap-2 text-xs">
+                    {percent(p.downloaded, p.total)}%
+                    <Button onClick={() => void api.cancel(m.id)}>Cancel</Button>
+                  </span>
+                ) : (
+                  <Button onClick={() => void api.download(m.id).catch((e) => setError(String(e)))}>Download</Button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </Group>
 
-      {st.dictations > 0 && (
-        <p className="mt-3 text-xs" style={muted} data-testid="dictation-stats">
-          {st.dictations} dictated · last: {((st.last_audio_ms ?? 0) / 1000).toFixed(1)} s of speech, transcribed in {st.last_transcribe_ms ?? "-"} ms, typed {st.last_release_to_insert_ms ?? "-"} ms after release
-        </p>
-      )}
-      {(error || st.last_error) && (
-        <p role="alert" className="mt-2 text-xs" style={{ color: "var(--danger)" }}>
-          {error ?? st.last_error}
-        </p>
-      )}
-      <p className="mt-3 text-xs" style={muted}>
-        Speech is recognized on this Mac by whisper.cpp. Audio is never saved or sent anywhere. Never types into password fields.
-      </p>
-    </section>
+      <Group
+        title="Words"
+        label="Words"
+        footer={
+          <span data-testid="voice-edit-hint">
+            Voice edit: select text, then hold {preset?.label ?? "the hotkey"} and say what to change, for example “make this friendlier” or “translate to German”. It uses the Selection Actions brain.
+          </span>
+        }
+      >
+        <div className="py-1">
+          <Vocabulary words={s.vocabulary} onSave={(vocabulary) => save({ vocabulary })} />
+          <Replacements rules={s.replacements} onSave={(replacements) => save({ replacements })} />
+        </div>
+      </Group>
+    </div>
   );
 }
 
@@ -217,12 +210,13 @@ function LastDictation({ onError }: { onError: (e: string) => void }) {
     }
   };
   return (
-    <p className="mt-2 flex items-center gap-2 text-xs" style={muted}>
-      <button type="button" onClick={() => void copy()} className="rounded-full px-3 py-0.5" style={field}>
-        {copied ? "Copied" : "Copy last dictation"}
-      </button>
-      Or choose Type Last Dictation Again in the menu bar. Forgotten after two minutes.
-    </p>
+    <div className="mac-row">
+      <div className="min-w-0 flex-1">
+        <div className="mac-row-title">Last dictation</div>
+        <div className="mac-row-detail">Kept for two minutes. Type Last Dictation Again is also in the menu bar.</div>
+      </div>
+      <Button onClick={() => void copy()}>{copied ? "Copied" : "Copy last dictation"}</Button>
+    </div>
   );
 }
 
@@ -237,7 +231,7 @@ function Vocabulary({ words, onSave }: { words: string[]; onSave: (w: string[]) 
     if (next !== words) await onSave(next);
   };
   return (
-    <details className="mt-4" data-testid="vocabulary">
+    <details data-testid="vocabulary">
       <summary className="cursor-pointer text-sm">
         Vocabulary <span style={muted}>({words.length})</span>
       </summary>
@@ -282,7 +276,7 @@ function Replacements({ rules, onSave }: { rules: Replacement[]; onSave: (r: Rep
     setDrafts(null);
   };
   return (
-    <details className="mt-3" data-testid="replacements">
+    <details data-testid="replacements">
       <summary className="cursor-pointer text-sm">
         Text replacements <span style={muted}>({rules.length})</span>
       </summary>

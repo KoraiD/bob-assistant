@@ -7,7 +7,6 @@ public enum HelperMode {
     /// Compatibility spike: observe the focused field for `seconds` and print per-event findings.
     case probe(seconds: Double)
     /// Standalone demo: show a ghost chip at the caret in any app.
-    case chipDemo
 }
 
 /// Wires the observer, the chip and the socket together. Not unit-tested (needs a window server and
@@ -42,6 +41,8 @@ public final class HelperRuntime: @unchecked Sendable {
     /// Last `context_state` sent, so unchanged surroundings are not re-sent on every keystroke.
     private var lastContext: NativeEvent?
     private var permissionTimer: Timer?
+    /// The text last checked for a typo (re-reads of the same text are not checked again).
+    private var lastTypoCheck = ""
 
     public init(mode: HelperMode) { self.mode = mode }
 
@@ -53,7 +54,6 @@ public final class HelperRuntime: @unchecked Sendable {
         switch mode {
         case let .connect(path): startConnected(path: path)
         case let .probe(seconds): startProbe(seconds: seconds)
-        case .chipDemo: startChipDemo()
         }
         app.run()
         exit(0)
@@ -102,6 +102,9 @@ public final class HelperRuntime: @unchecked Sendable {
             TextInserter.insert(text)
         case let .captureKeys(active):
             keyTap.isCapturing = active
+            // While a suggestion is visible, re-check the field a few times a second: some apps (Chrome,
+            // Slack) skip change notifications, which left a stale or frozen chip.
+            observer.setWatching(active)
             if !active { chip.hide() }
         case .requestPermissions:
             _ = Permissions.accessibilityTrusted(prompt: true)
@@ -129,6 +132,13 @@ public final class HelperRuntime: @unchecked Sendable {
             SelectionIO.replace(expected: expected, text: text, pid: selectionPID) { [weak self] ok, method, error in
                 try? self?.client?.send(NativeEvent.replaceResult(ok: ok, method: method, error: error))
             }
+        case let .replaceBeforeCaret(expected, text):
+            // Only if the text before the caret is still what the fix was made for, and never in a password field.
+            guard let focused = AXReader.focusedElement() else { break }
+            let snap = AXReader.snapshot(of: focused)
+            guard !snap.secure, (snap.beforeCaret ?? "").replacingOccurrences(of: "\u{a0}", with: " ").hasSuffix(expected) else { break }
+            TextInserter.deleteBackward(expected.count)
+            TextInserter.insert(text)
         case let .copyText(text):
             ClipboardWatcher.ignoreChanges(for: 2)
             NSPasteboard.general.clearContents()
@@ -330,6 +340,14 @@ public final class HelperRuntime: @unchecked Sendable {
             appBundleId: snap.appBundleId, secure: snap.secure, beforeCaret: snap.beforeCaret ?? "",
             selectionLen: snap.selectionLen ?? 0, caret: snap.caret))
         guard !snap.secure else { return }
+        let before = (snap.beforeCaret ?? "").replacingOccurrences(of: "\u{a0}", with: " ")
+        if (snap.selectionLen ?? 0) == 0, before != lastTypoCheck {
+            lastTypoCheck = before
+            // Snapshots are delivered on the main run loop.
+            if let t = MainActor.assumeIsolated({ TypoFinder.find(in: before) }) {
+                try? client?.send(NativeEvent.typo(word: t.word, fix: t.fix, trailing: t.trailing))
+            }
+        }
         let context = NativeEvent.contextState(appBundleId: snap.appBundleId, windowTitle: snap.windowTitle,
                                                afterCaret: snap.afterCaret ?? "")
         if context != lastContext {
@@ -345,24 +363,6 @@ public final class HelperRuntime: @unchecked Sendable {
         print(Permissions.accessibilityHelp(termProgram: ProcessInfo.processInfo.environment["TERM_PROGRAM"]))
         NSWorkspace.shared.open(Permissions.settingsURL(for: .accessibility))
         exit(1)
-    }
-
-    // MARK: chip demo
-
-    private func startChipDemo() {
-        guard Permissions.accessibilityTrusted(prompt: true) else { failUntrusted() }
-        print("chip demo: click into a text field in any app and type. Press Ctrl+C to stop.")
-        observer.onSnapshot = { [weak self] snap, _ in
-            guard let self else { return }
-            if snap.secure || !snap.editable { self.chip.hide(); return }
-            if let caret = snap.caret {
-                let via = snap.caretSource.map { " (\($0.rawValue))" } ?? ""
-                self.chip.show(text: "BOB is watching\(via)", caretAX: caret)
-            } else {
-                self.chip.hide()
-            }
-        }
-        observer.start()
     }
 
     // MARK: probe

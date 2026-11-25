@@ -69,10 +69,10 @@ pub fn window_title(trace_id: &str) -> Option<&'static str> {
 
 /// Sample profile for the context benchmark (written for this project).
 pub const PROFILE: &str = "# About me\n\
-- **Name:** Dávid\n\
+- **Name:** Zsófi\n\
 - **Role:** PhD student and software engineer\n\
 - I write friendly, concise emails and chat messages in English.\n\
-- Sign-off: Best, Dávid\n";
+- Sign-off: Best, Zsófi\n";
 
 /// Seed memory for the context benchmark: phrases a user might have accepted before. Six recur in the
 /// corpus and six do not, so the memory layer is measured both helping and distracting.
@@ -83,10 +83,33 @@ pub const MEMORY: &[&str] = &[
     "Thank you so much for your help",
     "Thursday afternoon",
     "Happy birthday!",
-    "Best, Dávid",
+    "Best, Zsófi",
     "see you on Monday",
     "the latest build",
     "sounds good to me",
     "the quarterly review",
     "on my way",
 ];
+
+/// What might be visible on screen while typing each trace (screen layer of the context benchmark): the
+/// message being answered or the page being worked on, plus the menu and sidebar noise that OCR also picks
+/// up. Written for this project.
+pub fn screen_text(trace_id: &str) -> Option<&'static str> {
+    Some(match trace_id {
+        "email-reply" => "Inbox Sent Drafts\nRe: Project update\nHi, could you check the numbers in the draft? \
+                          No rush, but I need them before Friday. Thanks, Anna\nReply Forward Archive",
+        "email-meeting" => "Calendar Week 48\nThursday 14:00 Free\nMonday Team sync\nRe: Planning\nCan we find a \
+                            better time for our meeting? Monday does not work for me.",
+        "email-attach" => "New Message\nTo: finance team\nSubject: Q3 report\nAttachments: report-q3.pdf (2 MB)\nSend",
+        "chat-late" => "Messages\nAnna: Where are you? We are all at the cafe already.\nToday 18:05",
+        "chat-thanks" => "Messages\nTom: No problem at all, it was fun moving all those boxes last weekend!",
+        "chat-plan" => "Messages\nSara: I'm free tomorrow, lunch maybe? Noon works for me.",
+        "note-todo" => "Notes\nThis week\nDentist appointment - call to confirm\nCar insurance renewal due Friday",
+        "note-idea" => "Notes\nDemo script\n1. Problem first\n2. Then the features\n3. Close with the ghost",
+        "doc-results" => "Pages\nResults\nFigure 2: accuracy over the baseline improved from 61% to 74%\nTable 1",
+        "doc-intro" => "Pages\nAbstract\nWe propose a simple method for faster inline text prediction on laptops.",
+        "birthday" => "Messages\nMom: Today is a wonderful day, we are having dinner with the family tonight!",
+        "support" => "Safari\nContact support\nDescribe the problem. Did you try restarting the app?\nSubmit",
+        _ => return None,
+    })
+}

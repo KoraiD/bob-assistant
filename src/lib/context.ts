@@ -111,8 +111,12 @@ export const TONES: { id: Tone; label: string }[] = [
  * Ghost Text layers the app offers (owner decision after the benchmark): remembered phrases alone, optionally
  * with the window title. The window title needs memory; profile and screen text stay benchmark-only.
  */
-export function ghostLayers(memory: boolean, window: boolean, extra: Pick<GhostLayers, "language_hint" | "clipboard"> = { language_hint: false, clipboard: false }): GhostLayers {
-  return { profile: false, memory, window: memory && window, screen: false, language_hint: extra.language_hint, clipboard: extra.clipboard };
+export function ghostLayers(
+  memory: boolean,
+  window: boolean,
+  extra: Pick<GhostLayers, "language_hint" | "clipboard"> & { screen?: boolean } = { language_hint: false, clipboard: false },
+): GhostLayers {
+  return { profile: false, memory, window: memory && window, screen: extra.screen ?? false, language_hint: extra.language_hint, clipboard: extra.clipboard };
 }
 
 export const contextApi = {

@@ -138,6 +138,7 @@ export function StatsPanel() {
             <dd style={muted}>
               {a.ghost_words} words from {a.ghost_accepts} accepted suggestions
               {rate !== null && ` · ${rate}% of ${a.ghost_shown} shown`}
+              {(a.typo_fixes ?? 0) > 0 && ` · ${a.typo_fixes} typos fixed`}
               {ghost?.p50_ms != null && ` · first suggestion in ${ghost.p50_ms} ms (median)`}
             </dd>
           </div>

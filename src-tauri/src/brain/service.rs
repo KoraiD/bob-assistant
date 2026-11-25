@@ -4,7 +4,7 @@
 
 use super::client::{HttpBrain, TestReport};
 use super::models::{self, DownloadError, ModelEntry, Progress};
-use super::registry::{Registry, RegistryError, Role, BUILTIN_ID};
+use super::registry::{Registry, RegistryError, Role};
 use super::secrets::SecretStore;
 use super::sidecar::{self, Sidecar, SidecarConfig, SidecarError, SidecarState};
 use super::{BrainConfig, BrainError, ProviderKind};
@@ -364,15 +364,12 @@ impl BrainService {
     pub fn models_dir(&self) -> &std::path::Path {
         &self.models_dir
     }
-
-    pub fn builtin_id(&self) -> &'static str {
-        BUILTIN_ID
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::brain::registry::BUILTIN_ID;
     use crate::brain::secrets::MemoryStore;
     use crate::brain::testserver::{Response, TestServer};
     use crate::brain::Capabilities;

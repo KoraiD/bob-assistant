@@ -2,8 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// Types text at the caret of the focused app with synthetic Unicode key events (GT-14). This works in
-/// nearly every app and leaves the clipboard untouched. Fallbacks (AX replacement, paste) come with
-/// Selection Actions (Task 7).
+/// nearly every app and leaves the clipboard untouched.
 public enum TextInserter {
     /// `CGEventKeyboardSetUnicodeString` handles short strings only; 16 UTF-16 units per event is safe.
     public static let maxUnitsPerEvent = 16
@@ -23,6 +22,20 @@ public enum TextInserter {
         }
         if !current.isEmpty { out.append(current) }
         return out
+    }
+
+    /// Press Delete `count` times (marked as BOB's own), to remove characters before the caret.
+    public static func deleteBackward(_ count: Int) {
+        guard count > 0, let source = CGEventSource(stateID: .hidSystemState) else { return }
+        source.userData = bobSyntheticEventMarker
+        for _ in 0..<count {
+            for keyDown in [true, false] {
+                guard let ev = CGEvent(keyboardEventSource: source, virtualKey: 51, keyDown: keyDown) else { continue }
+                ev.flags = []
+                ev.setIntegerValueField(.eventSourceUserData, value: bobSyntheticEventMarker)
+                ev.post(tap: .cghidEventTap)
+            }
+        }
     }
 
     /// Post the text as keyboard events marked as BOB's own (so the key tap never captures them).
