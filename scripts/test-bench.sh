@@ -71,6 +71,12 @@ cleanup() {
   fi
   sleep 2
   [ -f "$profile/logs/bob.log" ] && cp "$profile/logs/bob.log" "$out/test-bob.log"
+  if [ -f "$out/test-bob.log" ]; then
+    echo "== what the test BOB's Ghost Text did (from test-bob.log)"
+    grep -oE "ghost: (quiet \([^)]*\)|request|first chip|stale chip dropped|[0-9]+ raw chars, nothing worth showing yet|the app's own completion owns Tab)" \
+      "$out/test-bob.log" | sed -E 's/^ghost: [0-9]+ raw/ghost: N raw/' | sort | uniq -c | sort -rn | head -8 || true
+    grep -E "WARN|ERROR" "$out/test-bob.log" | sed -E 's/^[0-9-]+ //' | cut -c1-160 | head -5 || true
+  fi
   echo "== results in $out"
 }
 trap cleanup EXIT
@@ -86,7 +92,8 @@ EOF
 fi
 
 echo "== starting the test BOB ($brain brain)"
-open -n -g --env BOB_HOME="$profile" "$app"
+# Trace level: the Ghost engine says why it stays quiet (metadata only; the text is the bench's corpus).
+open -n -g --env BOB_HOME="$profile" --env RUST_LOG=bob_lib=trace "$app"
 for _ in $(seq 1 60); do
   [ -S "$profile/run/native.sock" ] && pgrep -f "$app/Contents/MacOS/bob-native" >/dev/null && break
   sleep 0.5
