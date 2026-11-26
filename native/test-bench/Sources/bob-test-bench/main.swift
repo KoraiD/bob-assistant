@@ -94,28 +94,29 @@ func say(_ line: String) {
 
 // MARK: keys
 
-/// The key code that types `char` in the current layout without modifiers (0 when there is none).
-func keyCode(for char: Character) -> CGKeyCode {
-    if char == " " { return CGKeyCode(kVK_Space) }
+/// Key codes by the character they type in the current layout without modifiers. Built on the main thread
+/// (the input source API asserts that it runs there), once before the run.
+func layoutKeyCodes() -> [String: CGKeyCode] {
+    dispatchPrecondition(condition: .onQueue(.main))
+    var table: [String: CGKeyCode] = [" ": CGKeyCode(kVK_Space)]
     guard let src = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
-          let raw = TISGetInputSourceProperty(src, kTISPropertyUnicodeKeyLayoutData) else { return 0 }
+          let raw = TISGetInputSourceProperty(src, kTISPropertyUnicodeKeyLayoutData) else { return table }
     let data = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
-    let target = String(char).lowercased()
-    return data.withUnsafeBytes { buf -> CGKeyCode in
-        guard let base = buf.baseAddress else { return 0 }
+    data.withUnsafeBytes { buf in
+        guard let base = buf.baseAddress else { return }
         let layout = base.assumingMemoryBound(to: UCKeyboardLayout.self)
         for c in 0..<UInt16(128) {
             var dead: UInt32 = 0
             var len = 0
             var chars = [UniChar](repeating: 0, count: 4)
             if UCKeyTranslate(layout, c, UInt16(kUCKeyActionDown), 0, UInt32(LMGetKbdType()),
-                              OptionBits(kUCKeyTranslateNoDeadKeysBit), &dead, 4, &len, &chars) == noErr,
-               len == 1, String(utf16CodeUnits: chars, count: 1) == target {
-                return CGKeyCode(c)
+                              OptionBits(kUCKeyTranslateNoDeadKeysBit), &dead, 4, &len, &chars) == noErr, len == 1 {
+                let s = String(utf16CodeUnits: chars, count: 1)
+                if table[s] == nil { table[s] = CGKeyCode(c) }
             }
         }
-        return 0
     }
+    return table
 }
 
 func postKey(code: CGKeyCode, text: String? = nil, flags: CGEventFlags = []) {
@@ -230,6 +231,7 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
     var runner: Runner?
     let limitMs = options.minutes * 60_000
     let lockFD: Int32
+    var keyCodes: [String: CGKeyCode] = [:]
 
     init(lockFD: Int32) {
         self.lockFD = lockFD
@@ -374,6 +376,7 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
     }
 
     func begin() {
+        keyCodes = layoutKeyCodes()
         try? FileManager.default.createDirectory(at: options.out, withIntermediateDirectories: true)
         let findingsURL = options.out.appendingPathComponent("findings.jsonl")
         FileManager.default.createFile(atPath: findingsURL.path, contents: nil)
@@ -446,7 +449,7 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
         if let r = stopReason() { return r }
         switch action {
         case let .type(c):
-            let code = keyCode(for: c)
+            let code = keyCodes[String(c).lowercased()] ?? 0
             postKey(code: code, text: String(c), flags: c.isUppercase ? .maskShift : [])
         case .backspace: postKey(code: CGKeyCode(kVK_Delete))
         case .accept(.tab): postKey(code: CGKeyCode(kVK_Tab))

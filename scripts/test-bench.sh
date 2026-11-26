@@ -101,6 +101,6 @@ echo "== Test Bench: click its window, then hands off for 3 seconds"
 root=$(pwd)
 open -W -n "$bundle" --args --out "$root/$out" --seed "$seed" --minutes "$minutes" --profiles "$profiles" \
   --corpus "$root/native/test-bench/corpus.txt" --real-lock "$real_lock"
-cat "$out/result.txt" 2>/dev/null || echo "the Test Bench left no result"
+cat "$out/result.txt" 2>/dev/null || echo "the Test Bench left no result; if it crashed, see ~/Library/Logs/DiagnosticReports/bob-test-bench-*.ips"
 code=$(cat "$out/exit-code" 2>/dev/null || echo 1)
 exit "$code"
