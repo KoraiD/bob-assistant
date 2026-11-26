@@ -2,8 +2,9 @@
 // every step. Started by scripts/test-bench.sh, which runs the test BOB in a separate profile (BOB_HOME).
 //
 // Safety: it holds your own BOB's instance lock for the whole run (so it refuses to start while your BOB runs,
-// and your BOB cannot start during the run), posts keys only while its own editor has focus and is in front,
-// and stops at once when anyone else uses the mouse or the keyboard. It never types into another app.
+// and your BOB cannot start during the run) and posts keys only while its own editor has focus and is in front.
+// Using the mouse, or another window coming to the front, pauses it; any key press stops it. It never types
+// into another app.
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
@@ -237,6 +238,12 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
     let lock = NSLock()
     var foreign: String?
     var lastForeign = CACurrentMediaTime()
+    var lastMouse = 0.0
+    /// Pauses so far, and paused time (not counted against the time limit).
+    var resumeCount = 0
+    var pausedMs = 0.0
+    /// A pause longer than this ends the run.
+    let maxPauseMs = 15.0 * 60_000
     var startedAt: Double?
     var tap: CFMachPort?
     var findingsFile: FileHandle?
@@ -384,10 +391,16 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
+    /// Keys from anyone else stop the run; the mouse only pauses it.
     func sawForeign(_ what: String) {
         lock.withLock {
-            lastForeign = CACurrentMediaTime()
-            if startedAt != nil, foreign == nil { foreign = what }
+            let now = CACurrentMediaTime()
+            lastForeign = now
+            if what == "mouse" {
+                lastMouse = now
+            } else if startedAt != nil, foreign == nil {
+                foreign = what
+            }
         }
     }
 
@@ -417,12 +430,12 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
             return false
         }
         guard quiet >= 3 else {
-            status.stringValue = String(format: "Hands off the mouse and keyboard: starting in %.0f s. "
-                + "Touch either one to stop.", max(1, 3 - quiet))
+            status.stringValue = String(format: "Hands off the mouse and keyboard: starting in %.0f s.",
+                                        max(1, 3 - quiet))
             return false
         }
         lock.withLock { startedAt = CACurrentMediaTime(); foreign = nil }
-        status.stringValue = "Typing. Touch the mouse or a key to stop."
+        status.stringValue = "Typing. Moving the mouse pauses; any key stops the run."
         begin()
         return true
     }
@@ -461,9 +474,10 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
                 try? data.write(to: options.out.appendingPathComponent("summary.json"))
             }
             say(String(format: "episodes %d, keys %d, suggestions %d, accepts %d (%d as expected), findings %d "
-                + "(%.1f per 1000 keys), chip unreadable %d times. Stopped: %@",
+                + "(%.1f per 1000 keys), chip unreadable %d times, pauses %d (%.0f s). Stopped: %@",
                 s.episodes, s.keys, s.suggestions, s.accepts, s.acceptsOK, runner.findings.count,
-                s.defectsPer1000Keys, chips.unreadable, s.stoppedBecause ?? ""))
+                s.defectsPer1000Keys, chips.unreadable, resumes, lock.withLock { pausedMs } / 1000,
+                s.stoppedBecause ?? ""))
             for (k, n) in s.findings.sorted(by: { $0.key < $1.key }) { say("  \(k): \(n)") }
         }
         try? findingsFile?.close()
@@ -485,17 +499,51 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
             editor.string = ""
             window.makeFirstResponder(nil)  // focus moves into the editor, like a click
             window.makeFirstResponder(editor)
-            status.stringValue = "Typing (\(profile.rawValue) editor). Touch the mouse or a key to stop."
+            status.stringValue = "Typing (\(profile.rawValue) editor). Moving the mouse pauses; any key stops the run."
         }
     }
 
+    var resumes: Int { lock.withLock { resumeCount } }
+
+    /// Typing time so far (paused time does not count against the limit).
+    func activeMs() -> Double { nowMs() - lock.withLock { pausedMs } }
+
+    /// Nil while typing may go on. Blocks while paused (mouse in use in the last 3 s, or the editor not in
+    /// front with focus); returns a reason to stop for a key press, the time limit or a very long pause.
     func stopReason() -> String? {
-        let input = lock.withLock { foreign }
-        let isFocused = DispatchQueue.main.sync { focused }
-        let state = GuardState(frontmostPID: isFocused ? ProcessInfo.processInfo.processIdentifier : nil,
-                               ownPID: ProcessInfo.processInfo.processIdentifier, windowIsKey: isFocused,
-                               editorHasFocus: isFocused, foreignInput: input, elapsedMs: nowMs(), limitMs: limitMs)
-        return TestBenchCore.stopReason(state)
+        var pauseStart: Double?
+        while true {
+            let (key, mouseIdle) = lock.withLock { (foreign != nil, CACurrentMediaTime() - lastMouse) }
+            let inFront = DispatchQueue.main.sync { focused }
+            let state = GuardState(editorInFront: inFront, mouseIdleS: mouseIdle, foreignKey: key,
+                                   activeMs: activeMs(), limitMs: limitMs,
+                                   pausedMs: pauseStart.map { nowMs() - $0 } ?? 0, maxPauseMs: maxPauseMs)
+            switch decide(state) {
+            case let .stop(reason):
+                return reason
+            case .type:
+                guard let start = pauseStart else { return nil }
+                let paused = nowMs() - start
+                DispatchQueue.main.sync {
+                    editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+                    status.stringValue = "Typing. Moving the mouse pauses; any key stops the run."
+                }
+                lock.withLock {
+                    pausedMs += paused
+                    resumeCount += 1
+                }
+                return nil
+            case .pause:
+                if pauseStart == nil {
+                    pauseStart = nowMs()
+                    DispatchQueue.main.async { [self] in
+                        status.stringValue = "Paused. Typing goes on 3 s after the mouse rests with this window in "
+                            + "front (click it). Any key stops the run."
+                    }
+                }
+                usleep(100_000)
+            }
+        }
     }
 
     func post(_ action: Action) -> String? {

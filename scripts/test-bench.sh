@@ -6,8 +6,9 @@
 #
 # Before you start: quit your own BOB (the Test Bench refuses to run while it runs) and build the dev app
 # (`make app`). The first run asks for Accessibility for "BOB Test Bench" (System Settings > Privacy & Security
-# > Accessibility); it continues once the switch is on. During the run, keep your hands off the mouse and
-# keyboard: touching either stops it. It types only into the Test Bench window.
+# > Accessibility); it continues once the switch is on. During the run, using the mouse or another window
+# pauses it (it goes on 3 s after the mouse rests with the bench in front); any key press stops it. It types
+# only into the Test Bench window, and reads and writes files only in /tmp (no Downloads access prompt).
 # Results: bench-results/local/testbench/<time>-seed<N>/. Set BOB_SIGN_IDENTITY to sign with your certificate,
 # so the Accessibility switch survives rebuilds (ad hoc signing otherwise).
 #   --brain fake     a local fake brain that continues corpus sentences (default; quick and repeatable)
@@ -33,6 +34,8 @@ profile=/tmp/bob-test
 port=18080
 real_lock="${TMPDIR%/}/bob-$(id -u)/bob.lock"
 out="bench-results/local/testbench/$(date +%Y%m%d-%H%M%S)-seed$seed"
+# The bench app only touches /tmp: the repo may sit in a protected folder (Downloads, Documents).
+work=/tmp/bob-bench
 
 [ -d "$app" ] || { echo "Build the dev app first: make app"; exit 1; }
 if pgrep -f "$app/Contents/MacOS/bob" >/dev/null; then
@@ -50,6 +53,9 @@ cp "$bench" "$bundle/Contents/MacOS/bob-test-bench"
 codesign --force --sign "${BOB_SIGN_IDENTITY:--}" "$bundle" 2>/dev/null
 "$bench" --preflight --real-lock "$real_lock"
 mkdir -p "$out"
+rm -rf "$work"
+mkdir -p "$work/out"
+cp native/test-bench/corpus.txt "$work/corpus.txt"
 
 echo "== preparing the test profile in $profile"
 rm -rf "$profile"
@@ -71,6 +77,7 @@ cleanup() {
     wait "$fake_pid" 2>/dev/null || true
   fi
   sleep 2
+  cp -R "$work/out/." "$out/" 2>/dev/null || true
   [ -f "$profile/logs/bob.log" ] && cp "$profile/logs/bob.log" "$out/test-bob.log"
   if [ -f "$out/test-bob.log" ]; then
     echo "== what the test BOB's Ghost Text did (from test-bob.log)"
@@ -92,7 +99,6 @@ EOF
   fake_pid=$!
 fi
 
-root=$(pwd)
 go="$profile/run/bench-go"
 start_bob() {
   echo "== starting the test BOB ($brain brain)"
@@ -110,8 +116,8 @@ start_bob() {
   touch "$go"
 }
 start_bench() {
-  open -W -n "$bundle" --args --out "$root/$out" --seed "$seed" --minutes "$minutes" --profiles "$profiles" \
-    --corpus "$root/native/test-bench/corpus.txt" --real-lock "$real_lock" --ready-file "$go"
+  open -W -n "$bundle" --args --out "$work/out" --seed "$seed" --minutes "$minutes" --profiles "$profiles" \
+    --corpus "$work/corpus.txt" --real-lock "$real_lock" --ready-file "$go"
 }
 
 # The bench starts first: BOB's helper does not see an app that comes to the front while it launches (GT-12),
@@ -128,6 +134,6 @@ else
   start_bob || { kill "$bench_job" 2>/dev/null; exit 1; }
   wait "$bench_job" || true
 fi
-cat "$out/result.txt" 2>/dev/null || echo "the Test Bench left no result; if it crashed, see ~/Library/Logs/DiagnosticReports/bob-test-bench-*.ips"
-code=$(cat "$out/exit-code" 2>/dev/null || echo 1)
+cat "$work/out/result.txt" 2>/dev/null || echo "the Test Bench left no result; if it crashed, see ~/Library/Logs/DiagnosticReports/bob-test-bench-*.ips"
+code=$(cat "$work/out/exit-code" 2>/dev/null || echo 1)
 exit "$code"

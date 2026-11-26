@@ -22,8 +22,14 @@ public protocol BenchIO: AnyObject {
     func post(_ action: Action) -> String?
     /// Empty the editor and apply `profile`.
     func reset(profile: EditorProfile)
-    /// A reason to stop now (focus left the editor, someone touched the mouse or keyboard, time is up).
+    /// A reason to stop now (someone used the keyboard, time is up). May block while the run is paused.
     func stopReason() -> String?
+    /// How many times the run resumed after a pause (the editor's caret may have moved meanwhile).
+    var resumes: Int { get }
+}
+
+public extension BenchIO {
+    var resumes: Int { 0 }
 }
 
 public enum FindingKind: String, Codable, Sendable {
@@ -85,6 +91,7 @@ public final class Runner {
     private var step = 0
     private var lastAccepted: (text: String, atMs: Double)?
     private var lastClaim: String?
+    private var seenResumes = 0
     /// Stop when no suggestion came in this long: the test BOB cannot read the editor or reach its brain.
     public var noSuggestionLimitMs = 45_000.0
     /// Called with each finding as it is made (the app writes it to disk at once).
@@ -139,11 +146,24 @@ public final class Runner {
         return (text, chip)
     }
 
+    /// After a pause nothing seen before it is trusted: start the checks again from the editor as it is.
+    private func resyncAfterPause() -> Bool {
+        guard io.resumes != seenResumes else { return false }
+        seenResumes = io.resumes
+        tracker = ChipTracker()
+        lastClaim = nil
+        lastAccepted = nil
+        expected = io.text()
+        note("paused, resumed")
+        return true
+    }
+
     /// Sleep in small slices, observing between them. Returns a stop reason if one came up.
     private func wait(ms: Int, until done: (() -> Bool)? = nil) -> String? {
         let end = io.nowMs() + Double(ms)
         while io.nowMs() < end {
             if let r = io.stopReason() { return r }
+            if resyncAfterPause() { return nil }
             io.sleep(ms: 15)
             observe()
             if let done, done() { return nil }
@@ -154,7 +174,9 @@ public final class Runner {
     private func checkText(_ text: String) {
         guard normalized(text) != normalized(expected) else { return }
         // Give a slow app a moment before calling it a mismatch.
+        let before = seenResumes
         _ = wait(ms: 250)
+        guard seenResumes == before else { return }
         let now = io.text()
         guard normalized(now) != normalized(expected) else { return }
         report(.textMismatch, expected: tail(expected), actual: tail(now))
@@ -193,6 +215,7 @@ public final class Runner {
 
     private func runStep(_ typist: inout Typist) -> String? {
         if let r = io.stopReason() { return r }
+        _ = resyncAfterPause()
         if summary.suggestions == 0, io.nowMs() > noSuggestionLimitMs { return Runner.noSuggestionsReason }
         let (text, chip) = observe()
         checkText(text)
@@ -226,6 +249,7 @@ public final class Runner {
     }
 
     private func acceptTypo(_ typo: (word: String, fix: String), before: String, chip: String, racy: Bool) -> String? {
+        let resumesBefore = seenResumes
         if let r = io.post(.accept(.tab)) { return r }
         summary.keys += 1
         summary.accepts += 1
@@ -233,6 +257,10 @@ public final class Runner {
         if let r = wait(ms: 700, until: { normalized(self.io.text()) != normalized(before) }) { return r }
         if let r = wait(ms: 150) { return r }
         let after = io.text()
+        if seenResumes != resumesBefore {
+            expected = after
+            return nil
+        }
         if let want = applyTypoFix(before: normalized(before), word: typo.word, fix: typo.fix),
            normalized(after) != want {
             report(.acceptMismatch, expected: tail(want), actual: tail(after), chip: chip, racy: racy)
@@ -250,6 +278,7 @@ public final class Runner {
         }
         let claim = tracker.claim
         let insert = claim.flatMap { expectedInsert(claim: $0, before: normalized(before), key: key) }
+        let resumesBefore = seenResumes
         if let r = io.post(.accept(key)) { return r }
         summary.keys += 1
         summary.accepts += 1
@@ -257,6 +286,10 @@ public final class Runner {
         if let r = wait(ms: 700, until: { normalized(self.io.text()) != normalized(before) }) { return r }
         if let r = wait(ms: 150) { return r }
         let after = io.text()
+        if seenResumes != resumesBefore {
+            expected = after
+            return nil
+        }
         if let insert {
             let want = normalized(before) + insert
             if normalized(after) == want {

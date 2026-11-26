@@ -59,23 +59,24 @@ struct OracleTests {
         #expect(t.observe(text: "I will get b", chip: " back", atMs: 710) == .notFollowing(chip: " back", expected: "ack"))
     }
 
-    @Test func theGuardStopsForAnyoneElse() {
-        var s = GuardState(frontmostPID: 7, ownPID: 7, windowIsKey: true, editorHasFocus: true,
-                           foreignInput: nil, elapsedMs: 0, limitMs: 1_000)
-        #expect(stopReason(s) == nil)
-        s.frontmostPID = 8
-        #expect(stopReason(s)?.contains("another app") == true)
-        s.frontmostPID = nil
-        #expect(stopReason(s) != nil)
-        s.frontmostPID = 7
-        s.editorHasFocus = false
-        #expect(stopReason(s)?.contains("lost focus") == true)
-        s.editorHasFocus = true
-        s.foreignInput = "mouse"
-        #expect(stopReason(s)?.contains("mouse") == true)
-        s.foreignInput = nil
-        s.elapsedMs = 1_000
-        #expect(stopReason(s) == "time is up")
+    @Test func keysStopTheRunAndTheMouseOrAnotherWindowPausesIt() {
+        var s = GuardState(editorInFront: true, mouseIdleS: 10, foreignKey: false, activeMs: 0, limitMs: 1_000)
+        #expect(decide(s) == .type)
+        s.mouseIdleS = 1
+        #expect(decide(s) == .pause, "the mouse was used in the last 3 s")
+        s.mouseIdleS = 3
+        #expect(decide(s) == .type)
+        s.editorInFront = false
+        #expect(decide(s) == .pause, "another window is in front")
+        s.pausedMs = 16 * 60_000
+        #expect(decide(s) == .stop("paused for 15 minutes, so the run stopped"))
+        s.pausedMs = 0
+        s.foreignKey = true
+        #expect(decide(s) == .stop("you used the keyboard, so the run stopped"))
+        s.foreignKey = false
+        s.editorInFront = true
+        s.activeMs = 1_000
+        #expect(decide(s) == .stop("time is up"))
         #expect(isOwnEvent(userData: benchEventMarker) && isOwnEvent(userData: bobEventMarker))
         #expect(!isOwnEvent(userData: 0))
     }
