@@ -21,9 +21,14 @@ struct Options {
     var profiles: [EditorProfile] = EditorProfile.allCases
     var realLock: String?
     var preflight = false
-    /// Move focus out of the editor and back before each episode, like a click into it. Off reproduces GT-12
-    /// (no suggestions when the field already had focus when BOB attached to the app).
-    var focusBounce = true
+    /// Start typing only once this file (the test BOB's helper socket) exists.
+    var readyFile: String?
+    /// Diagnostics: stay in the background, never post keys, and insert words into the editor in code.
+    var diag = false
+    /// With `--diag`: come to the front, so BOB's helper observes the editor (still no key events).
+    var diagActivate = false
+    /// With `--diag`: come to the front this many seconds after launch.
+    var diagFrontAfter = 0.0
 }
 
 func parseOptions() -> Options {
@@ -41,7 +46,10 @@ func parseOptions() -> Options {
         case "--profiles": o.profiles = v().split(separator: ",").compactMap { EditorProfile(rawValue: String($0)) }
         case "--real-lock": o.realLock = v()
         case "--preflight": o.preflight = true
-        case "--no-focus-bounce": o.focusBounce = false
+        case "--ready-file": o.readyFile = v()
+        case "--diag": o.diag = true
+        case "--diag-front": o.diag = true; o.diagActivate = true
+        case "--diag-front-after": o.diag = true; o.diagFrontAfter = Double(v()) ?? 1.5
         default:
             print("unknown option \(a)")
             exit(64)
@@ -266,8 +274,35 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(editor)
         configure(.plain)
+        if options.diag {
+            if options.diagActivate { NSApp.activate() }
+            if options.diagFrontAfter > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + options.diagFrontAfter) { NSApp.activate() }
+            }
+            return runDiagnostics()
+        }
         NSApp.activate()
         waitForAccessibility()
+    }
+
+    /// Insert a word every 300 ms for 10 s through the editor's own editing path (as typing would), without
+    /// key events or activation, so another process can watch the editor through Accessibility.
+    func runDiagnostics() {
+        var n = 0
+        Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] t in
+            guard let self else { return }
+            n += 1
+            self.editor.insertText("word\(n) ", replacementRange: self.editor.selectedRange())
+            if n % 5 == 1 {
+                let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
+                say("diag: word \(n), frontmost \(front), key window \(self.window.isKeyWindow)")
+            }
+            if n >= 33 {
+                t.invalidate()
+                say("diag: inserted \(n) words, editor has \(self.editor.string.count) characters")
+                self.finish(code: 0)
+            }
+        }
     }
 
     /// Ask macOS for Accessibility once (the system prompt adds "BOB Test Bench" to the list), then continue
@@ -297,9 +332,9 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
         Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] t in
             if self?.tryStart() == true { t.invalidate() }
         }
-        Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in
+        Timer.scheduledTimer(withTimeInterval: 180, repeats: false) { [weak self] _ in
             guard self?.startedAt == nil else { return }
-            say("The run did not start within 2 minutes (the Test Bench window needs focus and quiet). Nothing was typed.")
+            say("The run did not start within 3 minutes (the Test Bench window needs focus and quiet). Nothing was typed.")
             self?.finish(code: 5)
         }
     }
@@ -361,9 +396,22 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
             && window.isKeyWindow && window.firstResponder === editor
     }
 
-    /// Start once the editor has focus and nobody touched the mouse or keyboard for 3 seconds.
+    var readySince: Double?
+
+    /// Start once the test BOB is up, the editor has focus and nobody touched the mouse or keyboard for 3 s.
     func tryStart() -> Bool {
+        if let ready = options.readyFile {
+            guard FileManager.default.fileExists(atPath: ready) else {
+                status.stringValue = "Waiting for the test BOB to start…"
+                return false
+            }
+            if readySince == nil { readySince = CACurrentMediaTime() }
+        }
         let quiet = lock.withLock { CACurrentMediaTime() - lastForeign }
+        if let since = readySince, CACurrentMediaTime() - since < 3 {
+            status.stringValue = "The test BOB is starting…"
+            return false
+        }
         guard focused else {
             status.stringValue = "Click this window to hand BOB's Test Bench the keyboard."
             return false
@@ -435,7 +483,7 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
         DispatchQueue.main.sync {
             configure(profile)
             editor.string = ""
-            if options.focusBounce { window.makeFirstResponder(nil) }
+            window.makeFirstResponder(nil)  // focus moves into the editor, like a click
             window.makeFirstResponder(editor)
             status.stringValue = "Typing (\(profile.rawValue) editor). Touch the mouse or a key to stop."
         }

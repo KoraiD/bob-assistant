@@ -2,7 +2,7 @@
 # Run the BOB Test Bench: a test copy of BOB (separate profile in /tmp/bob-test) suggests while the Test Bench
 # types like a person into its own editor, and every step is checked.
 #
-#   scripts/test-bench.sh [--brain fake|builtin] [--minutes 5] [--seed N] [--profiles plain,smart] [--no-focus-bounce]
+#   scripts/test-bench.sh [--brain fake|builtin] [--minutes 5] [--seed N] [--profiles plain,smart] [--bob-first]
 #
 # Before you start: quit your own BOB (the Test Bench refuses to run while it runs) and build the dev app
 # (`make app`). The first run asks for Accessibility for "BOB Test Bench" (System Settings > Privacy & Security
@@ -15,14 +15,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-brain=fake minutes=5 seed=$(( $(date +%s) % 100000 )) profiles=plain,smart extra=()
+brain=fake minutes=5 seed=$(( $(date +%s) % 100000 )) profiles=plain,smart bob_first=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --brain) brain=$2; shift 2 ;;
     --minutes) minutes=$2; shift 2 ;;
     --seed) seed=$2; shift 2 ;;
     --profiles) profiles=$2; shift 2 ;;
-    --no-focus-bounce) extra+=(--no-focus-bounce); shift ;;
+    --bob-first) bob_first=1; shift ;;  # reproduces GT-12: the test BOB never sees the bench
     *) sed -n '2,15p' "$0"; exit 64 ;;
   esac
 done
@@ -92,23 +92,42 @@ EOF
   fake_pid=$!
 fi
 
-echo "== starting the test BOB ($brain brain)"
-# Trace level: the Ghost engine says why it stays quiet (metadata only; the text is the bench's corpus).
-open -n -g --env BOB_HOME="$profile" --env RUST_LOG=bob_lib=trace "$app"
-for _ in $(seq 1 60); do
-  [ -S "$profile/run/native.sock" ] && pgrep -f "$app/Contents/MacOS/bob-native" >/dev/null && break
-  sleep 0.5
-done
-[ -S "$profile/run/native.sock" ] || { echo "the test BOB did not start (see $profile/logs/bob.log)"; exit 1; }
-if [ "$brain" = builtin ]; then
-  echo "== waiting for the built-in model"
-  for _ in $(seq 1 150); do grep -q "built-in brain: ready" "$profile/logs/bob.log" 2>/dev/null && break; sleep 1; done
-fi
-
-echo "== Test Bench: click its window, then hands off for 3 seconds"
 root=$(pwd)
-open -W -n "$bundle" --args --out "$root/$out" --seed "$seed" --minutes "$minutes" --profiles "$profiles" \
-  --corpus "$root/native/test-bench/corpus.txt" --real-lock "$real_lock" ${extra[@]+"${extra[@]}"}
+go="$profile/run/bench-go"
+start_bob() {
+  echo "== starting the test BOB ($brain brain)"
+  # Trace level: the Ghost engine says why it stays quiet (metadata only; the text is the bench's corpus).
+  open -n -g --env BOB_HOME="$profile" --env RUST_LOG=bob_lib=trace "$app"
+  for _ in $(seq 1 60); do
+    [ -S "$profile/run/native.sock" ] && pgrep -f "$app/Contents/MacOS/bob-native" >/dev/null && break
+    sleep 0.5
+  done
+  [ -S "$profile/run/native.sock" ] || { echo "the test BOB did not start (see $profile/logs/bob.log)"; return 1; }
+  if [ "$brain" = builtin ]; then
+    echo "== waiting for the built-in model"
+    for _ in $(seq 1 150); do grep -q "built-in brain: ready" "$profile/logs/bob.log" 2>/dev/null && break; sleep 1; done
+  fi
+  touch "$go"
+}
+start_bench() {
+  open -W -n "$bundle" --args --out "$root/$out" --seed "$seed" --minutes "$minutes" --profiles "$profiles" \
+    --corpus "$root/native/test-bench/corpus.txt" --real-lock "$real_lock" --ready-file "$go"
+}
+
+# The bench starts first: BOB's helper does not see an app that comes to the front while it launches (GT-12),
+# so the test BOB attaches to the bench once the bench is running. --bob-first keeps the other order.
+echo "== Test Bench: click its window when it asks, then hands off"
+if [ "$bob_first" = 1 ]; then
+  start_bob
+  start_bench
+else
+  mkdir -p "$profile/run"
+  start_bench &
+  bench_job=$!
+  sleep 3
+  start_bob || { kill "$bench_job" 2>/dev/null; exit 1; }
+  wait "$bench_job" || true
+fi
 cat "$out/result.txt" 2>/dev/null || echo "the Test Bench left no result; if it crashed, see ~/Library/Logs/DiagnosticReports/bob-test-bench-*.ips"
 code=$(cat "$out/exit-code" 2>/dev/null || echo 1)
 exit "$code"
