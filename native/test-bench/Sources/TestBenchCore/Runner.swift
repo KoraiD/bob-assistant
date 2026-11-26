@@ -85,6 +85,8 @@ public final class Runner {
     private var step = 0
     private var lastAccepted: (text: String, atMs: Double)?
     private var lastClaim: String?
+    /// Stop when no suggestion came in this long: the test BOB cannot read the editor or reach its brain.
+    public var noSuggestionLimitMs = 45_000.0
     /// Called with each finding as it is made (the app writes it to disk at once).
     public var onFinding: ((Finding) -> Void)?
 
@@ -185,8 +187,13 @@ public final class Runner {
         }
     }
 
+    public static let noSuggestionsReason = "no suggestion came from the test BOB, so the run stopped. Check that "
+        + "the dev build of BOB has Accessibility (System Settings > Privacy & Security > Accessibility) and that "
+        + "its brain answers (fake-brain.json or test-bob.log in the results)"
+
     private func runStep(_ typist: inout Typist) -> String? {
         if let r = io.stopReason() { return r }
+        if summary.suggestions == 0, io.nowMs() > noSuggestionLimitMs { return Runner.noSuggestionsReason }
         let (text, chip) = observe()
         checkText(text)
         let current = io.text()

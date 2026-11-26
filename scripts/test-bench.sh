@@ -5,8 +5,11 @@
 #   scripts/test-bench.sh [--brain fake|builtin] [--minutes 5] [--seed N] [--profiles plain,smart]
 #
 # Before you start: quit your own BOB (the Test Bench refuses to run while it runs) and build the dev app
-# (`make app`). During the run, keep your hands off the mouse and keyboard: touching either stops it. It types
-# only into the Test Bench window. Results: bench-results/local/testbench/<time>-seed<N>/.
+# (`make app`). The first run asks for Accessibility for "BOB Test Bench" (System Settings > Privacy & Security
+# > Accessibility); it continues once the switch is on. During the run, keep your hands off the mouse and
+# keyboard: touching either stops it. It types only into the Test Bench window.
+# Results: bench-results/local/testbench/<time>-seed<N>/. Set BOB_SIGN_IDENTITY to sign with your certificate,
+# so the Accessibility switch survives rebuilds (ad hoc signing otherwise).
 #   --brain fake     a local fake brain that continues corpus sentences (default; quick and repeatable)
 #   --brain builtin  the built-in model, as you use BOB (realistic suggestions and timing)
 set -euo pipefail
@@ -39,6 +42,11 @@ fi
 echo "== building the Test Bench"
 (cd native/test-bench && swift build -c release -q)
 bench=native/test-bench/.build/release/bob-test-bench
+bundle="native/test-bench/.build/BOB Test Bench.app"
+mkdir -p "$bundle/Contents/MacOS"
+cp native/test-bench/Info.plist "$bundle/Contents/Info.plist"
+cp "$bench" "$bundle/Contents/MacOS/bob-test-bench"
+codesign --force --sign "${BOB_SIGN_IDENTITY:--}" "$bundle" 2>/dev/null
 "$bench" --preflight --real-lock "$real_lock"
 mkdir -p "$out"
 
@@ -59,6 +67,7 @@ cleanup() {
   if [ -n "$fake_pid" ]; then
     curl -s "http://127.0.0.1:$port/stats" > "$out/fake-brain.json" 2>/dev/null || true
     kill "$fake_pid" 2>/dev/null || true
+    wait "$fake_pid" 2>/dev/null || true
   fi
   sleep 2
   [ -f "$profile/logs/bob.log" ] && cp "$profile/logs/bob.log" "$out/test-bob.log"
@@ -89,5 +98,9 @@ if [ "$brain" = builtin ]; then
 fi
 
 echo "== Test Bench: click its window, then hands off for 3 seconds"
-"$bench" --out "$out" --seed "$seed" --minutes "$minutes" --profiles "$profiles" \
-  --corpus native/test-bench/corpus.txt --real-lock "$real_lock"
+root=$(pwd)
+open -W -n "$bundle" --args --out "$root/$out" --seed "$seed" --minutes "$minutes" --profiles "$profiles" \
+  --corpus "$root/native/test-bench/corpus.txt" --real-lock "$real_lock"
+cat "$out/result.txt" 2>/dev/null || echo "the Test Bench left no result"
+code=$(cat "$out/exit-code" 2>/dev/null || echo 1)
+exit "$code"

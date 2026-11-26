@@ -70,7 +70,7 @@ guard let lockPath = options.realLock else {
     exit(64)
 }
 guard let realLock = takeRealLock(lockPath) else {
-    print("Your BOB is running. Quit it from the menu bar (BOB > Quit), then start the Test Bench again.")
+    say("Your BOB is running. Quit it from the menu bar (BOB > Quit), then start the Test Bench again.")
     exit(3)
 }
 if options.preflight {
@@ -78,10 +78,18 @@ if options.preflight {
     print("preflight ok: your BOB is not running")
     exit(0)
 }
-guard AXIsProcessTrusted() else {
-    print("The Test Bench needs Accessibility to post keys and read BOB's chip. It runs inside your terminal app, "
-        + "so allow that app in System Settings > Privacy & Security > Accessibility and restart it.")
-    exit(4)
+/// Print and keep a copy in `result.txt` (the app is started with `open`, so its output is not on screen).
+func say(_ line: String) {
+    print(line)
+    try? FileManager.default.createDirectory(at: options.out, withIntermediateDirectories: true)
+    let url = options.out.appendingPathComponent("result.txt")
+    if let h = try? FileHandle(forWritingTo: url) {
+        h.seekToEndOfFile()
+        h.write(Data((line + "\n").utf8))
+        try? h.close()
+    } else {
+        try? Data((line + "\n").utf8).write(to: url)
+    }
 }
 
 // MARK: keys
@@ -253,13 +261,39 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
         window.makeFirstResponder(editor)
         configure(.plain)
         NSApp.activate()
+        waitForAccessibility()
+    }
+
+    /// Ask macOS for Accessibility once (the system prompt adds "BOB Test Bench" to the list), then continue
+    /// as soon as it is switched on.
+    func waitForAccessibility() {
+        let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        if AXIsProcessTrustedWithOptions(prompt) { return armed() }
+        let asked = CACurrentMediaTime()
+        status.stringValue = "BOB Test Bench needs Accessibility to type into this window and read BOB's chip. "
+            + "Switch it on in System Settings > Privacy & Security > Accessibility; the run continues by itself."
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] t in
+            if AXIsProcessTrusted() {
+                t.invalidate()
+                self?.armed()
+            } else if CACurrentMediaTime() - asked > 180 {
+                t.invalidate()
+                say("Accessibility was not switched on for BOB Test Bench within 3 minutes. Nothing was typed.")
+                self?.finish(code: 4)
+            }
+        }
+    }
+
+    func armed() {
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
         startMonitor()
         Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] t in
             if self?.tryStart() == true { t.invalidate() }
         }
         Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in
             guard self?.startedAt == nil else { return }
-            print("The run did not start within 2 minutes (the Test Bench window needs focus and quiet). Exiting.")
+            say("The run did not start within 2 minutes (the Test Bench window needs focus and quiet). Nothing was typed.")
             self?.finish(code: 5)
         }
     }
@@ -300,7 +334,7 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
             return Unmanaged.passUnretained(event)
         }, userInfo: me)
         guard let tap else {
-            print("cannot watch the keyboard and mouse (Accessibility); refusing to run")
+            say("Cannot watch the keyboard and mouse (Accessibility), so the run is refused. Nothing was typed.")
             finish(code: 4)
             return
         }
@@ -371,13 +405,14 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
             if let data = try? encoder.encode(s) {
                 try? data.write(to: options.out.appendingPathComponent("summary.json"))
             }
-            print(String(format: "episodes %d, keys %d, suggestions %d, accepts %d (%d as expected), findings %d "
+            say(String(format: "episodes %d, keys %d, suggestions %d, accepts %d (%d as expected), findings %d "
                 + "(%.1f per 1000 keys), chip unreadable %d times. Stopped: %@",
                 s.episodes, s.keys, s.suggestions, s.accepts, s.acceptsOK, runner.findings.count,
                 s.defectsPer1000Keys, chips.unreadable, s.stoppedBecause ?? ""))
-            for (k, n) in s.findings.sorted(by: { $0.key < $1.key }) { print("  \(k): \(n)") }
+            for (k, n) in s.findings.sorted(by: { $0.key < $1.key }) { say("  \(k): \(n)") }
         }
         try? findingsFile?.close()
+        try? Data("\(code)\n".utf8).write(to: options.out.appendingPathComponent("exit-code"))
         close(lockFD)
         exit(code)
     }

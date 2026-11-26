@@ -116,7 +116,7 @@ struct TypistTests {
 
 /// A fake world: an editor plus a BOB that behaves as specified (optionally with one bug), on a virtual clock.
 final class FakeWorld: BenchIO {
-    enum Bug { case none, insertTwice, staleAfterTyping }
+    enum Bug { case none, insertTwice, staleAfterTyping, silent }
     var clock = 0.0
     var editor = ""
     var chipText: String?
@@ -137,7 +137,7 @@ final class FakeWorld: BenchIO {
 
     /// BOB suggests the corpus continuation 150 ms after the last key.
     func tick() {
-        guard chipText == nil, !dismissed, clock - lastKeyMs >= 150, editor.count >= 6 else { return }
+        guard bug != .silent, chipText == nil, !dismissed, clock - lastKeyMs >= 150, editor.count >= 6 else { return }
         let needle = String(editor.suffix(40))
         guard let r = source.range(of: needle) else { return }
         let rest = source[r.upperBound...]
@@ -209,6 +209,14 @@ struct RunnerTests {
         let mismatch = runner.findings.first { $0.kind == .acceptMismatch }
         #expect(mismatch != nil)
         #expect(runner.findings.filter { $0.kind == .textMismatch }.isEmpty, "the accept is reported, not the text after it")
+    }
+
+    @Test func aBOBThatNeverSuggestsStopsTheRun() {
+        let world = FakeWorld(bug: .silent)
+        let runner = Runner(io: world, seed: 5, corpus: corpus)
+        runner.run(episodes: 50, stepsPerEpisode: 500, profiles: [.plain], seed: 5)
+        #expect(runner.summary.stoppedBecause == Runner.noSuggestionsReason)
+        #expect(world.clock < 50_000)
     }
 
     @Test func aStopReasonEndsTheRun() {
