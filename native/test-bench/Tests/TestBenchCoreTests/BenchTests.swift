@@ -19,6 +19,17 @@ struct OracleTests {
         #expect(expectedInsert(claim: "I will ", before: "I will", key: .tab) == nil)
     }
 
+    @Test func typoFixChipsAreRecognizedAndApplied() {
+        #expect(typoChip("alr \u{2192} all")! == ("alr", "all"))
+        #expect(typoChip(" back to") == nil)
+        #expect(applyTypoFix(before: "a fix is alr ", word: "alr", fix: "all") == "a fix is all ")
+        #expect(applyTypoFix(before: "see teh.", word: "teh", fix: "the") == "see the.")
+        #expect(applyTypoFix(before: "teh cat", word: "teh", fix: "the") == nil, "not the last word")
+        var t = ChipTracker()
+        #expect(t.observe(text: "is alr ", chip: "alr \u{2192} all", atMs: 0) == nil)
+        #expect(t.observe(text: "is alr x", chip: "alr \u{2192} all", atMs: 900) == nil, "a typo chip is never stale here")
+    }
+
     @Test func smartQuotesDoNotCountAsDifferences() {
         #expect(normalized("it\u{2019}s \u{201C}ok\u{201D}") == "it's \"ok\"")
     }

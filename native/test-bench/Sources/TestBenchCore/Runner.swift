@@ -225,8 +225,29 @@ public final class Runner {
         return wait(ms: typist.delayMs(after: action))
     }
 
+    private func acceptTypo(_ typo: (word: String, fix: String), before: String, chip: String, racy: Bool) -> String? {
+        if let r = io.post(.accept(.tab)) { return r }
+        summary.keys += 1
+        summary.accepts += 1
+        note("Tab (typo fix)")
+        if let r = wait(ms: 700, until: { normalized(self.io.text()) != normalized(before) }) { return r }
+        if let r = wait(ms: 150) { return r }
+        let after = io.text()
+        if let want = applyTypoFix(before: normalized(before), word: typo.word, fix: typo.fix),
+           normalized(after) != want {
+            report(.acceptMismatch, expected: tail(want), actual: tail(after), chip: chip, racy: racy)
+        } else {
+            summary.acceptsOK += 1
+        }
+        expected = after
+        return nil
+    }
+
     private func accept(_ key: AcceptKey, before: String, chip: String?) -> String? {
         let racy = io.nowMs() - tracker.changedAtMs < 60
+        if key == .tab, let chip, let typo = typoChip(normalized(chip)) {
+            return acceptTypo(typo, before: before, chip: chip, racy: racy)
+        }
         let claim = tracker.claim
         let insert = claim.flatMap { expectedInsert(claim: $0, before: normalized(before), key: key) }
         if let r = io.post(.accept(key)) { return r }

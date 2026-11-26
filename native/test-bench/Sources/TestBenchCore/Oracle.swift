@@ -31,6 +31,23 @@ public func expectedInsert(claim: String, before: String, key: AcceptKey) -> Str
     }
 }
 
+/// A typo-fix chip ("recieve → receive"): the misspelled word and its fix.
+public func typoChip(_ chip: String) -> (word: String, fix: String)? {
+    let parts = chip.components(separatedBy: " \u{2192} ")
+    guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty,
+          !parts[0].contains(" "), !parts[1].contains(" ") else { return nil }
+    return (parts[0], parts[1])
+}
+
+/// What Tab should leave after a typo fix: the last `word` before the caret (followed only by spaces or
+/// punctuation) replaced by `fix`. Nil when the word is not there.
+public func applyTypoFix(before: String, word: String, fix: String) -> String? {
+    guard let r = before.range(of: word, options: .backwards) else { return nil }
+    let trailing = before[r.upperBound...]
+    guard trailing.allSatisfy({ $0.isWhitespace || $0.isPunctuation }) else { return nil }
+    return before.replacingCharacters(in: r, with: fix)
+}
+
 /// Text compared without the editor's own substitutions (smart quotes), so only BOB's changes count.
 public func normalized(_ s: String) -> String {
     var out = s
@@ -71,7 +88,8 @@ public struct ChipTracker: Sendable {
     /// Feed one observation. Returns an issue once per out-of-step stretch.
     public mutating func observe(text rawText: String, chip: String?, atMs now: Double) -> ChipIssue? {
         let text = normalized(rawText)
-        guard let chip = chip.map(normalized), !chip.isEmpty else {
+        // A typo fix is not a continuation: it promises nothing about the next characters.
+        guard let chip = chip.map(normalized), !chip.isEmpty, typoChip(chip) == nil else {
             if shown != nil { changedAtMs = now }
             claim = nil
             shown = nil
