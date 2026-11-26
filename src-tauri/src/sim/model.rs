@@ -20,6 +20,7 @@ use std::time::Duration;
 /// One request the model answered.
 #[derive(Debug, Clone)]
 pub struct Call {
+    pub at: tokio::time::Instant,
     pub prompt: String,
     /// Everything the model would stream for this request (after `stop` and `max_tokens`).
     pub answer: String,
@@ -63,6 +64,12 @@ pub enum Model {
     /// The answer for the longest key that the prompt ends with; nothing when none matches. Fixed timing:
     /// first token after 40 ms, then one every 8 ms.
     Table(Vec<(&'static str, &'static str)>),
+    /// Like `Table`, with the first token after `first_ms` and then one every `gap_ms` (a slow stream).
+    Paced {
+        table: Vec<(&'static str, &'static str)>,
+        first_ms: u64,
+        gap_ms: u64,
+    },
     /// Generated from [`VOCAB`] with [`Quirks`]; seeded per request, so a session replays exactly.
     Random(Quirks),
 }
@@ -145,6 +152,16 @@ impl Model {
                 StdRng::seed_from_u64(seed ^ n.wrapping_add(1).wrapping_mul(0x9E37_79B9_7F4A_7C15));
             let (raw, first_ms, gap_ms) = match &self {
                 Model::Table(t) => (table_answer(t, &req.prompt), 40, 8),
+                Model::Paced {
+                    table,
+                    first_ms,
+                    gap_ms,
+                } => (table_answer(table, &req.prompt), *first_ms, *gap_ms),
+                Model::Random(_) if gap_subject(&req.prompt).is_some() => (
+                    generate_gap(&mut rng),
+                    rng.random_range(30..=70),
+                    rng.random_range(5..=12),
+                ),
                 Model::Random(q) => (
                     generate(&mut rng, &req.prompt, q),
                     rng.random_range(30..=70),
@@ -167,6 +184,7 @@ impl Model {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 c.push(Call {
+                    at: tokio::time::Instant::now(),
                     prompt: req.prompt.clone(),
                     answer,
                     tokens: feed.len(),
@@ -234,10 +252,25 @@ fn stream(feed: VecDeque<(Duration, String)>, guard: Guard) -> TokenStream {
     ))
 }
 
+/// For the gap prompt (`ghost::prompt::gap`, a cursor inside a sentence): the text before the gap.
+pub fn gap_subject(prompt: &str) -> Option<&str> {
+    let line = prompt.rsplit("\nText: ").next()?;
+    prompt.ends_with("Missing: [").then_some(())?;
+    line.split_once("[...]").map(|(before, _)| before)
+}
+
+/// One or two words and the closing bracket, the way the default model answers the gap prompt.
+fn generate_gap(rng: &mut StdRng) -> String {
+    let n = rng.random_range(1..=2);
+    let words: Vec<&str> = (0..n).map(|_| pick(rng, VOCAB)).collect();
+    format!("{}]", words.join(" "))
+}
+
 fn table_answer(table: &[(&str, &str)], prompt: &str) -> String {
+    let subject = gap_subject(prompt).unwrap_or(prompt);
     table
         .iter()
-        .filter(|(key, _)| prompt.ends_with(key))
+        .filter(|(key, _)| subject.ends_with(key))
         .max_by_key(|(key, _)| key.len())
         .map(|(_, a)| (*a).to_string())
         .unwrap_or_default()
@@ -367,6 +400,15 @@ mod tests {
         let stop = vec!["\n".to_string()];
         assert_eq!(server_cut(" you soon.\nQuestion", &stop), " you soon.");
         assert_eq!(server_cut(" you soon.", &stop), " you soon.");
+    }
+
+    #[test]
+    fn gap_prompts_are_answered_for_the_text_before_the_gap() {
+        let prompt = crate::ghost::prompt::gap("Send me the ", "report today.");
+        assert_eq!(gap_subject(&prompt), Some("Send me the "));
+        assert_eq!(gap_subject("Send me the "), None);
+        let t = [("me the ", "latest]")];
+        assert_eq!(table_answer(&t, &prompt), "latest]");
     }
 
     #[test]

@@ -17,6 +17,8 @@ pub mod check;
 pub mod model;
 pub mod world;
 
+mod random;
+mod scenarios;
 mod tests;
 
 use crate::brain::client::scripted;
@@ -44,18 +46,28 @@ pub struct Config {
     pub profile: Profile,
     pub model: Model,
     /// Text already in the field when the session starts.
-    pub start_text: &'static str,
+    pub start_text: String,
+    /// Byte offset of the caret in `start_text` (default: the end).
+    pub start_caret: Option<usize>,
     /// Longest session, in virtual time.
     pub max: Duration,
 }
 
 impl Config {
+    /// Start with `text` in the field and the caret at byte `caret` (`None`: at the end).
+    pub fn with_text(mut self, text: impl Into<String>, caret: Option<usize>) -> Self {
+        self.start_text = text.into();
+        self.start_caret = caret;
+        self
+    }
+
     pub fn new(seed: u64, profile: Profile, model: Model) -> Self {
         Self {
             seed,
             profile,
             model,
-            start_text: "",
+            start_text: String::new(),
+            start_caret: None,
             max: Duration::from_secs(600),
         }
     }
@@ -73,6 +85,8 @@ pub struct Report {
     pub text: String,
     pub requests: usize,
     pub cancelled: usize,
+    /// Every model request: milliseconds since the start, and the prompt.
+    pub prompts: Vec<(u64, String)>,
     /// Tokens the model would have generated, and tokens actually streamed before cancellations.
     pub tokens_offered: usize,
     pub tokens_streamed: usize,
@@ -192,10 +206,18 @@ pub async fn run(config: Config, actor: &mut dyn Actor) -> Report {
         Arc::new(ChannelSink(tx)),
         EngineConfig::default(),
         None,
-        context,
+        context.clone(),
     );
     let rng = rand::rngs::StdRng::seed_from_u64(config.seed);
-    let mut world = World::new(config.profile, rng, ghost, calls.clone(), config.start_text);
+    let mut world = World::new(
+        config.profile,
+        rng,
+        ghost,
+        context,
+        calls.clone(),
+        &config.start_text,
+        config.start_caret,
+    );
     let start = Instant::now();
     let deadline = start + config.max;
 
@@ -226,6 +248,15 @@ pub async fn run(config: Config, actor: &mut dyn Actor) -> Report {
         text: world.text().to_string(),
         requests: calls.len(),
         cancelled: calls.iter().filter(|c| c.cancelled).count(),
+        prompts: calls
+            .iter()
+            .map(|c| {
+                (
+                    c.at.duration_since(start).as_millis() as u64,
+                    c.prompt.clone(),
+                )
+            })
+            .collect(),
         tokens_offered: calls.iter().map(|c| c.tokens).sum(),
         tokens_streamed: calls.iter().map(|c| c.delivered).sum(),
         virtual_ms: Instant::now().duration_since(start).as_millis() as u64,

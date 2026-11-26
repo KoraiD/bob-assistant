@@ -1,26 +1,31 @@
 //! Everything around the engine, as one discrete-event world on the virtual clock: the text field of an app,
-//! the Swift helper (Accessibility reads, key tap, chip panel, text insertion) and what the user sees.
+//! the Swift helper (Accessibility reads, key tap, typo check, chip panel, text insertion) and what the user
+//! sees.
 //!
 //! Timing follows the helper's code: a change in the field is coalesced for 4 ms, read, sent to the engine,
 //! and re-read after 40, 120 and 300 ms (`FocusObserver.settleDelaysMs`); while a chip is visible the field is
-//! also re-read every 250 ms (`setWatching`). Tab, Shift+Tab and Esc are swallowed only while the engine
-//! captures keys (`KeyDecision`), otherwise they reach the app. Apps differ in how late Accessibility shows a
-//! change and whether the caret moves before the text ([`Profile`]).
+//! also re-read every 250 ms (`setWatching`). Each read sends the text before the caret (at most 2000
+//! characters, `TextWindow`), then a typo event when the last finished word is misspelled, then the text after
+//! the caret when it changed (`HelperRuntime.forward`). Tab, Shift+Tab and Esc are swallowed only while the
+//! engine captures keys (`KeyDecision`), otherwise they reach the app. Apps differ in how late Accessibility
+//! shows a change, whether the caret moves before the text, and what they rewrite ([`Profile`]).
 
 use super::actor::{Action, Actor, View};
 use super::check::{Defect, Kind};
 use super::model::Calls;
+use crate::context::ContextHub;
 use crate::ghost::chip;
-use crate::ghost::engine::GhostHandle;
+use crate::ghost::engine::{normalize_typed, GhostHandle};
 use crate::protocol::{CoreCommand, Key, NativeEvent, Rect};
 use rand::rngs::StdRng;
 use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, VecDeque};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
 
-/// How an app reports its text field through Accessibility.
+/// How an app reports its text field through Accessibility, and what it rewrites while you type.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Profile {
     pub name: &'static str,
@@ -31,6 +36,8 @@ pub struct Profile {
     pub caret_first: bool,
     /// Spaces near the caret are reported as no-break spaces (contenteditable).
     pub nbsp: bool,
+    /// Straight apostrophes and quotes become curly as they are typed (macOS smart quotes).
+    pub smart_quotes: bool,
 }
 
 pub const TEXTEDIT: Profile = Profile {
@@ -39,6 +46,14 @@ pub const TEXTEDIT: Profile = Profile {
     ax_lag_ms: (1, 4),
     caret_first: false,
     nbsp: false,
+    smart_quotes: false,
+};
+
+/// TextEdit with Edit > Substitutions > Smart Quotes on (the macOS default for rich text).
+pub const TEXTEDIT_SMART: Profile = Profile {
+    name: "TextEdit smart quotes",
+    smart_quotes: true,
+    ..TEXTEDIT
 };
 
 /// Electron editors such as the Kiro editor and VS Code: text shows up late, the caret first.
@@ -48,6 +63,7 @@ pub const ELECTRON: Profile = Profile {
     ax_lag_ms: (30, 220),
     caret_first: true,
     nbsp: false,
+    smart_quotes: false,
 };
 
 /// Chrome contenteditable (Gmail, Slack web): like Electron, plus no-break spaces.
@@ -57,7 +73,18 @@ pub const CHROME: Profile = Profile {
     ax_lag_ms: (20, 160),
     caret_first: true,
     nbsp: true,
+    smart_quotes: false,
 };
+
+pub const PROFILES: [Profile; 4] = [TEXTEDIT, TEXTEDIT_SMART, ELECTRON, CHROME];
+
+/// Misspellings the fake spell checker knows (the real helper asks `NSSpellChecker`).
+pub const TYPOS: &[(&str, &str)] = &[
+    ("recieve", "receive"),
+    ("teh", "the"),
+    ("definately", "definitely"),
+    ("adress", "address"),
+];
 
 /// How long a chip may keep showing text that no longer continues the field before it counts as stale.
 pub const STALE_LIMIT: Duration = Duration::from_millis(700);
@@ -65,12 +92,15 @@ pub const STALE_LIMIT: Duration = Duration::from_millis(700);
 const SETTLE_MS: [u64; 3] = [40, 120, 300];
 const WATCH_MS: u64 = 250;
 const COALESCE_MS: u64 = 4;
+/// `TextWindow.defaultMaxChars`.
+pub const WINDOW_CHARS: usize = 2000;
 /// Unix socket hop between helper and core.
 const HOP: Duration = Duration::from_micros(200);
 /// From a key event or inserted text to the field changing.
 const INPUT: Duration = Duration::from_millis(1);
 /// Width of one character in the fake field, for the caret rect.
 const CHAR_PX: f64 = 7.0;
+const OTHER_APP: &str = "com.apple.Notes";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
@@ -85,6 +115,8 @@ pub enum Origin {
 enum Edit {
     Insert(String),
     Backspace,
+    /// Move the caret by this many characters (arrow keys).
+    Caret(i32),
 }
 
 #[derive(Debug)]
@@ -107,11 +139,24 @@ enum Ev {
     WatchTick {
         generation: u64,
     },
-    ToEngine(NativeEvent),
+    /// An event for the core. `before` is the whole text before the caret it reports (the event may carry
+    /// only the last `WINDOW_CHARS`).
+    ToEngine {
+        ev: NativeEvent,
+        before: Option<String>,
+    },
     /// A command from the engine reaching the helper; for `ShowChip`, the continuation the chip claims.
     HelperCmd {
         cmd: CoreCommand,
         claim: Option<String>,
+    },
+    /// Typo fix: the helper checked the reported text; the deletions start now.
+    FixStart {
+        expected: String,
+    },
+    /// The user switches to another app (`true`) or back.
+    Focus {
+        away: bool,
     },
     End,
 }
@@ -144,9 +189,9 @@ impl Ord for Item {
 #[derive(Debug, Clone)]
 struct Screen {
     text: String,
-    /// The text before the caret that the engine had when it sent the chip, plus the chip: the document the
-    /// chip promises.
-    claim: String,
+    /// For a continuation: the text before the caret that the engine had when it sent the chip, plus the
+    /// chip (the document the chip promises). `None` for a typo fix ("teh → the").
+    claim: Option<String>,
 }
 
 /// A swallowed Tab or Shift+Tab, waiting for the text it asked for.
@@ -171,7 +216,9 @@ pub struct Stats {
     pub accepts: u32,
     pub inserts: u32,
     pub chips_painted: u32,
+    pub chips_hidden: u32,
     pub texts_sent: u32,
+    pub fixes: u32,
 }
 
 pub struct World {
@@ -187,9 +234,12 @@ pub struct World {
     rep_caret: usize,
     last_text_report: Instant,
     // The helper.
+    away: bool,
     capturing: bool,
     read_pending: bool,
     last_delivered: Option<(String, Rect)>,
+    last_typo_check: String,
+    last_after: Option<String>,
     settle_generation: u64,
     watch_generation: u64,
     watching: bool,
@@ -201,6 +251,7 @@ pub struct World {
     engine_capture: bool,
     capture_mismatch: bool,
     ghost: GhostHandle,
+    context: Arc<ContextHub>,
     calls: Calls,
     stale_since: Option<Instant>,
     stale_reported: bool,
@@ -215,7 +266,7 @@ fn ms(n: u64) -> Duration {
 }
 
 /// The tail of `s` for the timeline (keeps lines short).
-fn tail(s: &str, n: usize) -> String {
+pub fn tail(s: &str, n: usize) -> String {
     let count = s.chars().count();
     let t: String = s.chars().skip(count.saturating_sub(n)).collect();
     if count > n {
@@ -225,15 +276,64 @@ fn tail(s: &str, n: usize) -> String {
     }
 }
 
+/// The last finished word when the fake spell checker knows it as a misspelling: `(word, fix, trailing)`.
+/// Like `TypoFinder.lastWord`: the word is followed by at most three spaces or punctuation marks.
+fn find_typo(before: &str) -> Option<(String, String, String)> {
+    let trailing: String = before
+        .chars()
+        .rev()
+        .take_while(|c| " .,;:!?".contains(*c))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if trailing.is_empty() || trailing.chars().count() > 3 {
+        return None;
+    }
+    let body = &before[..before.len() - trailing.len()];
+    let word: String = body
+        .chars()
+        .rev()
+        .take_while(|c| c.is_alphabetic())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let fix = TYPOS.iter().find(|(w, _)| *w == word)?.1;
+    Some((word, fix.to_string(), trailing))
+}
+
+/// macOS smart quotes, as far as the fake field needs them: an apostrophe after a letter becomes ’.
+fn smart_quote(before: &str, typed: &str) -> String {
+    let mut prev = before.chars().last();
+    typed
+        .chars()
+        .map(|c| {
+            let out = if c == '\'' && prev.is_some_and(char::is_alphanumeric) {
+                '’'
+            } else {
+                c
+            };
+            prev = Some(c);
+            out
+        })
+        .collect()
+}
+
 impl World {
     pub fn new(
         profile: Profile,
         rng: StdRng,
         ghost: GhostHandle,
+        context: Arc<ContextHub>,
         calls: Calls,
         start_text: &str,
+        start_caret: Option<usize>,
     ) -> Self {
         let now = Instant::now();
+        let caret = start_caret
+            .unwrap_or(start_text.len())
+            .min(start_text.len());
         let mut w = Self {
             start: now,
             profile,
@@ -241,13 +341,16 @@ impl World {
             queue: BinaryHeap::new(),
             seq: 0,
             doc: start_text.to_string(),
-            caret: start_text.len(),
+            caret,
             rep_text: start_text.to_string(),
-            rep_caret: start_text.chars().count(),
+            rep_caret: start_text[..caret].chars().count(),
             last_text_report: now,
+            away: false,
             capturing: false,
             read_pending: false,
             last_delivered: None,
+            last_typo_check: String::new(),
+            last_after: None,
             settle_generation: 0,
             watch_generation: 0,
             watching: false,
@@ -258,6 +361,7 @@ impl World {
             engine_capture: false,
             capture_mismatch: false,
             ghost,
+            context,
             calls,
             stale_since: None,
             stale_reported: false,
@@ -266,13 +370,7 @@ impl World {
             defects: vec![],
             stats: Stats::default(),
         };
-        w.note("app", format!("{} field focused", profile.name));
-        w.ghost.native(NativeEvent::Focus {
-            app_bundle_id: profile.bundle_id.into(),
-            app_name: profile.name.into(),
-            secure: false,
-            editable: true,
-        });
+        w.focus_event(profile.bundle_id, profile.name);
         w.push(ms(10), Ev::AxNotify);
         w.push(ms(20), Ev::UserTurn);
         w
@@ -285,6 +383,10 @@ impl World {
     /// The field's text before the caret (what the user sees).
     pub fn before(&self) -> String {
         self.doc[..self.caret].to_string()
+    }
+
+    fn after(&self) -> &str {
+        &self.doc[self.caret..]
     }
 
     pub fn text(&self) -> &str {
@@ -386,15 +488,17 @@ impl World {
                 self.push(Duration::ZERO, Ev::AxNotify);
             }
             Ev::AxNotify => {
-                if !self.read_pending {
+                if !self.read_pending && !self.away {
                     self.read_pending = true;
                     self.push(ms(COALESCE_MS), Ev::HelperRead { settle: None });
                 }
             }
             Ev::HelperRead { settle: None } => {
                 self.read_pending = false;
-                let snap = self.snapshot();
-                self.deliver(snap, "read");
+                if self.away {
+                    return;
+                }
+                self.deliver("read");
                 self.settle_generation += 1;
                 let g = self.settle_generation;
                 for d in SETTLE_MS {
@@ -402,48 +506,79 @@ impl World {
                 }
             }
             Ev::HelperRead { settle: Some(g) } => {
-                if g == self.settle_generation && !self.read_pending {
-                    let snap = self.snapshot();
-                    if self.last_delivered.as_ref() != Some(&snap) {
-                        self.deliver(snap, "re-read");
-                    }
+                if g == self.settle_generation && !self.read_pending && !self.away {
+                    self.deliver_if_changed("re-read");
                 }
             }
             Ev::WatchTick { generation } => {
                 if generation == self.watch_generation && self.watching {
-                    if !self.read_pending {
-                        let snap = self.snapshot();
-                        if self.last_delivered.as_ref() != Some(&snap) {
-                            self.deliver(snap, "watch");
-                        }
+                    if !self.read_pending && !self.away {
+                        self.deliver_if_changed("watch");
                     }
                     self.push(ms(WATCH_MS), Ev::WatchTick { generation });
                 }
             }
-            Ev::ToEngine(ev) => {
-                if let NativeEvent::TextState { before_caret, .. } = &ev {
-                    self.engine_before = crate::ghost::engine::normalize_typed(before_caret);
+            Ev::ToEngine { ev, before } => {
+                if let Some(b) = before {
+                    self.engine_before = normalize_typed(&b);
                 }
-                self.ghost.native(ev);
+                match &ev {
+                    NativeEvent::ContextState { .. } => self.context.observe(&ev),
+                    NativeEvent::Focus { .. } => {
+                        self.context.observe(&ev);
+                        self.ghost.native(ev);
+                    }
+                    _ => self.ghost.native(ev),
+                }
             }
             Ev::HelperCmd { cmd, claim } => self.helper_cmd(cmd, claim),
+            Ev::FixStart { expected } => self.fix_start(&expected),
+            Ev::Focus { away } => {
+                self.away = away;
+                if away {
+                    self.note("user", "switches to another app".into());
+                    self.focus_event(OTHER_APP, "Notes");
+                } else {
+                    self.note("user", "comes back".into());
+                    self.last_delivered = None;
+                    self.last_after = None;
+                    self.focus_event(self.profile.bundle_id, self.profile.name);
+                    self.push(Duration::ZERO, Ev::AxNotify);
+                }
+            }
             Ev::End => self.ended = true,
         }
+    }
+
+    fn focus_event(&mut self, bundle_id: &str, name: &str) {
+        self.push(
+            HOP,
+            Ev::ToEngine {
+                ev: NativeEvent::Focus {
+                    app_bundle_id: bundle_id.into(),
+                    app_name: name.into(),
+                    secure: false,
+                    editable: true,
+                },
+                before: None,
+            },
+        );
     }
 
     // ---- the user ----
 
     fn user_turn(&mut self, actor: &mut dyn Actor) {
         let before = self.before();
-        let (chip, claim) = match &self.screen {
-            Some(s) => (Some(s.text.clone()), Some(s.claim.clone())),
-            None => (None, None),
+        let (chip, claim, fix) = match &self.screen {
+            Some(s) => (Some(s.text.clone()), s.claim.clone(), s.claim.is_none()),
+            None => (None, None, false),
         };
         let view = View {
             at_ms: self.since_start_us() / 1000,
             before: &before,
             chip: chip.as_deref(),
             claim: claim.as_deref(),
+            fix_chip: fix,
         };
         match actor.next(&view) {
             None => {
@@ -451,13 +586,14 @@ impl World {
                 self.push(ms(1500), Ev::End);
             }
             Some((action, wait)) => {
-                self.user_action(action);
+                let wait = self.user_action(action).unwrap_or(wait);
                 self.push(wait, Ev::UserTurn);
             }
         }
     }
 
-    fn user_action(&mut self, action: Action) {
+    /// Returns a different wait when the action takes time itself (switching apps).
+    fn user_action(&mut self, action: Action) -> Option<Duration> {
         match action {
             Action::Idle => {}
             Action::Type(c) => {
@@ -482,17 +618,43 @@ impl World {
                     },
                 );
             }
+            Action::Caret(delta) => {
+                self.stats.keys += 1;
+                self.note("user", format!("arrow {delta:+}"));
+                self.push(
+                    INPUT,
+                    Ev::AppEdit {
+                        edit: Edit::Caret(delta),
+                        by: Origin::User,
+                    },
+                );
+            }
+            Action::SwitchApp(away) => {
+                self.push(Duration::ZERO, Ev::Focus { away: true });
+                self.push(away, Ev::Focus { away: false });
+                return Some(away + ms(300));
+            }
             Action::Press(key) => {
                 self.stats.keys += 1;
                 if self.capturing {
                     self.note("user", format!("{key:?} (swallowed)"));
-                    if key != Key::Escape {
+                    let continuation = self.screen.as_ref().and_then(|s| s.claim.clone());
+                    if key != Key::Escape && continuation.is_some() {
                         self.stats.accepts += 1;
-                        let claim = self.screen.as_ref().map(|s| s.claim.clone());
                         let before = self.before();
-                        self.accepts.push_back(Accept { key, claim, before });
+                        self.accepts.push_back(Accept {
+                            key,
+                            claim: continuation,
+                            before,
+                        });
                     }
-                    self.push(HOP, Ev::ToEngine(NativeEvent::Key { key }));
+                    self.push(
+                        HOP,
+                        Ev::ToEngine {
+                            ev: NativeEvent::Key { key },
+                            before: None,
+                        },
+                    );
                 } else {
                     self.note("user", format!("{key:?} (reaches the app)"));
                     if key == Key::Tab {
@@ -513,6 +675,7 @@ impl World {
                 }
             }
         }
+        None
     }
 
     // ---- the app ----
@@ -521,18 +684,49 @@ impl World {
         let before = self.before();
         match &edit {
             Edit::Insert(s) => {
-                self.doc.insert_str(self.caret, s);
-                self.caret += s.len();
+                let landed = if self.profile.smart_quotes {
+                    smart_quote(&before, s)
+                } else {
+                    s.clone()
+                };
                 if by != Origin::User {
                     self.note("app", format!("BOB inserted {s:?}"));
-                    self.check_insert(&before, s, by);
+                    let after = self.after().to_string();
+                    self.check_insert(&before, &after, s, by);
                 }
+                self.doc.insert_str(self.caret, &landed);
+                self.caret += landed.len();
             }
             Edit::Backspace => {
                 if let Some((i, _)) = self.doc[..self.caret].char_indices().last() {
                     self.doc.replace_range(i..self.caret, "");
                     self.caret = i;
                 }
+            }
+            Edit::Caret(delta) => {
+                for _ in 0..delta.unsigned_abs() {
+                    let next = if *delta < 0 {
+                        self.doc[..self.caret].char_indices().last().map(|(i, _)| i)
+                    } else {
+                        self.doc[self.caret..]
+                            .chars()
+                            .next()
+                            .map(|c| self.caret + c.len_utf8())
+                    };
+                    if let Some(i) = next {
+                        self.caret = i;
+                    }
+                }
+                // Selection changes are reported right away; the text is unchanged.
+                let caret = self.doc[..self.caret].chars().count();
+                self.push(
+                    ms(1),
+                    Ev::Report {
+                        text: None,
+                        caret: Some(caret),
+                    },
+                );
+                return;
             }
         }
         let lag = self
@@ -561,9 +755,16 @@ impl World {
 
     // ---- the helper ----
 
-    /// What Accessibility shows now: text before the reported caret (clamped, like `TextWindow`) and the caret.
-    fn snapshot(&self) -> (String, Rect) {
+    /// What Accessibility shows now: the whole text before the reported caret (clamped, like `TextWindow`),
+    /// the text after it, and the caret rect.
+    fn snapshot(&self) -> (String, String, Rect) {
         let mut before: String = self.rep_text.chars().take(self.rep_caret).collect();
+        let after: String = self
+            .rep_text
+            .chars()
+            .skip(self.rep_caret)
+            .take(400)
+            .collect();
         if self.profile.nbsp && before.ends_with(' ') {
             before.pop();
             before.push('\u{a0}');
@@ -574,26 +775,74 @@ impl World {
             width: 1.0,
             height: 18.0,
         };
-        (before, caret)
+        (before, after, caret)
     }
 
-    fn deliver(&mut self, snap: (String, Rect), how: &str) {
+    fn deliver_if_changed(&mut self, how: &str) {
+        let (before, _, caret) = self.snapshot();
+        if self.last_delivered.as_ref() != Some(&(before, caret)) {
+            self.deliver(how);
+        }
+    }
+
+    /// `HelperRuntime.forward`: text state, then a typo event, then the text after the caret if it changed.
+    fn deliver(&mut self, how: &str) {
+        let (before, after, caret) = self.snapshot();
         self.stats.texts_sent += 1;
         self.note(
             "helper",
-            format!("{how}: text {:?}, caret x {}", tail(&snap.0, 30), snap.1.x),
+            format!("{how}: text {:?}, caret x {}", tail(&before, 30), caret.x),
         );
-        self.last_delivered = Some(snap.clone());
+        self.last_delivered = Some((before.clone(), caret));
+        let n = before.chars().count();
+        let window: String = before
+            .chars()
+            .skip(n.saturating_sub(WINDOW_CHARS))
+            .collect();
         self.push(
             HOP,
-            Ev::ToEngine(NativeEvent::TextState {
-                app_bundle_id: self.profile.bundle_id.into(),
-                secure: false,
-                before_caret: snap.0,
-                selection_len: 0,
-                caret: Some(snap.1),
-            }),
+            Ev::ToEngine {
+                ev: NativeEvent::TextState {
+                    app_bundle_id: self.profile.bundle_id.into(),
+                    secure: false,
+                    before_caret: window.clone(),
+                    selection_len: 0,
+                    caret: Some(caret),
+                },
+                before: Some(before),
+            },
         );
+        let normalized = normalize_typed(&window);
+        if normalized != self.last_typo_check {
+            if let Some((word, fix, trailing)) = find_typo(&normalized) {
+                self.push(
+                    HOP,
+                    Ev::ToEngine {
+                        ev: NativeEvent::Typo {
+                            word,
+                            fix,
+                            trailing,
+                        },
+                        before: None,
+                    },
+                );
+            }
+            self.last_typo_check = normalized;
+        }
+        if self.last_after.as_deref() != Some(after.as_str()) {
+            self.last_after = Some(after.clone());
+            self.push(
+                HOP,
+                Ev::ToEngine {
+                    ev: NativeEvent::ContextState {
+                        app_bundle_id: self.profile.bundle_id.into(),
+                        window_title: None,
+                        after_caret: after,
+                    },
+                    before: None,
+                },
+            );
+        }
     }
 
     fn helper_cmd(&mut self, cmd: CoreCommand, claim: Option<String>) {
@@ -604,10 +853,12 @@ impl World {
                     self.defect(Kind::EmptyChip, format!("{text:?}"));
                 }
                 self.note("chip", format!("shows {text:?}"));
-                let claim = claim.unwrap_or_else(|| format!("{}{text}", self.before()));
+                // A typo fix chip ("teh → the") promises a replacement, not a continuation.
+                let claim = if text.contains(" → ") { None } else { claim };
                 self.screen = Some(Screen { text, claim });
             }
             CoreCommand::HideChip => {
+                self.stats.chips_hidden += 1;
                 self.note("chip", "hidden".into());
                 self.screen = None;
             }
@@ -633,9 +884,17 @@ impl World {
                 );
             }
             CoreCommand::ReplaceBeforeCaret { expected, text } => {
-                // `HelperRuntime`: re-read the field; replace only if the word is still there.
-                let (before, _) = self.snapshot();
-                if crate::ghost::engine::normalize_typed(&before).ends_with(&expected) {
+                // `HelperRuntime`: re-read the field; replace only if the word is still there (in what
+                // Accessibility shows, which can lag behind the field).
+                let (before, _, _) = self.snapshot();
+                if normalize_typed(&before).ends_with(&expected) {
+                    self.stats.fixes += 1;
+                    self.push(
+                        Duration::ZERO,
+                        Ev::FixStart {
+                            expected: expected.clone(),
+                        },
+                    );
                     for _ in 0..expected.chars().count() {
                         self.push(
                             INPUT,
@@ -660,8 +919,23 @@ impl World {
 
     // ---- checks ----
 
-    /// BOB's insertion `s` landed after `before`.
-    fn check_insert(&mut self, before: &str, s: &str, by: Origin) {
+    /// The deletions of a typo fix start now: the field itself must still end with the misspelled word.
+    fn fix_start(&mut self, expected: &str) {
+        let before = self.before();
+        if !before.ends_with(expected) {
+            self.defect(
+                Kind::FixCorruptedText,
+                format!(
+                    "deleting {} characters for {expected:?}, but the field ends with {:?}",
+                    expected.chars().count(),
+                    tail(&before, 20)
+                ),
+            );
+        }
+    }
+
+    /// BOB's insertion `s` lands between `before` and `after`.
+    fn check_insert(&mut self, before: &str, after: &str, s: &str, by: Origin) {
         self.stats.inserts += 1;
         if by == Origin::Bob {
             match self.accepts.pop_front() {
@@ -691,9 +965,19 @@ impl World {
                 },
             }
         }
-        let joint: String = before.chars().last().into_iter().chain(s.chars()).collect();
+        let next = after.chars().next();
+        let joint: String = before
+            .chars()
+            .last()
+            .into_iter()
+            .chain(s.chars())
+            .chain(next)
+            .collect();
         if joint.contains("  ") {
-            self.defect(Kind::DoubleSpace, format!("{:?} + {s:?}", tail(before, 20)));
+            self.defect(
+                Kind::DoubleSpace,
+                format!("{:?} + {s:?} + {:?}", tail(before, 20), next),
+            );
         }
         if [" .", " ,", " !", " ?", " ;", " :"]
             .iter()
@@ -702,6 +986,15 @@ impl World {
             self.defect(
                 Kind::SpaceBeforePunctuation,
                 format!("{:?} + {s:?}", tail(before, 20)),
+            );
+        }
+        if s.ends_with(char::is_alphanumeric) && next.is_some_and(char::is_alphanumeric) {
+            self.defect(
+                Kind::GluedWord,
+                format!(
+                    "{s:?} runs into {:?}",
+                    tail(&after.chars().take(12).collect::<String>(), 12)
+                ),
             );
         }
         if by == Origin::Bob {
@@ -714,16 +1007,24 @@ impl World {
         if !s.ends_with(char::is_alphanumeric) {
             return;
         }
-        let after = format!("{before}{s}");
+        let after = normalize_typed(&format!("{before}{s}"));
         let calls = self
             .calls
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
+        // The model's path: its prompt (the text, or its last window, when asked) plus the polished answer.
+        // Find where that prompt sits in the text now; if the path continues past the insertion with a
+        // letter, the insertion cut a word short.
         let next = calls.iter().rev().find_map(|c| {
+            if c.prompt.is_empty() {
+                return None;
+            }
             let polished = chip::polish(&c.answer, &c.prompt)?;
             let path = format!("{}{polished}", c.prompt);
-            path.strip_prefix(after.as_str())
+            after
+                .match_indices(c.prompt.as_str())
+                .find_map(|(i, _)| path.strip_prefix(&after[i..]))
                 .and_then(|rest| rest.chars().next())
         });
         if next.is_some_and(char::is_alphanumeric) {
@@ -734,12 +1035,15 @@ impl World {
         }
     }
 
+    /// A continuation chip must show what its promise says comes next from the field now; a typo fix chip is
+    /// not checked here. Short mismatches are normal (the app or the engine catching up); longer ones are
+    /// what the user sees as a wrong suggestion.
     fn check_stale(&mut self) {
         let before = self.before();
-        let valid = self
-            .screen
-            .as_ref()
-            .is_none_or(|s| s.claim.starts_with(&before) && s.claim.len() > before.len());
+        let valid = self.screen.as_ref().is_none_or(|s| match &s.claim {
+            Some(claim) => claim.strip_prefix(before.as_str()) == Some(s.text.as_str()),
+            None => true,
+        });
         if valid {
             self.stale_since = None;
             self.stale_reported = false;
@@ -756,7 +1060,7 @@ impl World {
             self.defect(
                 Kind::StaleChip,
                 format!(
-                    "{chip:?} still shown {} ms after it stopped continuing {:?}",
+                    "{chip:?} shown for {} ms although {:?} needs a different continuation",
                     since.elapsed().as_millis(),
                     tail(&before, 30)
                 ),
@@ -784,5 +1088,31 @@ pub fn expected_insert(claim: &str, before: &str, key: Key) -> Option<String> {
         }
         Key::ShiftTab => Some(rest.to_string()),
         Key::Escape => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_fake_spell_checker_finds_finished_misspellings() {
+        assert_eq!(
+            find_typo("We will recieve "),
+            Some(("recieve".into(), "receive".into(), " ".into()))
+        );
+        assert_eq!(
+            find_typo("see teh."),
+            Some(("teh".into(), "the".into(), ".".into()))
+        );
+        assert_eq!(find_typo("We will recieve"), None, "not finished yet");
+        assert_eq!(find_typo("We will receive "), None);
+    }
+
+    #[test]
+    fn smart_quotes_curl_apostrophes_after_letters() {
+        assert_eq!(smart_quote("I", " don't"), " don’t");
+        assert_eq!(smart_quote("I don", "'t"), "’t");
+        assert_eq!(smart_quote("", "'quoted'"), "'quoted’");
     }
 }

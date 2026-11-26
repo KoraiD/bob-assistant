@@ -17,6 +17,10 @@ pub enum Kind {
     Fragment,
     /// A chip kept showing text that no longer continued the field for longer than `STALE_LIMIT`.
     StaleChip,
+    /// BOB's insertion ends in a letter right before a letter of the following text ("latestreport").
+    GluedWord,
+    /// A typo fix deleted characters although the field no longer ended with the misspelled word.
+    FixCorruptedText,
     /// A chip with no visible text.
     EmptyChip,
     /// Tab reached the app (a tab character) while a chip was on screen.

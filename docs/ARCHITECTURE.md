@@ -88,7 +88,7 @@ flowchart LR
 | Typo fixes (macOS spell checker) and keyboard-layout lookup | `TypoFinder.swift`, `KeyLayout.swift` | done; Swift tests |
 | Gap prompt for suggestions inside a sentence | `ghost/prompt.rs` (`gap`), `ghost/chip.rs` (`gap_chip`) | done; unit and engine tests |
 | Release build (bundled model server, signing, DMG) | `scripts/build-release.sh` | done, verified (RELEASE.md) |
-| Ghost Text simulator (test only): the real engine against a fake app, helper, model and user on a virtual clock; app timing profiles for TextEdit, Electron and Chrome; seeded sessions replay exactly | `src-tauri/src/sim/` (`cargo test sim::`) | core done: 8 tests; defect checks for wrong or duplicate inserts, double spaces, word fragments, stale chips, leaked Tab, chip without key capture |
+| Ghost Text simulator (test only): the real engine against a fake app, helper, model and user on a virtual clock; app profiles for TextEdit (plain and smart quotes), Electron and Chrome; seeded sessions replay exactly | `src-tauri/src/sim/` (`cargo test sim::`; soak: `cargo test sim::random::soak -- --ignored --nocapture`) | 12 regression scenarios for confirmed Ghost Text bugs (ignored until fixed); a random human-speed typist (48 proptest sessions per CI run, shrinking); checks for wrong, duplicate or glued inserts, double spaces, word fragments, stale chips, damaged typo fixes, leaked Tab |
 | End-to-end check in TextEdit | `scripts/e2e.swift` (`make e2e`) | 14 of 14 pass (Ghost Text, typo fix, gap, window switch, Fix grammar, undo, Explain) |
 | Quiet-apps and phrases editors, interactive ghost | `src/components/{GhostLists,GhostMark}.tsx` | done |
 

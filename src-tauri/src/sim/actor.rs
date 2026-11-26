@@ -1,6 +1,10 @@
 //! The user in a simulated session: something that looks at the screen and decides the next key.
 
+use super::model::VOCAB;
+use super::world::TYPOS;
 use crate::protocol::Key;
+use rand::rngs::StdRng;
+use rand::Rng;
 use std::collections::VecDeque;
 use std::time::Duration;
 
@@ -14,6 +18,8 @@ pub struct View<'a> {
     pub chip: Option<&'a str>,
     /// The document the visible chip promises (text before the caret when it was sent, plus the chip).
     pub claim: Option<&'a str>,
+    /// The chip offers a typo fix ("teh → the").
+    pub fix_chip: bool,
 }
 
 impl View<'_> {
@@ -32,6 +38,10 @@ pub enum Action {
     Type(char),
     Backspace,
     Press(Key),
+    /// Arrow keys: move the caret by this many characters.
+    Caret(i32),
+    /// Switch to another app for this long, then come back.
+    SwitchApp(Duration),
 }
 
 pub trait Actor {
@@ -47,6 +57,8 @@ pub enum Step {
     Wait(Duration),
     Press(Key),
     Backspace,
+    /// Arrow keys: move the caret by this many characters.
+    Caret(i32),
     /// Type the chip's next `n` characters (stops early when there is no chip).
     TypeChip(usize, Duration),
     /// Wait until a chip is visible, at most this long.
@@ -99,6 +111,10 @@ impl Actor for Script {
                 self.steps.pop_front();
                 Some((Action::Backspace, Duration::from_millis(160)))
             }
+            Step::Caret(delta) => {
+                self.steps.pop_front();
+                Some((Action::Caret(delta), Duration::from_millis(200)))
+            }
             Step::TypeChip(n, gap) => {
                 let next = view.chip_rest().and_then(|r| r.chars().next());
                 match next {
@@ -124,5 +140,126 @@ impl Actor for Script {
                 Some((Action::Idle, POLL))
             }
         }
+    }
+}
+
+/// One decision of the random typist: a roll (0 to 99) picks the kind of action, `timing` the human delay,
+/// `pick` the word or character. A session is a list of these, so proptest can shrink a failing session to
+/// the few decisions that matter.
+pub type Choice = (u8, u16, u8);
+
+/// Random choices with the same distribution proptest uses (seeded soak runs).
+pub fn random_choices(rng: &mut StdRng, n: usize) -> Vec<Choice> {
+    (0..n)
+        .map(|_| (rng.random_range(0..100), rng.random(), rng.random()))
+        .collect()
+}
+
+/// A person typing at a normal speed (150 to 350 ms between keys, with pauses) who reacts to the chip like
+/// people do: types part of it, takes a word or all of it (sometimes tapping Tab again quickly), dismisses it,
+/// types something else, corrects with Backspace, moves the caret, switches apps.
+pub struct Typist {
+    choices: VecDeque<Choice>,
+    word: VecDeque<char>,
+    last: Action,
+}
+
+impl Typist {
+    pub fn new(choices: impl IntoIterator<Item = Choice>) -> Self {
+        Self {
+            choices: choices.into_iter().collect(),
+            word: VecDeque::new(),
+            last: Action::Idle,
+        }
+    }
+
+    /// The next character of the person's own sentence: words from the shared vocabulary (now and then a
+    /// misspelled one), separated by spaces, sometimes ending a sentence.
+    fn own_char(&mut self, view: &View, pick: u8) -> char {
+        if let Some(c) = self.word.pop_front() {
+            return c;
+        }
+        let last = view.before.chars().last();
+        if last.is_some_and(|c| !c.is_whitespace()) {
+            return match pick % 16 {
+                0 => '.',
+                1 => ',',
+                _ => ' ',
+            };
+        }
+        let word = if pick.is_multiple_of(25) {
+            TYPOS[usize::from(pick) % TYPOS.len()].0
+        } else {
+            VOCAB[usize::from(pick) % VOCAB.len()]
+        };
+        self.word = word.chars().collect();
+        self.word.pop_front().unwrap_or(' ')
+    }
+
+    /// Something other than the chip's next character.
+    fn other_char(rest: &str, pick: u8) -> char {
+        let next = rest.chars().next();
+        let options = ['e', 'a', 's', 't', ' ', 'o', 'n', ','];
+        let c = options[usize::from(pick) % options.len()];
+        if Some(c) == next {
+            'x'
+        } else {
+            c
+        }
+    }
+}
+
+fn human_gap(timing: u16) -> Duration {
+    let t = u64::from(timing);
+    match t % 10 {
+        // A pause: long enough for the chip to appear.
+        0 | 1 => Duration::from_millis(500 + t % 1000),
+        _ => Duration::from_millis(150 + t % 200),
+    }
+}
+
+impl Actor for Typist {
+    fn next(&mut self, view: &View) -> Option<(Action, Duration)> {
+        let (roll, timing, pick) = self.choices.pop_front()?;
+        let gap = human_gap(timing);
+        let action = if view.fix_chip {
+            match roll {
+                0..=49 => Action::Press(Key::Tab),
+                50..=59 => Action::Press(Key::Escape),
+                _ => Action::Type(self.own_char(view, pick)),
+            }
+        } else if view.chip.is_some() {
+            let rest = view.chip_rest().unwrap_or("");
+            match roll {
+                // Tapping Tab again right after a Tab, word by word.
+                0..=44 if self.last == Action::Press(Key::Tab) => Action::Press(Key::Tab),
+                0..=29 => rest
+                    .chars()
+                    .next()
+                    .map_or(Action::Type(self.own_char(view, pick)), Action::Type),
+                30..=49 => Action::Press(Key::Tab),
+                50..=61 => Action::Press(Key::ShiftTab),
+                62..=69 => Action::Press(Key::Escape),
+                70..=89 => Action::Type(Self::other_char(rest, pick)),
+                90..=94 => Action::Backspace,
+                95..=97 => Action::Caret(if pick % 2 == 0 { -1 } else { 1 }),
+                _ => Action::SwitchApp(Duration::from_millis(800 + u64::from(timing) % 1500)),
+            }
+        } else {
+            match roll {
+                0..=3 => Action::Backspace,
+                4 => Action::Caret(-1 - i32::from(pick % 3)),
+                5 => Action::Caret(1),
+                _ => Action::Type(self.own_char(view, pick)),
+            }
+        };
+        // After a Tab, people often look again quickly (and may tap Tab again, see above).
+        let gap = if action == Action::Press(Key::Tab) && timing % 3 == 0 {
+            Duration::from_millis(80 + u64::from(timing) % 100)
+        } else {
+            gap
+        };
+        self.last = action;
+        Some((action, gap))
     }
 }
