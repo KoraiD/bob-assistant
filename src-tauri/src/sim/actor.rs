@@ -162,6 +162,8 @@ pub struct Typist {
     choices: VecDeque<Choice>,
     word: VecDeque<char>,
     last: Action,
+    /// Words to type first (a canary for the log check, a credential for the redaction check).
+    inject: VecDeque<String>,
 }
 
 impl Typist {
@@ -170,7 +172,14 @@ impl Typist {
             choices: choices.into_iter().collect(),
             word: VecDeque::new(),
             last: Action::Idle,
+            inject: VecDeque::new(),
         }
+    }
+
+    /// Type these words before any of the person's own (in order, as whole words).
+    pub fn with_words(mut self, words: impl IntoIterator<Item = String>) -> Self {
+        self.inject = words.into_iter().collect();
+        self
     }
 
     /// The next character of the person's own sentence: words from the shared vocabulary (now and then a
@@ -187,10 +196,10 @@ impl Typist {
                 _ => ' ',
             };
         }
-        let word = if pick.is_multiple_of(25) {
-            TYPOS[usize::from(pick) % TYPOS.len()].0
-        } else {
-            VOCAB[usize::from(pick) % VOCAB.len()]
+        let word = match self.inject.pop_front() {
+            Some(w) => w,
+            None if pick.is_multiple_of(25) => TYPOS[usize::from(pick) % TYPOS.len()].0.to_string(),
+            None => VOCAB[usize::from(pick) % VOCAB.len()].to_string(),
         };
         self.word = word.chars().collect();
         self.word.pop_front().unwrap_or(' ')

@@ -240,6 +240,7 @@ pub struct World {
     last_delivered: Option<(String, Rect)>,
     last_typo_check: String,
     last_after: Option<String>,
+    window_title: Option<String>,
     settle_generation: u64,
     watch_generation: u64,
     watching: bool,
@@ -351,6 +352,7 @@ impl World {
             last_delivered: None,
             last_typo_check: String::new(),
             last_after: None,
+            window_title: None,
             settle_generation: 0,
             watch_generation: 0,
             watching: false,
@@ -374,6 +376,11 @@ impl World {
         w.push(ms(10), Ev::AxNotify);
         w.push(ms(20), Ev::UserTurn);
         w
+    }
+
+    /// The title of the app's window, sent with the text after the caret (a personal-context layer).
+    pub fn set_window_title(&mut self, title: Option<String>) {
+        self.window_title = title;
     }
 
     pub fn ended(&self) -> bool {
@@ -836,7 +843,7 @@ impl World {
                 Ev::ToEngine {
                     ev: NativeEvent::ContextState {
                         app_bundle_id: self.profile.bundle_id.into(),
-                        window_title: None,
+                        window_title: self.window_title.clone(),
                         after_caret: after,
                     },
                     before: None,

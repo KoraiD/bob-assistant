@@ -16,9 +16,11 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+// tokio's clock: identical to `std::time::Instant` in the app, virtual in the simulator (`crate::sim`).
+use tokio::time::Instant;
 
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(20);
 const TRANSCRIBE_TIMEOUT: Duration = Duration::from_secs(120);

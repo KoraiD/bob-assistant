@@ -19,6 +19,11 @@ pub async fn replay(profile: Profile, seed: u64, choices: Vec<Choice>) -> Report
     run(config, &mut Typist::new(choices)).await
 }
 
+/// Play one session on a fresh paused runtime (for proptest bodies, which are not async).
+pub fn block_on_session(config: Config, mut typist: Typist) -> Report {
+    block_on(async move { run(config, &mut typist).await })
+}
+
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .enable_time()

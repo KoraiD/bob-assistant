@@ -27,6 +27,22 @@ pub enum Kind {
     TabLeaked,
     /// The engine showed a chip without capturing keys, or the other way round.
     CaptureMismatch,
+    /// Selection Actions or voice edit replaced text without a choice by the user in this episode.
+    UnauthorizedReplace,
+    /// A replacement aimed at other text than the action ran on.
+    ReplaceOfWrongText,
+    /// Text was copied to the clipboard without a Copy choice.
+    UnrequestedCopy,
+    /// Text from a password field, an empty or an oversized selection reached a brain.
+    ForbiddenTextSent,
+    /// Credential-like text reached a cloud brain.
+    SecretToCloud,
+    /// Typed, selected or dictated text reached the log or the audit trail.
+    TextInLog,
+    /// Dictated text was inserted without a transcript to insert, or into a password field.
+    UnrequestedDictation,
+    /// Recording started in a password field.
+    RecordingInSecureField,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

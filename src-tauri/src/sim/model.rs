@@ -205,6 +205,72 @@ impl Model {
     }
 }
 
+/// The scripted chat brain (Selection Actions, dictation cleanup, voice edit). Each request is recorded with
+/// `prompt` = system prompt, a `\n---\n` line and the user's text. The answer is the text, lightly edited,
+/// sometimes behind a preamble that the cleaner must remove, or an explanation for Explain and Reply. The
+/// first token takes 80 ms to 2.5 s, so a user can change their mind while it runs.
+pub fn chat_script(seed: u64, calls: Calls) -> crate::brain::client::scripted::Chat {
+    let counter = Arc::new(AtomicU64::new(0));
+    Arc::new(move |req: &crate::brain::dialect::ChatRequest| {
+        let n = counter.fetch_add(1, Ordering::SeqCst);
+        let mut rng = StdRng::seed_from_u64(
+            seed ^ 0xC4A7 ^ n.wrapping_add(1).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+        );
+        let system = req.system.to_lowercase();
+        let body = req.user.trim();
+        let answer = if system.contains("explain") || system.contains("reply") {
+            "It asks for an update by Friday.".to_string()
+        } else if body.is_empty() {
+            String::new()
+        } else {
+            let mut edited = body.to_string();
+            if let Some(first) = edited.get(..1) {
+                edited.replace_range(..1, &first.to_uppercase());
+            }
+            if !edited.ends_with(['.', '!', '?']) {
+                edited.push('.');
+            }
+            if rng.random_bool(0.2) {
+                format!("Here is the corrected text:\n{edited}")
+            } else {
+                edited
+            }
+        };
+        let first_ms = if rng.random_bool(0.15) {
+            rng.random_range(1200..=2500)
+        } else {
+            rng.random_range(80..=400)
+        };
+        let feed: VecDeque<(Duration, String)> = tokenize(&answer)
+            .into_iter()
+            .enumerate()
+            .map(|(i, t)| (Duration::from_millis(if i == 0 { first_ms } else { 12 }), t))
+            .collect();
+        let idx = {
+            let mut c = calls
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            c.push(Call {
+                at: tokio::time::Instant::now(),
+                prompt: format!("{}\n---\n{}", req.system, req.user),
+                answer: answer.clone(),
+                tokens: feed.len(),
+                delivered: 0,
+                cancelled: false,
+            });
+            c.len() - 1
+        };
+        stream(
+            feed,
+            Guard {
+                calls: calls.clone(),
+                idx,
+                done: false,
+            },
+        )
+    })
+}
+
 /// Marks the call cancelled when the engine drops the stream before its end.
 struct Guard {
     calls: Calls,

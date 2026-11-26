@@ -646,6 +646,108 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Random lines on the control socket: valid and invalid requests, invalid UTF-8, deep nesting, unknown
+    /// tools. Every line gets exactly one JSON answer, valid requests past the rate limit are refused, an
+    /// oversized line is answered and closes the connection, and the server task ends without a panic.
+    #[tokio::test]
+    async fn the_control_server_survives_random_input() {
+        use rand::{Rng, SeedableRng};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let dispatch: Dispatch = std::sync::Arc::new(|tool, _| {
+            Box::pin(async move {
+                if tool == "bob_status" {
+                    Ok(json!({"paused": false}))
+                } else {
+                    Err("unknown tool".to_string())
+                }
+            })
+        });
+        for seed in 0..20u64 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let (server_end, client_end) = tokio::net::UnixStream::pair().unwrap();
+            let server = tokio::spawn(serve_control(server_end, dispatch.clone()));
+            let (r, mut w) = client_end.into_split();
+            let mut answers = BufReader::new(r).lines();
+            let mut valid = 0usize;
+            for i in 0..90 {
+                let line: Vec<u8> = match rng.random_range(0..6) {
+                    0 => b"{not json".to_vec(),
+                    1 => (0..rng.random_range(1..200))
+                        .map(|_| rng.random_range(0..=255u8))
+                        .filter(|b| *b != b'\n')
+                        .collect(),
+                    2 => format!("{}{}", "[".repeat(5000), "]".repeat(5000)).into_bytes(),
+                    3 => json!({"id": i, "tool": "rm_rf", "args": {"text": "x"}})
+                        .to_string()
+                        .into_bytes(),
+                    _ => json!({"id": i, "tool": "bob_status", "args": {}})
+                        .to_string()
+                        .into_bytes(),
+                };
+                let is_valid = serde_json::from_slice::<Value>(&line).is_ok_and(|v| v.is_object());
+                w.write_all(&line).await.unwrap();
+                w.write_all(b"\n").await.unwrap();
+                let answer = tokio::time::timeout(Duration::from_secs(5), answers.next_line())
+                    .await
+                    .expect("an answer for every line")
+                    .unwrap()
+                    .expect("the connection stays open");
+                let v: Value = serde_json::from_str(&answer).expect("answers are JSON");
+                assert!(v["ok"].is_boolean(), "seed {seed}: {answer}");
+                if is_valid {
+                    valid += 1;
+                    let limited = v["error"]
+                        .as_str()
+                        .is_some_and(|e| e.starts_with("Too many"));
+                    assert_eq!(
+                        limited,
+                        valid > RATE_PER_MINUTE,
+                        "seed {seed}, request {valid}: {answer}"
+                    );
+                }
+            }
+            let huge = vec![b'a'; MAX_REQUEST_BYTES + 10];
+            w.write_all(&huge).await.unwrap();
+            w.write_all(b"\n").await.unwrap();
+            let answer = answers.next_line().await.unwrap().unwrap();
+            assert!(answer.contains("request too large"), "{answer}");
+            assert!(
+                answers.next_line().await.unwrap().is_none(),
+                "closed after an oversized line"
+            );
+            server.await.expect("the server task never panics");
+        }
+    }
+
+    proptest::proptest! {
+        /// Any JSON-RPC message gets a well-formed answer (or none, for a notification), never a panic.
+        #[test]
+        fn any_rpc_message_gets_a_well_formed_answer(
+            id in proptest::option::of(0i64..1000),
+            method in proptest::sample::select(vec!["initialize", "tools/list", "tools/call", "ping",
+                "notifications/initialized", "resources/list", "", "tools/call/x"]),
+            tool in proptest::sample::select(vec!["bob_status", "bob_rewrite", "rm_rf", ""]),
+            params_kind in 0u8..4,
+        ) {
+            let params = match params_kind {
+                0 => json!({"name": tool, "arguments": {"text": "hello"}}),
+                1 => json!({"name": tool}),
+                2 => json!([1, 2, 3]),
+                _ => Value::Null,
+            };
+            let mut msg = json!({"jsonrpc": "2.0", "method": method, "params": params});
+            if let Some(id) = id {
+                msg["id"] = json!(id);
+            }
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            let answer = rt.block_on(handle_rpc(&msg, |_, _| async { Ok(json!({"ok": true})) }));
+            if let Some(a) = answer {
+                proptest::prop_assert_eq!(&a["jsonrpc"], "2.0");
+                proptest::prop_assert!(a.get("result").is_some() != a.get("error").is_some(), "{}", a);
+            }
+        }
+    }
+
     #[test]
     fn the_rate_limit_slides() {
         let mut r = RateLimit::new(2);

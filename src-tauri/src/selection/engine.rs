@@ -18,9 +18,11 @@ use futures_util::StreamExt;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+// tokio's clock: identical to `std::time::Instant` in the app, virtual in the simulator (`crate::sim`).
+use tokio::time::Instant;
 
 /// Longest selection an action runs on (characters).
 pub const MAX_CHARS: usize = 8000;

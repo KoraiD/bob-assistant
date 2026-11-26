@@ -134,7 +134,10 @@ impl log::Log for Logger {
             line.target,
             line.message
         );
+        #[cfg(not(test))]
         let _ = std::io::stderr().write_all(text.as_bytes());
+        #[cfg(test)]
+        capture::push(&text);
         let mut s = self
             .sink
             .lock()
@@ -273,9 +276,70 @@ pub fn dir_in_use() -> Option<PathBuf> {
         .and_then(|p| p.parent().map(Path::to_path_buf))
 }
 
+/// Test builds: BOB's logger at trace level with every line kept in memory instead of stderr, so tests can
+/// check that typed text, selections and transcripts never reach the log. The audit trail is logged too
+/// (target "audit"), so this covers it.
+#[cfg(test)]
+pub mod capture {
+    use std::sync::{Mutex, OnceLock};
+
+    /// Enough for the longest test run; older lines are dropped first.
+    const MAX_LINES: usize = 400_000;
+
+    fn lines() -> &'static Mutex<std::collections::VecDeque<String>> {
+        static L: OnceLock<Mutex<std::collections::VecDeque<String>>> = OnceLock::new();
+        L.get_or_init(Default::default)
+    }
+
+    pub(super) fn push(line: &str) {
+        let mut l = lines()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        l.push_back(line.to_string());
+        if l.len() > MAX_LINES {
+            l.pop_front();
+        }
+    }
+
+    /// Install the logger at trace level (once per test process).
+    pub fn start() {
+        static ONCE: OnceLock<()> = OnceLock::new();
+        ONCE.get_or_init(|| super::init(None, super::Level::Trace));
+        super::logger().level.store(
+            log::LevelFilter::Trace as usize,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    /// Every captured line that contains `needle`.
+    pub fn find(needle: &str) -> Vec<String> {
+        lines()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .filter(|l| l.contains(needle))
+            .cloned()
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_line_is_captured_in_tests_and_redacted() {
+        capture::start();
+        let secret = format!("sk-{}", "Qz7".repeat(12));
+        log::info!("capture check {secret}");
+        log::trace!("capture check trace");
+        assert!(!capture::find("capture check").is_empty());
+        assert!(
+            !capture::find("capture check trace").is_empty(),
+            "trace level is on"
+        );
+        assert!(capture::find("Qz7Qz7").is_empty(), "lines are redacted");
+    }
 
     #[test]
     fn levels_apply_to_bob_and_dependencies_differently() {

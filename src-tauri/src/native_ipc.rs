@@ -466,6 +466,41 @@ mod tests {
         handle.join().unwrap().unwrap();
     }
 
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig { cases: 48, ..Default::default() })]
+
+        /// Random bytes from a peer, with or without a valid hello first: nothing is delivered before the
+        /// handshake, the session ends cleanly when the peer hangs up, and the bridge never panics.
+        #[test]
+        fn random_bytes_never_break_the_bridge(
+            hello in proptest::bool::ANY,
+            chunks in proptest::collection::vec(proptest::collection::vec(proptest::num::u8::ANY, 0..400), 0..12),
+        ) {
+            let (mut client, _bridge, rx, handle) = start();
+            if hello {
+                client
+                    .write_all(encode_line(&NativeEvent::Hello { version: PROTOCOL_VERSION, pid: 1 }).as_bytes())
+                    .unwrap();
+            }
+            for c in &chunks {
+                // The peer may be gone already (a rejected or failed session); that is fine.
+                if client.write_all(c).is_err() {
+                    break;
+                }
+            }
+            drop(client);
+            let joined = handle.join();
+            proptest::prop_assert!(joined.is_ok(), "the bridge thread panicked");
+            let delivered: Vec<NativeEvent> = rx.try_iter().map(|(ev, _)| ev).collect();
+            if !hello {
+                proptest::prop_assert!(delivered.is_empty(), "events before the handshake: {}", delivered.len());
+            } else if let Some(first) = delivered.first() {
+                let is_hello = matches!(first, NativeEvent::Hello { .. });
+                proptest::prop_assert!(is_hello, "the first event is the hello");
+            }
+        }
+    }
+
     #[test]
     fn socket_is_private_to_the_user() {
         let dir = std::env::temp_dir().join(format!("bob-test-{}", std::process::id()));
