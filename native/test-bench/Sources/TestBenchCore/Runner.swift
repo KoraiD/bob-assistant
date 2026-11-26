@@ -175,7 +175,7 @@ public final class Runner {
             lastAccepted = nil
             lastClaim = nil
             recent = []
-            if let r = wait(ms: 300) { summary.stoppedBecause = r; return }
+            if let r = wait(ms: 400) { summary.stoppedBecause = r; return }
             var typist = Typist(seed: seed &+ UInt64(e) &* 7919, corpus: corpus)
             summary.episodes += 1
             for s in 0..<stepsPerEpisode {

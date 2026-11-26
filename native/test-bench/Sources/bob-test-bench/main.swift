@@ -21,6 +21,9 @@ struct Options {
     var profiles: [EditorProfile] = EditorProfile.allCases
     var realLock: String?
     var preflight = false
+    /// Move focus out of the editor and back before each episode, like a click into it. Off reproduces GT-12
+    /// (no suggestions when the field already had focus when BOB attached to the app).
+    var focusBounce = true
 }
 
 func parseOptions() -> Options {
@@ -38,6 +41,7 @@ func parseOptions() -> Options {
         case "--profiles": o.profiles = v().split(separator: ",").compactMap { EditorProfile(rawValue: String($0)) }
         case "--real-lock": o.realLock = v()
         case "--preflight": o.preflight = true
+        case "--no-focus-bounce": o.focusBounce = false
         default:
             print("unknown option \(a)")
             exit(64)
@@ -431,6 +435,7 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
         DispatchQueue.main.sync {
             configure(profile)
             editor.string = ""
+            if options.focusBounce { window.makeFirstResponder(nil) }
             window.makeFirstResponder(editor)
             status.stringValue = "Typing (\(profile.rawValue) editor). Touch the mouse or a key to stop."
         }
