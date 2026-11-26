@@ -824,19 +824,7 @@ mod tests {
     use crate::brain::secrets::MemoryStore;
     use crate::brain::testserver::{Response, TestServer};
     use crate::brain::{BrainConfig, Capabilities, ProviderKind};
-
-    #[derive(Default)]
-    struct Recorder(Mutex<Vec<CoreCommand>>);
-    impl Sink for Recorder {
-        fn send(&self, cmd: CoreCommand) {
-            self.0.lock().unwrap().push(cmd);
-        }
-    }
-    impl Recorder {
-        fn take(&self) -> Vec<CoreCommand> {
-            std::mem::take(&mut self.0.lock().unwrap())
-        }
-    }
+    use crate::testkit::Recorder;
 
     /// A selection brain backed by a chat test server answering `tokens`.
     async fn setup(

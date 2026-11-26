@@ -115,6 +115,10 @@ impl HttpBrain {
         &self,
         req: &CompletionRequest,
     ) -> Result<TokenStream, BrainError> {
+        #[cfg(test)]
+        if let Some(script) = scripted::completion(&self.config.endpoint) {
+            return Ok(script(req));
+        }
         let d = self.config.dialect();
         let body = dialect::completion_body(d, req, self.config.model.as_deref());
         let resp = send(self.post(dialect::completion_path(d), &body)).await?;
@@ -132,6 +136,10 @@ impl HttpBrain {
     }
 
     async fn chat_stream_unchecked(&self, req: &ChatRequest) -> Result<TokenStream, BrainError> {
+        #[cfg(test)]
+        if let Some(script) = scripted::chat(&self.config.endpoint) {
+            return Ok(script(req));
+        }
         let d = self.config.dialect();
         let body = dialect::chat_body(req, self.config.model.as_deref());
         let resp = send(self.post(dialect::chat_path(d), &body)).await?;
@@ -342,6 +350,74 @@ fn events(
             }
         }
     }))
+}
+
+/// Scripted brains for the simulator (`crate::sim`), test builds only. A script answers requests for one
+/// endpoint in memory instead of over HTTP, so a simulated session runs on tokio's virtual clock and replays
+/// exactly. Everything before the transport (capabilities, prompts, redaction) stays real.
+#[cfg(test)]
+pub(crate) mod scripted {
+    use super::{ChatRequest, CompletionRequest, TokenStream};
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    pub type Completion = Arc<dyn Fn(&CompletionRequest) -> TokenStream + Send + Sync>;
+    pub type Chat = Arc<dyn Fn(&ChatRequest) -> TokenStream + Send + Sync>;
+
+    #[derive(Default)]
+    struct Scripts {
+        completion: BTreeMap<String, Completion>,
+        chat: BTreeMap<String, Chat>,
+    }
+
+    fn scripts() -> &'static Mutex<Scripts> {
+        static S: OnceLock<Mutex<Scripts>> = OnceLock::new();
+        S.get_or_init(Default::default)
+    }
+
+    /// Removes the endpoint's scripts when dropped (tests run in parallel; each uses its own endpoint).
+    pub struct Registration(String);
+
+    impl Drop for Registration {
+        fn drop(&mut self) {
+            let mut s = scripts()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            s.completion.remove(&self.0);
+            s.chat.remove(&self.0);
+        }
+    }
+
+    pub fn register(
+        endpoint: &str,
+        completion: Option<Completion>,
+        chat: Option<Chat>,
+    ) -> Registration {
+        let mut s = scripts()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(c) = completion {
+            s.completion.insert(endpoint.to_string(), c);
+        }
+        if let Some(c) = chat {
+            s.chat.insert(endpoint.to_string(), c);
+        }
+        Registration(endpoint.to_string())
+    }
+
+    pub(super) fn completion(endpoint: &str) -> Option<Completion> {
+        let s = scripts()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        s.completion.get(endpoint).cloned()
+    }
+
+    pub(super) fn chat(endpoint: &str) -> Option<Chat> {
+        let s = scripts()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        s.chat.get(endpoint).cloned()
+    }
 }
 
 #[cfg(test)]

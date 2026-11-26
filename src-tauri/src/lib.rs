@@ -27,8 +27,12 @@ pub mod protocol;
 mod quit_key;
 pub mod selection;
 pub mod shell;
+#[cfg(test)]
+mod sim;
 pub mod supervisor;
 pub mod system;
+#[cfg(test)]
+pub(crate) mod testkit;
 pub mod usage;
 
 use app_info::AppInfo;

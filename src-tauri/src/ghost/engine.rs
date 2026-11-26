@@ -21,9 +21,12 @@ use serde::Serialize;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+// The engine's time windows use tokio's clock: identical to `std::time::Instant` in the app, and virtual in
+// the simulator (`crate::sim`), which pauses time so a session replays exactly.
+use tokio::time::Instant;
 
 /// Quiet gate after the last keystroke before asking the model (perf steering: 60 to 80 ms).
 pub const QUIET: Duration = Duration::from_millis(70);
@@ -1143,29 +1146,7 @@ mod tests {
     use crate::brain::testserver::{Response, TestServer};
     use crate::brain::{BrainConfig, Capabilities, ProviderKind};
 
-    #[derive(Default)]
-    struct Recorder(Mutex<Vec<CoreCommand>>);
-    impl Sink for Recorder {
-        fn send(&self, cmd: CoreCommand) {
-            self.0.lock().unwrap().push(cmd);
-        }
-    }
-    impl Recorder {
-        fn take(&self) -> Vec<CoreCommand> {
-            std::mem::take(&mut *self.0.lock().unwrap())
-        }
-        fn chips(&self) -> Vec<String> {
-            self.0
-                .lock()
-                .unwrap()
-                .iter()
-                .filter_map(|c| match c {
-                    CoreCommand::ShowChip { text, .. } => Some(text.clone()),
-                    _ => None,
-                })
-                .collect()
-        }
-    }
+    use crate::testkit::Recorder;
 
     const CARET: Rect = Rect {
         x: 100.0,

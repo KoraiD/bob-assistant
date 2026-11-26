@@ -2,7 +2,7 @@
 //! and sharing permission, every quiet zone, plus a randomized typing session. Each case runs the real engine
 //! against a local test server and checks what reached the "model" and what reached the screen.
 
-use super::engine::{spawn_ctx, EngineConfig, GhostHandle, Sink};
+use super::engine::{spawn_ctx, EngineConfig, GhostHandle};
 use crate::brain::registry::Role;
 use crate::brain::secrets::MemoryStore;
 use crate::brain::service::BrainService;
@@ -11,21 +11,10 @@ use crate::brain::{BrainConfig, Capabilities, ProviderKind};
 use crate::context::typography::Quotes;
 use crate::context::{ContextHub, ContextSettings, GhostLayers};
 use crate::protocol::{CoreCommand, Key, NativeEvent, Rect};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-
-#[derive(Default)]
-struct Recorder(Mutex<Vec<(Instant, CoreCommand)>>);
-impl Sink for Recorder {
-    fn send(&self, cmd: CoreCommand) {
-        self.0.lock().unwrap().push((Instant::now(), cmd));
-    }
-}
-impl Recorder {
-    fn take(&self) -> Vec<(Instant, CoreCommand)> {
-        std::mem::take(&mut *self.0.lock().unwrap())
-    }
-}
+use crate::testkit::Recorder;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::Instant;
 
 const CARET: Rect = Rect {
     x: 100.0,
@@ -130,20 +119,16 @@ async fn wait_for_chip(rec: &Recorder, ms: u64) -> Vec<(Instant, CoreCommand)> {
     let mut quiet_since = Instant::now();
     loop {
         tokio::time::sleep(Duration::from_millis(5)).await;
-        let (got, len) = {
-            let v = rec.0.lock().unwrap();
-            (
-                v.iter()
-                    .any(|(_, c)| matches!(c, CoreCommand::ShowChip { .. })),
-                v.len(),
-            )
-        };
-        if len != last_len {
-            last_len = len;
+        let v = rec.peek();
+        let got = v
+            .iter()
+            .any(|(_, c)| matches!(c, CoreCommand::ShowChip { .. }));
+        if v.len() != last_len {
+            last_len = v.len();
             quiet_since = Instant::now();
         }
         if (got && quiet_since.elapsed() > Duration::from_millis(40)) || Instant::now() > until {
-            return rec.take();
+            return rec.take_timed();
         }
     }
 }
@@ -286,7 +271,7 @@ async fn every_quiet_zone_combination_keeps_text_away_from_the_model() {
             asked, open,
             "enabled={enabled} paused={paused} quiet={quiet_app} secure={secure} selected={selected}"
         );
-        let cmds = r.rec.take();
+        let cmds = r.rec.take_timed();
         if !open {
             assert!(chips(&cmds).is_empty());
         }
@@ -370,7 +355,7 @@ async fn randomized_sessions_keep_chip_and_key_capture_consistent() {
                 }
             }
             tokio::time::sleep(Duration::from_millis(rng.random_range(2..40))).await;
-            for (_, c) in r.rec.take() {
+            for (_, c) in r.rec.take_timed() {
                 match c {
                     CoreCommand::ShowChip { text, .. } => {
                         assert!(!text.trim().is_empty(), "seed {seed}: empty chip");

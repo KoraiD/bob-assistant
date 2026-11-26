@@ -652,19 +652,7 @@ async fn run_cleanup(
 mod tests {
     use super::*;
     use crate::brain::secrets::MemoryStore;
-
-    #[derive(Default)]
-    struct Recorder(Mutex<Vec<CoreCommand>>);
-    impl Sink for Recorder {
-        fn send(&self, cmd: CoreCommand) {
-            self.0.lock().unwrap().push(cmd);
-        }
-    }
-    impl Recorder {
-        fn take(&self) -> Vec<CoreCommand> {
-            std::mem::take(&mut self.0.lock().unwrap())
-        }
-    }
+    use crate::testkit::Recorder;
 
     /// An engine whose chosen model "is installed" (an empty file with the catalog name).
     fn setup(installed: bool) -> (DictationHandle, Arc<Recorder>, PathBuf) {
