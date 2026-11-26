@@ -12,11 +12,10 @@ Details: [CHANGELOG.md](../CHANGELOG.md).
 
 | Item | Who | Notes |
 |---|---|---|
-| Publish the GitHub Release (v0.1.0, DMG and checksum) | owner, or agent on request | `make release`, then a draft release |
+| Publish the GitHub Release (v0.1.0, DMG and checksum) | agent | Notarized DMG built 2026-11-26 |
 | Owner checks on real apps | owner | List below |
 | Demo video | owner | Shot list in SUBMISSION.md section 2 |
 | Devpost form, student details, ownership | owner | SUBMISSION.md sections 3 and 4 |
-| Notarization (optional, recommended) | owner | `xcrun notarytool store-credentials`, then `BOB_NOTARY_PROFILE=... make release` |
 
 **Owner checks** (each takes a minute or two):
 1. Chrome and Gmail: type, pause, Tab; type through a suggestion; switch between two Chrome windows.

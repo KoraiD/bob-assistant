@@ -3,7 +3,7 @@
 All notable changes to BOB. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-11-26
 
 The first release, built for Kiroween 2026.
 
@@ -49,7 +49,7 @@ The first release, built for Kiroween 2026.
 - Statistics: words BOB typed for you and time saved (counts only).
 - AI agents (MCP): `bob-mcp` and a Skill file for Kiro and other agents, off by default.
 - Logs with five levels and an activity list of everything that matters for privacy, without your text.
-- Signed release DMG with the model server and speech engine inside.
+- Signed and notarized release DMG with the model server and speech engine inside.
 
 ### Privacy and security
 - No accounts and no telemetry. API keys only in the Keychain. Local servers bind to `127.0.0.1` with a

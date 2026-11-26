@@ -82,7 +82,7 @@ pub enum SidecarError {
 }
 
 /// Locate `llama-server`: `$BOB_LLAMA_SERVER`, next to the app executable (bundled), then the dev
-/// location `src-tauri/binaries/llama/llama-server` created by `make sidecars`.
+/// location `src-tauri/binaries/llama/llama-server` created by `make sidecars` (debug builds only).
 pub fn locate_binary() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("BOB_LLAMA_SERVER").map(PathBuf::from) {
         return p.is_file().then_some(p);
@@ -93,6 +93,8 @@ pub fn locate_binary() -> Option<PathBuf> {
         candidates.push(dir.join("../Resources/llama/llama-server"));
         candidates.push(dir.join("llama/llama-server"));
     }
+    // Dev builds only: a release build must not carry the build machine's source path.
+    #[cfg(debug_assertions)]
     candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries/llama/llama-server"));
     candidates.into_iter().find(|p| p.is_file())
 }

@@ -33,8 +33,11 @@ LLAMA_LIBS="libllama-server-impl.dylib libllama-common.1.dylib libmtmd.1.dylib l
 [ -x "$LLAMA/llama-server" ] || { echo "llama-server missing: run make sidecars" >&2; exit 1; }
 [ -d "$WHISPER_FW" ] || { echo "whisper.framework missing: run make whisper" >&2; exit 1; }
 
+# Source paths that compilers record (panic messages, debug info) must not carry the build machine's home
+# folder (it names the user): map it to "~".
+export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=~"
 echo "== build (release)"
-(cd native/bob-native && swift build -c release >/dev/null)
+(cd native/bob-native && swift build -c release -Xswiftc -file-prefix-map -Xswiftc "$HOME=~" >/dev/null)
 cargo build --release --manifest-path src-tauri/Cargo.toml --bin bob-mcp >/dev/null 2>&1
 npx tauri build --bundles app >/dev/null
 [ -d "$APP_SRC" ] || { echo "bundle not found: $APP_SRC" >&2; exit 1; }
@@ -45,6 +48,7 @@ mkdir -p "$OUT/stage"
 APP="$OUT/stage/BOB.app"
 cp -R "$APP_SRC" "$APP"
 cp native/bob-native/.build/release/bob-native "$APP/Contents/MacOS/bob-native"
+strip -S "$APP/Contents/MacOS/bob-native"  # the debug map lists object files by their build path
 cp src-tauri/target/release/bob-mcp "$APP/Contents/MacOS/bob-mcp"
 mkdir -p "$APP/Contents/Frameworks" "$APP/Contents/Resources/llama"
 cp -R "$WHISPER_FW" "$APP/Contents/Frameworks/"
@@ -74,6 +78,12 @@ DMG="$OUT/BOB-$VERSION-arm64.dmg"
 rm -f "$DMG"
 ln -s /Applications "$OUT/stage/Applications"
 hdiutil create -quiet -volname "BOB $VERSION" -srcfolder "$OUT/stage" -fs HFS+ -format UDZO -ov "$DMG"
+# Check before signing the DMG: no home folder path in anything that ships.
+if grep -rlaF "$HOME/" "$APP" >/dev/null 2>&1; then
+  echo "the app contains paths from your home folder:" >&2
+  grep -rlaF "$HOME/" "$APP" >&2
+  exit 1
+fi
 [ "$IDENTITY" = "-" ] || codesign --force $TS --sign "$IDENTITY" "$DMG"
 
 if [ -n "${BOB_NOTARY_PROFILE:-}" ]; then

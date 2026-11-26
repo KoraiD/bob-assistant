@@ -10,7 +10,8 @@
    Benchmark tools are not built (they need `--features bench`).
 3. Signs inside out with the hardened runtime and a secure timestamp: libraries, the model server, the framework,
    the helper (microphone entitlement), `bob-mcp`, then the app.
-4. Creates the DMG (drag to Applications) and signs it.
+4. Stops if any file in the app contains a path from the build machine's home folder (Rust paths are mapped to
+   `~`, the helper's debug map is stripped), then creates the DMG (drag to Applications) and signs it.
 5. Notarizes and staples, **only** when `BOB_NOTARY_PROFILE` is set.
 
 ## Secrets
@@ -41,10 +42,13 @@ spctl -a -vvv -t exec "/Volumes/BOB <version>/BOB.app"                 # "Notari
 Publish on GitHub: a release named `v<version>` with the DMG, the `.sha256` file and the notes from CHANGELOG.md.
 Start with a draft release, check the download on a second Mac or user account, then publish.
 
-## Verified (2026-11-25, v0.1.0)
+## Verified (2026-11-26, v0.1.0)
 
 - The DMG is 25 MB and the app 58 MB; `codesign --verify --strict --deep` passes.
-- Gatekeeper reports "Unnotarized Developer ID" (expected until notarization).
+- Notarization accepted and the ticket stapled to the DMG (`xcrun stapler validate`). Gatekeeper reports
+  "Notarized Developer ID" for both the DMG and the app inside it.
+- No file in the app contains a home-folder path or the commit email; the signing certificate's name appears only
+  in the code signatures.
 - Run from the mounted DMG: the bundled model server started from `Contents/Resources/llama`, the helper
   connected, and quitting stopped both.
 

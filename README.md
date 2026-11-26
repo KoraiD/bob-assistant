@@ -34,9 +34,8 @@ Requirements: macOS 14 or later on Apple Silicon. 16 GB of memory is recommended
 
 1. Download `BOB-<version>-arm64.dmg` from [Releases](https://github.com/KoraiD/bob-assistant/releases) and check
    its SHA-256 against the `.sha256` file.
-2. Drag BOB to Applications and open it.
-   The current release is signed with a Developer ID but not notarized yet. If macOS blocks it, open
-   **System Settings > Privacy & Security** and click **Open Anyway** next to the BOB message.
+2. Drag BOB to Applications and open it. The release is signed with a Developer ID and notarized by Apple, so
+   macOS opens it after the usual "downloaded from the internet" question.
 3. The welcome tour asks for **Accessibility** and **Microphone** access and downloads the models it recommends
    for your Mac (about 1.1 GB for writing and 0.6 GB for speech).
 
