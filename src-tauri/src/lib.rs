@@ -22,6 +22,7 @@ pub mod ghost;
 pub mod logging;
 pub mod mcp;
 pub mod native_ipc;
+pub mod paths;
 pub mod pause;
 pub mod protocol;
 mod quit_key;
@@ -81,11 +82,21 @@ fn request_permissions(bridge: State<'_, Bridge>) -> Result<(), String> {
 /// Start hidden only after the welcome tour has been seen once (a first launch always shows the window).
 /// The tour flag lives in the web view, so the core uses its own marker: any saved settings file.
 fn commands_onboarded(app: &tauri::AppHandle) -> bool {
-    app.path()
-        .app_config_dir()
-        .map(|d| d.join(ghost::engine::SETTINGS_FILE).exists())
+    layout_of(app)
+        .map(|l| l.config.join(ghost::engine::SETTINGS_FILE).exists())
         .unwrap_or(false)
 }
+
+/// The folders of the running profile (`paths`): the app's own, or those under `BOB_HOME`.
+fn layout_of(app: &tauri::AppHandle) -> tauri::Result<paths::Layout> {
+    Ok(paths::layout(
+        app.path().app_config_dir()?,
+        app.path().app_data_dir()?,
+    ))
+}
+
+/// Appended to the tray tooltip and the window title when a separate profile (`BOB_HOME`) runs.
+pub const SEPARATE_HINT: &str = " (separate profile)";
 
 /// Emitted whenever the orb state changes (payload: `activity::OrbView`).
 pub const ORB_EVENT: &str = "orb-state";
@@ -159,7 +170,7 @@ fn start_native_bridge(
         pause,
         brains,
     } = engines;
-    let socket = native_ipc::default_socket_path();
+    let socket = native_ipc::socket_path();
     let listener = match native_ipc::bind_socket(&socket) {
         Ok(l) => l,
         Err(e) => {
@@ -401,19 +412,31 @@ fn install_panic_hook() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A separate profile (BOB_HOME) is decided before anything is written; a bad value never falls back to
+    // the user's own folders.
+    let profile = match paths::init() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("BOB: {e}");
+            std::process::exit(2);
+        }
+    };
     // Logs go to stderr and ~/Library/Logs/BOB/bob.log. Default: info for BOB, warn for dependencies; the
     // level is a setting (applied once settings load) and RUST_LOG overrides it.
     // Privacy: log metadata only (sizes, timings, states), never typed text, prompts or keys.
-    let log_dir = logging::default_dir();
+    let log_dir = paths::logs_dir();
     logging::init(Some(&log_dir), logging::Level::Info);
     audit::init(&log_dir);
     install_panic_hook();
-    // One BOB per user: a second copy would take over the helper socket and load a second model.
-    let runtime = native_ipc::default_socket_path()
-        .parent()
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_else(std::env::temp_dir);
-    let _instance = match native_ipc::acquire_instance_lock(&runtime) {
+    if let paths::Profile::Separate(home) = &profile {
+        log::info!(
+            "separate profile: settings, logs, keys and sockets under {}",
+            home.display()
+        );
+    }
+    let separate = paths::is_separate();
+    // One BOB per profile: a second copy would take over the helper socket and load a second model.
+    let _instance = match native_ipc::acquire_instance_lock(&paths::runtime_dir()) {
         Ok(Some(lock)) => Some(lock),
         Ok(None) => {
             log::warn!("BOB is already running; this copy exits");
@@ -424,9 +447,12 @@ pub fn run() {
             None
         }
     };
-    tauri::Builder::default()
-        .menu(app_menu)
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+    let mut builder = tauri::Builder::default().menu(app_menu);
+    // The window-state plugin keeps its file in the app's own config folder, so a separate profile skips it.
+    if !separate {
+        builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+    }
+    builder
         .on_menu_event(|app, event| match event.id().as_ref() {
             "app-quit" => {
                 log::info!("quit requested from the app menu");
@@ -494,7 +520,8 @@ pub fn run() {
         .setup(|app| {
             // Brain service: registry in the config dir, models in the data dir, the sidecar's key and
             // PID files in the per-user 0700 runtime dir next to the helper socket.
-            let config_dir = app.path().app_config_dir()?;
+            let layout = layout_of(app.handle())?;
+            let config_dir = layout.config.clone();
             if let Err(e) = fsutil::private_dir(&config_dir) {
                 log::warn!("cannot make the settings folder private: {e}");
             }
@@ -505,15 +532,10 @@ pub fn run() {
             let context: commands::Context =
                 std::sync::Arc::new(context::ContextHub::load(config_dir.clone()));
             app.manage(context.clone());
-            let data_dir = app.path().app_data_dir()?;
-            let runtime_dir = native_ipc::default_socket_path()
-                .parent()
-                .map(|p| p.join("llama"))
-                .unwrap_or_else(|| std::env::temp_dir().join("bob-llama"));
             let brains: commands::Brains = std::sync::Arc::new(brain::service::BrainService::new(
                 config_dir,
-                data_dir,
-                runtime_dir,
+                layout.data.clone(),
+                layout.runtime.join("llama"),
                 Box::new(brain::secrets::KeychainStore),
             ));
             app.manage(brains.clone());
@@ -524,7 +546,11 @@ pub fn run() {
             let activity = activity::Activity::new(move |v| {
                 let _ = handle.emit(ORB_EVENT, v.clone());
                 if let Some(tray) = handle.tray_by_id("bob-tray") {
-                    let _ = tray.set_tooltip(Some(tray_tooltip(v)));
+                    let mut tip = tray_tooltip(v);
+                    if paths::is_separate() {
+                        tip.push_str(SEPARATE_HINT);
+                    }
+                    let _ = tray.set_tooltip(Some(tip));
                 }
             });
             app.manage(activity.clone());
@@ -550,7 +576,7 @@ pub fn run() {
             let selection = {
                 let sink = observed(&activity);
                 let brains = app.state::<commands::Brains>().inner().clone();
-                let dir = app.path().app_config_dir()?;
+                let dir = layout.config.clone();
                 let ctx = context.clone();
                 tauri::async_runtime::block_on(async move {
                     selection::engine::spawn(brains, ctx, sink, Some(dir))
@@ -560,7 +586,7 @@ pub fn run() {
             let dictation = {
                 let sink = observed(&activity);
                 let brains = app.state::<commands::Brains>().inner().clone();
-                let dir = app.path().app_config_dir()?;
+                let dir = layout.config.clone();
                 let models_dir = brains.models_dir().to_path_buf();
                 let ctx = context.clone();
                 let sel = selection.clone();
@@ -575,7 +601,7 @@ pub fn run() {
             let handle = app.handle().clone();
             quit_key::install(move || handle.exit(0));
             // General settings: Dock icon now; launch at login is read live from macOS.
-            let general_path = app.path().app_config_dir()?.join(app_settings::FILE);
+            let general_path = layout.config.join(app_settings::FILE);
             let general = app_settings::AppSettings::load(&general_path);
             if std::env::var_os("RUST_LOG").is_none() {
                 logging::set_level(general.log_level);
@@ -585,6 +611,12 @@ pub fn run() {
                 serde_json::json!({"version": env!("CARGO_PKG_VERSION"), "log_level": format!("{:?}", logging::level())}),
             );
             shell::apply_dock(app.handle(), general.show_in_dock, false);
+            if paths::is_separate() {
+                if let Some(w) = app.get_webview_window("main") {
+                    let title = w.title().unwrap_or_else(|_| "BOB".into());
+                    let _ = w.set_title(&format!("{title}{SEPARATE_HINT}"));
+                }
+            }
             if !general.open_window_at_launch && commands_onboarded(app.handle()) {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.hide();

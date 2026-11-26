@@ -21,15 +21,13 @@ pub const CONTROL_SOCKET: &str = "control.sock";
 pub const RATE_PER_MINUTE: usize = 60;
 pub const MAX_REQUEST_BYTES: usize = 256 * 1024;
 
-/// Next to the helper socket; `BOB_CONTROL_SOCKET` overrides it (tests).
+/// Next to the helper socket in the profile's runtime folder (`paths`, so the `bob-mcp` bridge follows
+/// `BOB_HOME` too); `BOB_CONTROL_SOCKET` overrides it (tests).
 pub fn control_socket_path() -> PathBuf {
     if let Some(p) = std::env::var_os("BOB_CONTROL_SOCKET") {
         return PathBuf::from(p);
     }
-    crate::native_ipc::default_socket_path()
-        .parent()
-        .map(|p| p.join(CONTROL_SOCKET))
-        .unwrap_or_else(|| std::env::temp_dir().join(CONTROL_SOCKET))
+    crate::paths::runtime_dir().join(CONTROL_SOCKET)
 }
 
 pub const INSTRUCTIONS: &str = "BOB is a privacy-first writing assistant running on this Mac. Use bob_rewrite \
@@ -298,8 +296,7 @@ pub fn start_control(dispatch: Dispatch) -> std::io::Result<tauri::async_runtime
     use std::os::unix::fs::PermissionsExt;
     let path = control_socket_path();
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        crate::fsutil::private_dir(dir)?;
     }
     let _ = std::fs::remove_file(&path);
     let std_listener = std::os::unix::net::UnixListener::bind(&path)?;

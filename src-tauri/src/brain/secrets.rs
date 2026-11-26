@@ -5,8 +5,10 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// Keychain service name for every BOB secret.
-pub const SERVICE: &str = "dev.bob.assistant";
+/// Keychain service for every BOB secret of the running profile (a separate profile has its own, `paths`).
+fn service() -> &'static str {
+    crate::paths::keychain_service()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SecretError {
@@ -30,7 +32,7 @@ pub struct KeychainStore;
 
 impl SecretStore for KeychainStore {
     fn get(&self, brain_id: &str) -> Result<Option<String>, SecretError> {
-        let entry = keyring::Entry::new(SERVICE, &account(brain_id))
+        let entry = keyring::Entry::new(service(), &account(brain_id))
             .map_err(|e| SecretError::Store(e.to_string()))?;
         match entry.get_password() {
             Ok(k) => Ok(Some(k)),
@@ -40,13 +42,13 @@ impl SecretStore for KeychainStore {
     }
 
     fn set(&self, brain_id: &str, key: &str) -> Result<(), SecretError> {
-        keyring::Entry::new(SERVICE, &account(brain_id))
+        keyring::Entry::new(service(), &account(brain_id))
             .and_then(|e| e.set_password(key))
             .map_err(|e| SecretError::Store(e.to_string()))
     }
 
     fn delete(&self, brain_id: &str) -> Result<(), SecretError> {
-        let entry = keyring::Entry::new(SERVICE, &account(brain_id))
+        let entry = keyring::Entry::new(service(), &account(brain_id))
             .map_err(|e| SecretError::Store(e.to_string()))?;
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),

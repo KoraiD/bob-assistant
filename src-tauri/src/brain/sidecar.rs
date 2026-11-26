@@ -106,8 +106,7 @@ pub fn generate_api_key() -> String {
 
 /// Write the key to `<dir>/llama.key` with mode 0600 inside a 0700 directory.
 pub fn write_key_file(dir: &Path, key: &str) -> std::io::Result<PathBuf> {
-    std::fs::create_dir_all(dir)?;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    crate::fsutil::private_dir(dir)?;
     let path = dir.join("llama.key");
     let tmp = dir.join("llama.key.tmp");
     std::fs::write(&tmp, format!("{key}\n"))?;

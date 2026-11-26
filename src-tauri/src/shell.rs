@@ -136,7 +136,11 @@ pub fn build_tray(app: &tauri::App, ghost_on: bool, dictation_on: bool) -> tauri
         ],
     )?;
     let mut builder = TrayIconBuilder::with_id("bob-tray")
-        .tooltip("BOB")
+        .tooltip(if crate::paths::is_separate() {
+            format!("BOB{}", crate::SEPARATE_HINT)
+        } else {
+            "BOB".to_string()
+        })
         .menu(&menu)
         .on_menu_event(|app, event| on_tray_menu(app, event.id.as_ref()));
     if let Some(icon) = app.default_window_icon() {
@@ -383,6 +387,10 @@ pub fn general_set_open_at_launch(general: State<'_, General>, open: bool) -> Re
 
 #[tauri::command]
 pub fn general_set_login(on: bool) -> Result<LoginItem, String> {
+    // The login item belongs to the app bundle, so a separate profile would change the user's own BOB.
+    if crate::paths::is_separate() {
+        return Err("launch at login is off in a separate profile (BOB_HOME)".into());
+    }
     crate::audit::record("settings.login_item", serde_json::json!({ "on": on }));
     #[cfg(target_os = "macos")]
     {

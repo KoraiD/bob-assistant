@@ -27,7 +27,7 @@ public final class HelperRuntime: @unchecked Sendable {
     private var selectionPID: pid_t = 0
     // Voice Dictation: audio and transcription stay in this process (VD-8).
     private let orb = OrbPanel()
-    private let recorder = AudioRecorder()
+    private let recorder = AudioRecorder(testAudioFile: TestHooks.audioFile)
     private let transcriber = Transcriber()
     private var dictationModel: String?
     private var dictationLanguage = ""

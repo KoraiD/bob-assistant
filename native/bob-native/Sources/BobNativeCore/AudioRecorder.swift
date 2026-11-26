@@ -51,7 +51,13 @@ public final class AudioRecorder: @unchecked Sendable {
     /// Called once when the 5-minute cap is reached (VD-11).
     public var onCap: (() -> Void)?
 
-    public init() {}
+    /// Test Bench only: play this file instead of the microphone (no permission, no audio engine).
+    private let testAudioFile: URL?
+
+    /// `testAudioFile` comes from `TestHooks.audioFile`, which is nil unless the helper was built for tests.
+    public init(testAudioFile: URL? = nil) {
+        self.testAudioFile = testAudioFile
+    }
 
     public enum Failure: Error, CustomStringConvertible {
         case permission, noInput, engine(String)
@@ -66,6 +72,7 @@ public final class AudioRecorder: @unchecked Sendable {
 
     public func start() throws {
         guard !isRecording else { return }
+        if let file = testAudioFile { return try startFromFile(file) }
         guard Permissions.microphoneStatus() == .granted else { throw Failure.permission }
         let input = engine.inputNode
         let inFormat = input.outputFormat(forBus: 0)
@@ -109,11 +116,21 @@ public final class AudioRecorder: @unchecked Sendable {
         isRecording = true
     }
 
+    private func startFromFile(_ file: URL) throws {
+        let loaded: [Float]
+        do { loaded = try DictationAudio.load(url: file) } catch { throw Failure.engine("test audio file") }
+        let cap = DictationAudio.maxSeconds * Int(DictationAudio.format.sampleRate)
+        lock.withLock { samples = Array(loaded.prefix(cap)) }
+        isRecording = true
+    }
+
     /// Stop and return the recording (empty when `keep` is false). The buffer is cleared either way.
     public func stop(keep: Bool) -> [Float] {
         guard isRecording else { return [] }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        if testAudioFile == nil {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+        }
         isRecording = false
         return lock.withLock {
             let out = keep ? samples : []

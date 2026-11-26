@@ -47,22 +47,10 @@ pub struct BridgeStatus {
     pub screen_recording: Option<bool>,
 }
 
-/// Default socket location: `$TMPDIR/bob-<uid>/native.sock`.
-pub fn default_socket_path() -> PathBuf {
-    let uid = current_uid();
-    std::env::temp_dir()
-        .join(format!("bob-{uid}"))
-        .join("native.sock")
-}
-
-/// The current user's id, found without `unsafe`: the home directory is owned by the user on macOS.
-/// Falls back to 0 only if `HOME` is unset or unreadable (the directory is still mode 0700).
-fn current_uid() -> u32 {
-    use std::os::unix::fs::MetadataExt;
-    std::env::var_os("HOME")
-        .and_then(|h| std::fs::metadata(h).ok())
-        .map(|m| m.uid())
-        .unwrap_or(0)
+/// The helper socket in the profile's private runtime folder (`paths`): `$TMPDIR/bob-<uid>/native.sock`,
+/// or `$BOB_HOME/run/native.sock`.
+pub fn socket_path() -> PathBuf {
+    crate::paths::runtime_dir().join("native.sock")
 }
 
 /// Single-instance guard: an exclusive lock on `bob.lock` in the private (0700) runtime directory. Returns
@@ -70,8 +58,7 @@ fn current_uid() -> u32 {
 /// if BOB crashes, so a stale lock can never block a restart. Without it, a second instance would
 /// replace the first one's helper socket and start a second model server.
 pub fn acquire_instance_lock(dir: &Path) -> io::Result<Option<std::fs::File>> {
-    std::fs::create_dir_all(dir)?;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    crate::fsutil::private_dir(dir)?;
     let file = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -88,8 +75,7 @@ pub fn acquire_instance_lock(dir: &Path) -> io::Result<Option<std::fs::File>> {
 /// then restrict the socket file to 0600 (NB-1).
 pub fn bind_socket(path: &Path) -> io::Result<UnixListener> {
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+        crate::fsutil::private_dir(dir)?;
     }
     if path.exists() {
         std::fs::remove_file(path)?;
@@ -518,7 +504,7 @@ mod tests {
 
     #[test]
     fn default_path_is_inside_a_per_user_directory() {
-        let p = default_socket_path();
+        let p = socket_path();
         assert!(p.ends_with("native.sock"));
         assert!(p
             .parent()

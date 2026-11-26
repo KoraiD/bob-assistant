@@ -91,6 +91,8 @@ flowchart LR
 | Simulator (test only): the real Ghost Text, Selection Actions and Dictation engines against a fake app, helper, models and user on a virtual clock; app profiles for TextEdit (plain and smart quotes), Electron and Chrome; seeded sessions replay exactly; test builds capture every log line in memory | `src-tauri/src/sim/` (`cargo test sim::`; soak: `cargo test sim::random::soak -- --ignored --nocapture`) | 14 regression tests for confirmed bugs (ignored until fixed); random sessions on every CI run for Ghost Text (48), Ghost setting combinations (64), Selection Actions (24) and Dictation (16), plus fuzzing of the MCP control server and the native bridge; checks cover wrong or unrequested text, password fields, credentials to cloud brains and text in the log |
 | End-to-end check in TextEdit | `scripts/e2e.swift` (`make e2e`) | 14 of 14 pass (Ghost Text, typo fix, gap, window switch, Fix grammar, undo, Explain) |
 | Quiet-apps and phrases editors, interactive ghost | `src/components/{GhostLists,GhostMark}.tsx` | done |
+| File locations and the separate profile (`BOB_HOME`) | `src-tauri/src/paths.rs` | done; unit tests, checked next to an installed BOB |
+| Test audio file for dictation (helper built with `-DBOB_TEST_HOOKS` only) | `TestHooks.swift`, `AudioRecorder(testAudioFile:)` | done; Swift tests |
 
 ## Decisions log
 | Date | Decision | Reason |
@@ -128,6 +130,8 @@ flowchart LR
 | 2026-11-24 | Language filter from letters plus common words, no language-ID model | catches the measured drifts (Vietnamese, French) in microseconds; a model would cost memory and latency on the Ghost Text hot path |
 | 2026-11-24 | Re-read the focused field after each change in the helper | Chrome updates the caret before the text; three cheap re-reads fix the stale chip at its source |
 | 2026-11-24 | Usage is a process-wide recorder saved at most every 30 s and at exit | engines count without new plumbing; counts only, never text |
+| 2026-11-26 | A separate profile through `BOB_HOME`, models shared | the Test Bench needs a second BOB that cannot touch the user's settings, memory, logs, keys or sockets; sharing models avoids a second 1 GB download. A bad value stops BOB (exit 2) instead of falling back to the real folders |
+| 2026-11-26 | Test hooks behind a compile flag, not `#if DEBUG` | `build-app.sh` builds the helper with `-c release` even for dev builds, so `DEBUG` would not include them; a flag keeps them out of every shipped build |
 | 2026-11-23 | Dictation state machine in Rust, audio in Swift | the core owns timing rules (250 ms minimum hold, 5-minute cap) as a pure, property-tested machine; the helper only records, gates silence and transcribes |
 
 ## Ghost Text pipeline
@@ -157,8 +161,23 @@ Actions and Dictation cleanup need `chat`. The registry refuses incapable assign
 brain is removed or loses a capability. A connection test proves capabilities with one-token requests and saves
 what it proved. The built-in brain resolves to the running sidecar's loopback endpoint and per-launch key.
 
+## File locations
+| What | Normal | Separate profile (`BOB_HOME=/tmp/bob-test`) |
+|---|---|---|
+| Settings, memory, profile notes, usage | `~/Library/Application Support/dev.bob.assistant` | `$BOB_HOME/config` |
+| Models | `~/Library/Application Support/dev.bob.assistant/models` | shared with the normal profile |
+| Logs and activity trail | `~/Library/Logs/BOB` | `$BOB_HOME/logs` |
+| Sockets, instance lock, model server key and PID | `$TMPDIR/bob-<uid>` | `$BOB_HOME/run` |
+| API keys | Keychain service `dev.bob.assistant` | Keychain service `dev.bob.assistant.separate-profile` |
+
+Every folder is 0700. `BOB_HOME` must be absolute, without `.` or `..`, not `/` or the home folder, and short
+enough for `run/control.sock` to fit a socket path (103 bytes). A separate profile does not save the window position
+and cannot change the login item, and its tray tooltip and window title end in "(separate profile)". The web view's
+storage (theme, welcome tour seen) is still shared, because WebKit keeps it per app bundle. `bob-mcp` follows
+`BOB_HOME` too, so an agent reaches the matching BOB.
+
 ## Native bridge protocol (v1)
-Version 2. Newline-delimited JSON over `$TMPDIR/bob-<uid>/native.sock`. Helper to core: `hello`, `permissions`, `focus`,
+Version 2. Newline-delimited JSON over `native.sock` in the runtime folder (File locations). Helper to core: `hello`, `permissions`, `focus`,
 `text_state`, `error`, `key`. Core to helper: `hello_ack`, `reject`, `show_chip`, `hide_chip`, `insert_text`, `capture_keys`,
 `request_permissions`, `quit`. Unknown `type` values are
 ignored on both sides. Shared fixtures: `native/bob-native/Tests/Fixtures/*.jsonl` (decoded and re-encoded by both test suites).
