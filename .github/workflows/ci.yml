@@ -74,3 +74,6 @@ jobs:
       - name: Swift tests
         working-directory: native/bob-native
         run: swift test
+      - name: Test Bench logic tests
+        working-directory: native/test-bench
+        run: swift test

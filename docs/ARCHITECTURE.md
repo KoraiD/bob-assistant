@@ -92,6 +92,7 @@ flowchart LR
 | End-to-end check in TextEdit | `scripts/e2e.swift` (`make e2e`) | 14 of 14 pass (Ghost Text, typo fix, gap, window switch, Fix grammar, undo, Explain) |
 | Quiet-apps and phrases editors, interactive ghost | `src/components/{GhostLists,GhostMark}.tsx` | done |
 | File locations and the separate profile (`BOB_HOME`) | `src-tauri/src/paths.rs` | done; unit tests, checked next to an installed BOB |
+| Test Bench: a typist types like a person into the bench's own editor while a test BOB (separate profile) suggests; every step is checked (text, Tab and Shift+Tab, chip following the text, Esc). It holds your BOB's instance lock, types only while its editor has focus and stops when anyone touches the mouse or keyboard. A fake OpenAI-compatible brain continues corpus sentences | `native/test-bench/`, `scripts/test-bench.sh`, `scripts/fake-brain.py` (`make test-bench`) | done; logic tests in CI (a correct fake BOB gives no findings, injected bugs are found) |
 | Test audio file for dictation (helper built with `-DBOB_TEST_HOOKS` only) | `TestHooks.swift`, `AudioRecorder(testAudioFile:)` | done; Swift tests |
 
 ## Decisions log
@@ -131,6 +132,7 @@ flowchart LR
 | 2026-11-24 | Re-read the focused field after each change in the helper | Chrome updates the caret before the text; three cheap re-reads fix the stale chip at its source |
 | 2026-11-24 | Usage is a process-wide recorder saved at most every 30 s and at exit | engines count without new plumbing; counts only, never text |
 | 2026-11-26 | A separate profile through `BOB_HOME`, models shared | the Test Bench needs a second BOB that cannot touch the user's settings, memory, logs, keys or sockets; sharing models avoids a second 1 GB download. A bad value stops BOB (exit 2) instead of falling back to the real folders |
+| 2026-11-26 | The Test Bench types into its own editor only, through the HID event stream | BOB's key tap only sees events at the HID or session level, so `postToPid` would skip BOB; the bench owns the window it types into, checks focus before every key and watches for other input, and reads BOB's chip label through Accessibility |
 | 2026-11-26 | Test hooks behind a compile flag, not `#if DEBUG` | `build-app.sh` builds the helper with `-c release` even for dev builds, so `DEBUG` would not include them; a flag keeps them out of every shipped build |
 | 2026-11-23 | Dictation state machine in Rust, audio in Swift | the core owns timing rules (250 ms minimum hold, 5-minute cap) as a pure, property-tested machine; the helper only records, gates silence and transcribes |
 

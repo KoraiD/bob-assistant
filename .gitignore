@@ -20,6 +20,7 @@ src-tauri/gen/
 
 # Swift
 native/bob-native/.build/
+native/test-bench/.build/
 native/bob-native/.swiftpm/
 native/bob-native/Frameworks/
 native/bob-native/Frameworks/

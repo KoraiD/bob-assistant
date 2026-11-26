@@ -3,7 +3,7 @@
 CARGO_MANIFEST := src-tauri/Cargo.toml
 NATIVE_DIR := native/bob-native
 
-.PHONY: audit help setup dev build whisper native app release sidecars probe test test-rust test-swift test-ui screenshot bench style-bench e2e lint fmt check-kiro check clean
+.PHONY: audit help setup dev build whisper native app release sidecars probe test test-rust test-swift test-ui screenshot bench style-bench e2e test-bench lint fmt check-kiro check clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[35m%-12s\033[0m %s\n", $$1, $$2}'
@@ -39,8 +39,9 @@ test: native test-rust test-swift test-ui ## Run every test suite
 test-rust: ## Rust unit + property tests
 	cargo test --manifest-path $(CARGO_MANIFEST)
 
-test-swift: ## Swift package tests
+test-swift: ## Swift package tests (helper and Test Bench logic)
 	cd $(NATIVE_DIR) && swift test
+	cd native/test-bench && swift test
 
 test-ui: ## Frontend tests
 	npm test
@@ -53,6 +54,9 @@ style-bench: ## What the language and style settings change on the real model (a
 
 e2e: ## End-to-end check of the running BOB in TextEdit with real key events (takes over the keyboard for a minute)
 	swiftc -O scripts/e2e.swift -o /tmp/bob-e2e && /tmp/bob-e2e
+
+test-bench: ## Test Bench: a test BOB (separate profile) suggests while a typist types into the bench's own editor (quit your BOB first; ARGS="--brain builtin --minutes 10")
+	bash scripts/test-bench.sh $(ARGS)
 
 screenshot: ## Capture the UI with headless Chrome into bench-results/local/ (visual review)
 	bash scripts/screenshot.sh
