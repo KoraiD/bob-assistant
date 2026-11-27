@@ -51,6 +51,7 @@ feature that changes the answer.
 | Logs | `~/Library/Logs/BOB/bob.log` (0600, rotated at 5 MB, 3 old files): states, sizes and timings only; every line is also redacted | yes, locally |
 | Activity trail | `~/Library/Logs/BOB/audit.jsonl` (0600, rotated at 2 MB): settings changes, brains (never keys), text sent to brains as feature, brain, cloud or not, character count and whether personal context was included; AI agent calls as tool, characters, duration and outcome | yes, locally |
 | AI agents (MCP, opt-in) | text an agent sends goes to your brains with the same rules as the hotkeys; only same-user processes can connect | not stored (audited without text) |
+| The "Try it" prompt (Brains panel) | to the brain you test; redacted for cloud brains; the activity trail records the size, never the text | not stored |
 | Transcripts, typed text, selections | never logged | no |
 | Separate profile (`BOB_HOME`, for testing; development builds only) | its settings, logs, keys and sockets stay under that folder and a separate Keychain service; only downloaded models and the window's theme are shared with your BOB | yes, in that folder |
 | API keys | macOS Keychain | yes |

@@ -141,6 +141,18 @@ impl TokenEvent {
     }
 }
 
+/// The "Try it" prompt as it may leave BOB (code review SEC-17): redacted for cloud brains like every other
+/// path, and recorded in the activity trail (without text).
+fn try_prompt(brain: &crate::brain::BrainConfig, prompt: String) -> String {
+    let prompt = if brain.is_cloud() {
+        crate::ghost::redact::scrub(&prompt)
+    } else {
+        prompt
+    };
+    crate::audit::sent("try_it", brain, prompt.chars().count(), false);
+    prompt
+}
+
 /// "Try it": stream a short completion (`mode = "ghost"`) or chat answer (`"chat"`) from a brain.
 /// The prompt is the user's own input in the panel and is never logged.
 #[tauri::command]
@@ -152,6 +164,7 @@ pub async fn brain_try(
     mode: String,
 ) -> Result<u64, String> {
     let brain = brains.resolve(&id).await.map_err(|e| e.to_string())?;
+    let prompt = try_prompt(&brain.config, prompt);
     let request_id = NEXT_REQUEST.fetch_add(1, Ordering::SeqCst);
     tauri::async_runtime::spawn(async move {
         let emit = |e: TokenEvent| {
@@ -715,4 +728,46 @@ pub async fn system_info() -> Result<crate::system::SystemInfo, String> {
 #[tauri::command]
 pub async fn running_apps() -> Result<Vec<crate::system::RunningApp>, String> {
     Ok(crate::system::running_apps())
+}
+
+#[cfg(test)]
+mod try_tests {
+    use super::*;
+    use crate::brain::{BrainConfig, ProviderKind};
+
+    fn brain(id: &str, endpoint: &str) -> BrainConfig {
+        BrainConfig {
+            id: id.into(),
+            name: id.into(),
+            kind: ProviderKind::OpenAiCompatible,
+            endpoint: endpoint.into(),
+            model: None,
+            capabilities: ProviderKind::OpenAiCompatible.default_capabilities(),
+            has_api_key: false,
+            share_context: None,
+        }
+    }
+
+    /// Code review SEC-17: "Try it" redacts for cloud brains and is audited, like every other path.
+    #[test]
+    fn try_it_redacts_for_cloud_brains_and_is_audited() {
+        // Built at run time: no key-shaped literal in the repository.
+        let key = format!("ghp_{}", "a1B2".repeat(9));
+        let text = format!("my token is {key}");
+        let cloud = brain("try-cloud", "https://api.example.com/v1");
+        let sent = try_prompt(&cloud, text.clone());
+        assert!(!sent.contains(&key), "{sent}");
+        let local = brain("try-local", "http://127.0.0.1:11434/v1");
+        assert_eq!(try_prompt(&local, text.clone()), text);
+        let trail = crate::audit::recent(Some("data.sent"), 50);
+        for id in ["try-cloud", "try-local"] {
+            assert!(
+                trail
+                    .iter()
+                    .any(|e| e.detail["brain"] == id && e.detail["feature"] == "try_it"),
+                "{id}"
+            );
+        }
+        assert!(!format!("{trail:?}").contains("my token"));
+    }
 }

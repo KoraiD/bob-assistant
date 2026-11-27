@@ -24,6 +24,8 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
   minutes.
 - A crash report in the log no longer quotes the values in Rust's panic message, which could include a piece of
   the text being typed. The location is still logged.
+- "Try it" in the Brains panel redacts credentials for cloud brains and appears in the activity trail, like every
+  other way text leaves BOB. The activity trail also explains withheld dictations and deleted model files.
 - Redaction also finds keys glued to other text by punctuation (CSV, tables, code, quotes) and long lowercase
   tokens that mix letters and digits, such as UUIDs.
 ### Fixed

@@ -50,6 +50,10 @@ export function auditLabel(e: AuditEntry): string {
   switch (e.kind) {
     case "data.sent":
       return `Text sent to ${d.cloud ? "cloud" : "local"} brain ${str("brain")} for ${str("feature").replace("_", " ")} (${str("chars")} characters${d.personal_context ? ", with personal context" : ""})`;
+    case "dictation_cleanup.withheld":
+      return `Dictation not sent to brain ${str("brain")}: it looked like it contained a password or key`;
+    case "model.mismatch":
+      return "A model file failed its check and was deleted (download it again)";
     case "mcp.call":
       return `AI agent used ${str("tool")}${d.ok === false ? " (failed)" : ""}`;
     case "brain.saved":

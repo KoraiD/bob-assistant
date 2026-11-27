@@ -82,6 +82,11 @@ describe("general helpers", () => {
   it("labels audit entries without any text content", () => {
     expect(auditLabel({ at: 0, kind: "brain.saved", detail: { brain: "x", key: "set" } })).toBe("Brain saved: x (API key set)");
     expect(auditLabel({ at: 0, kind: "security.peer_rejected", detail: {} })).toMatch(/another user/);
+    expect(auditLabel({ at: 0, kind: "data.sent", detail: { feature: "try_it", brain: "openai", cloud: true, chars: 12 } })).toBe(
+      "Text sent to cloud brain openai for try it (12 characters)",
+    );
+    expect(auditLabel({ at: 0, kind: "dictation_cleanup.withheld", detail: { brain: "openai", chars: 40 } })).toMatch(/not sent to brain openai/);
+    expect(auditLabel({ at: 0, kind: "model.mismatch", detail: { bytes: 1, deleted: true } })).toMatch(/deleted/);
     expect(JSON.parse(mcpSnippet(null)).mcpServers.bob.command).toMatch(/bob-mcp$/);
   });
 });
