@@ -39,7 +39,7 @@ log = "0.4"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time", "sync", "process", "io-util", "net", "fs", "signal", "io-std"] }
 futures-util = "0.3.34"
 thiserror = "2.0.21"
-sha2 = "0.10.9"
+sha2 = "0.11.1"
 hex = "0.4.3"
 url = "2.5.9"
 keyring = { version = "3.6.3", features = ["apple-native"] }
@@ -63,6 +63,11 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 [dev-dependencies]
 proptest = "1"
 tokio = { version = "1.53.3", features = ["test-util"] }
+
+# Debug builds (`make app`, the Test Bench, tests) hash models before loading them (code review SEC-13):
+# unoptimized SHA-256 takes 11.5 s for the default model instead of 0.45 s (docs/PERFORMANCE.md).
+[profile.dev.package.sha2]
+opt-level = 3
 
 [profile.release]
 lto = "thin"

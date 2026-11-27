@@ -35,6 +35,9 @@ pub const MIC_HELP: &str =
     "BOB needs the microphone: System Settings > Privacy & Security > Microphone > BOB.";
 pub const MODEL_HELP: &str = "Download a dictation model first (Overview > Voice Dictation).";
 pub const SECURE_HELP: &str = "BOB never types into password fields.";
+pub const CHECKING_HELP: &str = "BOB is checking the dictation model; try again in a moment.";
+pub const DAMAGED_HELP: &str =
+    "The dictation model changed after it was downloaded, so BOB deleted it. Download it again.";
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DictationStats {
@@ -62,6 +65,8 @@ struct Shared {
     unloaded: AtomicBool,
     /// The last inserted dictation, kept in memory only, for [`LAST_KEEP`].
     last: Mutex<Option<(String, Instant)>>,
+    /// Tells the engine when a model check finishes, so it sends the helper its model.
+    wake: mpsc::WeakUnboundedSender<In>,
 }
 
 impl Shared {
@@ -86,6 +91,26 @@ impl Shared {
         last.as_ref().map(|(t, _)| t.clone())
     }
 
+    /// The chosen model when it is installed and verified this launch (code review SEC-13). An unchecked
+    /// file is hashed in the background first; the engine sends the configuration again when it is done.
+    fn loadable_model(&self, s: &DictationSettings) -> Option<PathBuf> {
+        let entry = models::find_speech(&s.model)?;
+        let path = model_path(&self.models_dir, s)?;
+        match models::integrity(&path) {
+            models::Integrity::Verified => Some(path),
+            models::Integrity::Missing => None,
+            models::Integrity::Unchecked => {
+                let wake = self.wake.clone();
+                models::verify_in_background(path, entry.sha256, move |result| {
+                    if let Some(tx) = wake.upgrade() {
+                        let _ = tx.send(In::ModelChecked(result.map_err(|e| e.to_string())));
+                    }
+                });
+                None
+            }
+        }
+    }
+
     fn command(&self) -> CoreCommand {
         let s = self.settings();
         CoreCommand::SetDictation {
@@ -94,7 +119,7 @@ impl Shared {
                 modifiers: s.hotkey.modifiers.clone(),
             }),
             model_path: if s.enabled && !self.unloaded.load(Ordering::SeqCst) {
-                model_path(&self.models_dir, &s).map(|p| p.display().to_string())
+                self.loadable_model(&s).map(|p| p.display().to_string())
             } else {
                 None
             },
@@ -198,6 +223,8 @@ enum In {
         generation: u64,
     },
     PasteLast,
+    /// A background model check finished: `Ok(false)` means the file did not match and was deleted.
+    ModelChecked(Result<bool, String>),
     IdleCheck,
 }
 
@@ -213,6 +240,7 @@ pub fn spawn(
         .as_ref()
         .map(|d| DictationSettings::load(&d.join(SETTINGS_FILE)))
         .unwrap_or_default();
+    let (tx, rx) = mpsc::unbounded_channel();
     let shared = Arc::new(Shared {
         settings: Mutex::new(settings),
         stats: Mutex::new(DictationStats::default()),
@@ -220,8 +248,8 @@ pub fn spawn(
         models_dir,
         unloaded: AtomicBool::new(false),
         last: Mutex::new(None),
+        wake: tx.downgrade(),
     });
-    let (tx, rx) = mpsc::unbounded_channel();
     let engine = Engine {
         brains,
         context,
@@ -332,10 +360,14 @@ impl Engine {
                 if self.secure {
                     return self.orb(OrbState::Error, Some(SECURE_HELP.into()));
                 }
-                let installed = model_path(&self.shared.models_dir, &self.settings()).is_some();
-                if !installed {
+                let Some(model) = model_path(&self.shared.models_dir, &self.settings()) else {
                     self.stats(|s| s.last_error = Some(MODEL_HELP.into()));
                     return self.orb(OrbState::Error, Some(MODEL_HELP.into()));
+                };
+                if models::integrity(&model) != models::Integrity::Verified {
+                    // Starts the check if none runs; the helper gets the model when it passes.
+                    self.sink.send(self.shared.command());
+                    return self.orb(OrbState::Error, Some(CHECKING_HELP.into()));
                 }
                 self.last_used = Instant::now();
                 if self.shared.unloaded.swap(false, Ordering::SeqCst) {
@@ -445,6 +477,19 @@ impl Engine {
                     let text = with_spacing(self.last_char, &text);
                     self.sink.send(CoreCommand::InsertText { text });
                 }
+            }
+            In::ModelChecked(result) => {
+                match result {
+                    Ok(true) => {}
+                    Ok(false) => self.stats(|s| s.model_error = Some(DAMAGED_HELP.into())),
+                    Err(e) => {
+                        // Not sent again here (that would start another check at once); the next press
+                        // or settings change retries.
+                        log::warn!("dictation model check failed: {e}");
+                        return self.stats(|s| s.model_error = Some(CHECKING_HELP.into()));
+                    }
+                }
+                self.sink.send(self.shared.command());
             }
             In::IdleCheck => {
                 let s = self.shared.settings();
@@ -663,7 +708,9 @@ mod tests {
         std::fs::create_dir_all(&models_dir).unwrap();
         if installed {
             let entry = models::find_speech(super::super::settings::DEFAULT_MODEL).unwrap();
-            std::fs::write(models::installed_path(&models_dir, entry), b"").unwrap();
+            let file = models::installed_path(&models_dir, entry);
+            std::fs::write(&file, b"").unwrap();
+            models::assume_verified(&file);
         }
         let svc = Arc::new(BrainService::new(
             root.join("c"),
@@ -968,6 +1015,40 @@ mod tests {
             panic!()
         };
         assert!(hotkey.is_none(), "disabled dictation registers no hotkey");
+    }
+    /// Code review SEC-13: the helper only gets a speech model that BOB verified this launch.
+    #[tokio::test]
+    async fn an_unverified_speech_model_is_checked_before_the_helper_gets_it() {
+        let (h, rec, root) = setup(false);
+        let entry = models::find_speech(super::super::settings::DEFAULT_MODEL).unwrap();
+        let file = models::installed_path(&root.join("models"), entry);
+        std::fs::write(&file, b"not the pinned whisper model").unwrap();
+        // Unchecked: no path for the helper; the check starts in the background.
+        let CoreCommand::SetDictation { model_path, .. } = h.command() else {
+            panic!()
+        };
+        assert_eq!(model_path, None);
+        h.native(key(true));
+        settle(30).await;
+        let cmds = rec.take();
+        assert!(!cmds.contains(&CoreCommand::StartRecording));
+        // The check finds a mismatch: the file is deleted and the configuration sent again without it.
+        for _ in 0..100 {
+            if h.stats().model_error.is_some() {
+                break;
+            }
+            settle(20).await;
+        }
+        assert_eq!(h.stats().model_error.as_deref(), Some(DAMAGED_HELP));
+        assert!(!file.exists());
+        assert!(rec.take().iter().all(|c| !matches!(
+            c,
+            CoreCommand::SetDictation {
+                model_path: Some(_),
+                ..
+            }
+        )));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

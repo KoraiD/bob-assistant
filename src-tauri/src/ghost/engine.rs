@@ -1884,7 +1884,11 @@ mod tests {
         let data = root.join("d");
         std::fs::create_dir_all(data.join("models")).unwrap();
         let entry = crate::brain::models::find("qwen2.5-1.5b-instruct-q4km").unwrap();
-        std::os::unix::fs::symlink(&model, data.join("models").join(entry.file)).unwrap();
+        // A hard link, not a symlink: BOB only loads regular files it verified (code review SEC-13).
+        let link = data.join("models").join(entry.file);
+        if std::fs::hard_link(&model, &link).is_err() {
+            std::fs::copy(&model, &link).unwrap();
+        }
         assert!(
             sidecar::locate_binary().is_some(),
             "run `make sidecars` first"

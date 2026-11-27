@@ -11,6 +11,9 @@ What BOB protects, how, and how it is checked. Privacy (what data goes where) is
   environment variables. Release builds ignore them for every choice of program or folder (see the table).
   BOB does not check its helper's and model server's signatures before starting them: they sit inside the signed,
   notarized bundle, which macOS (App Management) protects from other apps.
+- **Trust boundary 1c, model files:** the models folder is writable by any process of the user. Models are hashed
+  before they are loaded (see the table). A file changed in the moment between the check and the load, or while
+  it is loaded, is not detected.
 - **Trust boundary 2, the network:** only the brains you configure and Hugging Face downloads (pinned URLs,
   SHA-256 verified before install).
 - **Trust boundary 3, the web view:** strict CSP (`default-src 'self'`, no remote scripts, no `eval`). IPC is limited
@@ -29,6 +32,7 @@ What BOB protects, how, and how it is checked. Privacy (what data goes where) is
 | Screenshots for screen context stay in memory for the OCR call only | `ScreenContext.swift` |
 | Audio stays in the helper's memory, never on disk | `AudioRecorder.swift`, `Transcriber.swift` |
 | Downloads: pinned URL, size cap, SHA-256 before install, resumable | `brain/models.rs` (property test) |
+| Models are hashed again once per launch before llama-server or whisper loads them; the result stays in memory, tied to the file's device, inode, size, mtime and ctime, so any change is checked again. A file that does not match (or a symlink in its place) is never loaded; a mismatch deletes it and asks for a new download | `models::verified`, `BrainService::start_builtin`, dictation engine (tests) |
 | Third-party binaries (llama-server, whisper.xcframework): pinned version and SHA-256 | `scripts/versions.env`, fetch scripts |
 | Files with personal data are created 0600, written to a temporary file, synced, then renamed; the settings folder is 0700 | `fsutil.rs` (test) |
 | A brain server cannot exhaust memory: 8 MB per streamed answer, 64 KB per error body, 4 MB per SSE event | `brain/client.rs`, `brain/sse.rs` (tests) |

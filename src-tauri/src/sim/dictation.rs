@@ -504,7 +504,9 @@ fn brains_models_dir(config: &Config) -> std::path::PathBuf {
     let dir = root.join("models");
     let _ = std::fs::create_dir_all(&dir);
     if let Some(entry) = models::find_speech(DEFAULT_MODEL) {
-        let _ = std::fs::write(models::installed_path(&dir, entry), b"");
+        let file = models::installed_path(&dir, entry);
+        let _ = std::fs::write(&file, b"");
+        models::assume_verified(&file);
     }
     dir
 }

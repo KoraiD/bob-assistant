@@ -283,14 +283,203 @@ pub async fn download(
         return Err(DownloadError::HashMismatch);
     }
     tokio::fs::rename(&part, dest).await.map_err(io)?;
+    // Just hashed: no second pass before the first load.
+    remember(dest);
     Ok(dest.to_path_buf())
 }
 
-/// Verify an installed file's SHA-256 (used before handing a model to the sidecar).
+/// Verify an installed file's SHA-256 (no caching; see [`verified`] for the check before loading).
 pub async fn verify(path: &Path, sha256: &str) -> Result<bool, DownloadError> {
     let mut hasher = Sha256::new();
     hash_existing(path, &mut hasher).await?;
     Ok(hex::encode(hasher.finalize()) == sha256.to_ascii_lowercase())
+}
+
+// ---- Verification before loading (code review SEC-13) ----
+//
+// Any process of the user can write the models folder, so a file is hashed again before BOB hands it to
+// llama-server or to the helper's whisper, once per launch. The result is kept in memory only (a stamp
+// file could be forged) and is tied to the file's identity: device, inode, size, mtime and ctime. Writing,
+// replacing or `touch`ing the file changes ctime, which the owner cannot set back, so it is hashed again.
+// What remains is a change between the last check and the moment the other program opens the file.
+
+/// The identity of a file's current contents, as far as the file system tells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    dev: u64,
+    ino: u64,
+    len: u64,
+    mtime: (i64, i64),
+    ctime: (i64, i64),
+}
+
+fn stamp(path: &Path) -> Option<Stamp> {
+    use std::os::unix::fs::MetadataExt;
+    // `symlink_metadata`: a link swapped in for the model is not followed (it is not a file).
+    let m = std::fs::symlink_metadata(path).ok()?;
+    m.is_file().then(|| Stamp {
+        dev: m.dev(),
+        ino: m.ino(),
+        len: m.len(),
+        mtime: (m.mtime(), m.mtime_nsec()),
+        ctime: (m.ctime(), m.ctime_nsec()),
+    })
+}
+
+/// What is known about a model file right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Integrity {
+    /// Hashed this launch and unchanged since.
+    Verified,
+    /// Not hashed yet (or changed since): call [`verified`] or [`verify_in_background`].
+    Unchecked,
+    /// Not there (or not a regular file).
+    Missing,
+}
+
+type VerifiedFiles = std::sync::Mutex<std::collections::HashMap<PathBuf, Stamp>>;
+
+fn verified_files() -> &'static VerifiedFiles {
+    static FILES: std::sync::OnceLock<VerifiedFiles> = std::sync::OnceLock::new();
+    FILES.get_or_init(Default::default)
+}
+
+fn lock_verified() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, Stamp>> {
+    verified_files()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Cheap (one `lstat`): whether `path` was verified this launch and has not changed since.
+pub fn integrity(path: &Path) -> Integrity {
+    let Some(now) = stamp(path) else {
+        return Integrity::Missing;
+    };
+    if lock_verified().get(path) == Some(&now) {
+        Integrity::Verified
+    } else {
+        Integrity::Unchecked
+    }
+}
+
+/// Remember a file whose content BOB has just hashed itself (a finished download).
+fn remember(path: &Path) {
+    if let Some(s) = stamp(path) {
+        lock_verified().insert(path.to_path_buf(), s);
+    }
+}
+
+/// SHA-256 of a file, lowercase hex (blocking).
+fn hash_file(path: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            return Ok(hex::encode(hasher.finalize()));
+        }
+        hasher.update(&buf[..n]);
+    }
+}
+
+/// Hash `path` (blocking) and compare it with `sha256`. A file that does not match is deleted and never
+/// loaded (P3); the user can download it again.
+pub fn verify_blocking(path: &Path, sha256: &str) -> Result<bool, DownloadError> {
+    if integrity(path) == Integrity::Verified {
+        return Ok(true);
+    }
+    let before =
+        stamp(path).ok_or_else(|| DownloadError::Io("the model file is missing".into()))?;
+    let started = std::time::Instant::now();
+    let ok = hash_file(path).map_err(io)? == sha256.to_ascii_lowercase();
+    // A file that changed while it was read is not trusted either way: report it as not matching only
+    // if the hash failed, and do not remember it.
+    let unchanged = stamp(path) == Some(before);
+    log::info!(
+        "model check: {} bytes in {} ms, {}",
+        before.len,
+        started.elapsed().as_millis(),
+        if !ok {
+            "mismatch"
+        } else if unchanged {
+            "ok"
+        } else {
+            "changed while read"
+        }
+    );
+    if !ok {
+        crate::audit::record(
+            "model.mismatch",
+            serde_json::json!({ "bytes": before.len, "deleted": true }),
+        );
+        let _ = std::fs::remove_file(path);
+        lock_verified().remove(path);
+        return Ok(false);
+    }
+    if !unchanged {
+        return Err(DownloadError::Io(
+            "the model file changed while BOB checked it".into(),
+        ));
+    }
+    lock_verified().insert(path.to_path_buf(), before);
+    Ok(true)
+}
+
+/// Tests and the simulator use empty stand-in model files: treat one as verified.
+#[cfg(test)]
+pub fn assume_verified(path: &Path) {
+    remember(path);
+}
+
+/// [`verify_blocking`] off the async runtime's threads.
+pub async fn verified(path: &Path, sha256: &str) -> Result<bool, DownloadError> {
+    if integrity(path) == Integrity::Verified {
+        return Ok(true);
+    }
+    let (p, s) = (path.to_path_buf(), sha256.to_string());
+    tokio::task::spawn_blocking(move || verify_blocking(&p, &s))
+        .await
+        .map_err(|e| DownloadError::Io(e.to_string()))?
+}
+
+/// Start [`verify_blocking`] on its own thread unless one already runs for `path`; `done` gets the
+/// result. For callers without an async runtime (the dictation configuration).
+pub fn verify_in_background(
+    path: PathBuf,
+    sha256: &'static str,
+    done: impl FnOnce(Result<bool, DownloadError>) + Send + 'static,
+) {
+    static RUNNING: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+    {
+        let mut running = RUNNING
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if running.contains(&path) {
+            return;
+        }
+        running.push(path.clone());
+    }
+    let spawned = std::thread::Builder::new()
+        .name("bob-model-check".into())
+        .spawn({
+            let path = path.clone();
+            move || {
+                let res = verify_blocking(&path, sha256);
+                RUNNING
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .retain(|p| p != &path);
+                done(res);
+            }
+        });
+    if spawned.is_err() {
+        RUNNING
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|p| p != &path);
+    }
 }
 
 #[cfg(test)]
@@ -539,6 +728,96 @@ mod tests {
             .await,
             Err(DownloadError::Http(404))
         );
+    }
+
+    /// Code review SEC-13: verified once, trusted while unchanged, checked again after any write.
+    #[tokio::test]
+    async fn a_model_is_verified_once_and_again_after_it_changes() {
+        let dir = tmpdir("integrity");
+        let path = dir.join("m.gguf");
+        let good = content(4096);
+        std::fs::write(&path, &good).unwrap();
+        assert_eq!(integrity(&path), Integrity::Unchecked);
+        assert!(verified(&path, &sha(&good)).await.unwrap());
+        assert_eq!(integrity(&path), Integrity::Verified);
+        // Same size, same content length, new bytes: the ctime changes, so it is no longer trusted.
+        let mut bad = good.clone();
+        bad[0] ^= 1;
+        std::fs::write(&path, &bad).unwrap();
+        assert_eq!(integrity(&path), Integrity::Unchecked);
+        assert!(!verified(&path, &sha(&good)).await.unwrap());
+        assert!(!path.exists(), "a file that does not match is deleted");
+        assert_eq!(integrity(&path), Integrity::Missing);
+        // A symlink in place of the model is not a model file.
+        let target = dir.join("elsewhere.gguf");
+        std::fs::write(&target, &good).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert_eq!(integrity(&path), Integrity::Missing);
+        assert!(verified(&path, &sha(&good)).await.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn a_finished_download_counts_as_verified() {
+        let data = content(10_000);
+        let body = data.clone();
+        let server = TestServer::start(move |_| Response::new(200).body(body.clone())).await;
+        let dir = tmpdir("dl-verified");
+        let dest = dir.join("m.gguf");
+        let spec = DownloadSpec {
+            url: server.base.clone(),
+            size: data.len() as u64,
+            sha256: sha(&data),
+        };
+        download(&reqwest::Client::new(), &spec, &dest, |_| {}, || false)
+            .await
+            .unwrap();
+        assert_eq!(integrity(&dest), Integrity::Verified);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn background_verification_reports_its_result() {
+        let dir = std::env::temp_dir().join(format!("bob-dl-bg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("m.bin");
+        let data = content(2048);
+        std::fs::write(&path, &data).unwrap();
+        // The background API takes a 'static hash, as the catalog's are.
+        let hash: &'static str = Box::leak(sha(&data).into_boxed_str());
+        let (tx, rx) = std::sync::mpsc::channel();
+        verify_in_background(path.clone(), hash, move |r| tx.send(r).unwrap());
+        assert_eq!(rx.recv_timeout(Duration::from_secs(10)).unwrap(), Ok(true));
+        assert_eq!(integrity(&path), Integrity::Verified);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Measures the check on an installed catalog model (docs/PERFORMANCE.md). Read-only: it hashes
+    /// without the delete-on-mismatch of `verify_blocking`. `BOB_MODEL_FILE=<path to a catalog file>`.
+    #[test]
+    #[ignore]
+    fn real_model_check_time() {
+        let Some(p) = std::env::var_os("BOB_MODEL_FILE").map(PathBuf::from) else {
+            eprintln!("set BOB_MODEL_FILE to an installed catalog model");
+            return;
+        };
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+        let entry = CATALOG
+            .iter()
+            .chain(SPEECH_CATALOG)
+            .find(|m| m.file == name)
+            .expect("not a catalog file");
+        for run in 1..=3 {
+            let t = std::time::Instant::now();
+            assert_eq!(hash_file(&p).unwrap(), entry.sha256);
+            eprintln!(
+                "{} ({} bytes) run {run}: {} ms",
+                entry.id,
+                entry.size,
+                t.elapsed().as_millis()
+            );
+        }
     }
 
     proptest::proptest! {

@@ -8,6 +8,9 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
 - Release builds ignore the development environment variables (`BOB_HOME`, `BOB_NATIVE_PATH`,
   `BOB_LLAMA_SERVER`, `BOB_CONTROL_SOCKET`) and take `HOME`, `TMPDIR` and `PATH` from the system. Before, another
   program could start BOB with its own helper and have it run with BOB's Accessibility and Microphone permissions.
+- Models are checked (SHA-256) once per launch before they are loaded. A model file that changed after its
+  download is deleted, and BOB asks you to download it again. The check takes about half a second for the default
+  model.
 ### Fixed
 - Ghost Text: a suggestion that was dismissed with `Esc` while it was still arriving no longer comes back.
 - Ghost Text: `⇧Tab` inserts what was on screen (finishing its last word), not words that arrived after the

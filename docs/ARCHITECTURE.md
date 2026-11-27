@@ -132,6 +132,7 @@ flowchart LR
 | 2026-11-24 | Re-read the focused field after each change in the helper | Chrome updates the caret before the text; three cheap re-reads fix the stale chip at its source |
 | 2026-11-24 | Usage is a process-wide recorder saved at most every 30 s and at exit | engines count without new plumbing; counts only, never text |
 | 2026-11-26 | A separate profile through `BOB_HOME`, models shared | the Test Bench needs a second BOB that cannot touch the user's settings, memory, logs, keys or sockets; sharing models avoids a second 1 GB download. A bad value stops BOB (exit 2) instead of falling back to the real folders |
+| 2026-11-27 | Models are hashed once per launch before loading, remembered in memory only (code review SEC-13) | any same-user process can replace a model file, which llama-server and whisper then parse. A stamp file could be forged, so the result is kept in memory and tied to the file's identity including ctime. Costs 0.45 s before the first launch's model server starts (docs/PERFORMANCE.md); sha2 moved to 0.11 for the Arm SHA-256 instructions |
 | 2026-11-27 | Development overrides only in debug builds; release builds reset `HOME`, `TMPDIR` and `PATH` at launch (code review SEC-12) | any same-user process could start a release BOB with `open --env BOB_NATIVE_PATH=...` and have its own program run with BOB's Accessibility and Microphone permissions. Checking the signatures of the bundled programs was left out: macOS already protects a notarized bundle from other apps |
 | 2026-11-26 | The Test Bench types into its own editor only, through the HID event stream | BOB's key tap only sees events at the HID or session level, so `postToPid` would skip BOB; the bench owns the window it types into, checks focus before every key and watches for other input, and reads BOB's chip label through Accessibility |
 | 2026-11-26 | Test hooks behind a compile flag, not `#if DEBUG` | `build-app.sh` builds the helper with `-c release` even for dev builds, so `DEBUG` would not include them; a flag keeps them out of every shipped build |
@@ -193,6 +194,6 @@ Typed text only travels in `text_state.before_caret`, is capped to the last 2000
 
 ## Dependencies
 Rust: tauri 2, serde, serde_json (float_roundtrip), log, env_logger, tokio, reqwest 0.13 (rustls), futures-util, bytes,
-thiserror, sha2, hex, rand, url, keyring (apple-native), libc (system home and temp folders; it was already in the
+thiserror, sha2 0.11 (optimized in debug builds too), hex, rand, url, keyring (apple-native), libc (system home and temp folders; it was already in the
 build through other crates); dev: proptest. JS: react 18, vite 6, tailwind 4, vitest 3,
 @tauri-apps/api. Swift: standard library and Swift Testing only (no third-party packages).

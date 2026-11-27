@@ -302,3 +302,20 @@ which now delays only the chip, never a key.
 
 **Changes:** the key tap runs on its own thread (`dev.bob.keytap`, user-interactive) and still only reads atomic
 flags; Accessibility calls time out after 0.4 s; a snapshot reads the text once.
+
+## Model check before loading (code review SEC-13, 2026-11-27)
+BOB now hashes a model file (SHA-256) once per launch before llama-server or the helper's whisper loads it; a file
+it downloaded itself counts as checked. The check runs before the model server starts, so it adds to the time
+until the first suggestion after launch (not to any keystroke). **Method:** the ignored test
+`brain::models::tests::real_model_check_time` hashes an installed catalog file three times (read-only; the file is
+already in the page cache after the first run, as it is when llama-server reads it right after). Apple M4 Max.
+| Build | sha2 | Qwen2.5 1.5B (1.12 GB) | Whisper large-v3 turbo (574 MB) |
+|---|---|---|---|
+| release | 0.10.9 (software on aarch64 without the `asm` feature) | 1,900 to 1,960 ms | 989 to 1,008 ms |
+| release | 0.11.1 (Arm SHA-256 instructions, picked at runtime) | 445 to 484 ms | 229 to 254 ms |
+| debug | 0.11.1, unoptimized | 11,484 to 11,745 ms | not run |
+| debug | 0.11.1 with `[profile.dev.package.sha2] opt-level = 3` | 440 to 474 ms | not run |
+For comparison, `openssl dgst -sha256` (OpenSSL 4.1) takes 0.46 s for the 1.12 GB file. **Research:** sha2 0.10
+compiles its aarch64 backend only with the `asm` feature (a C build through `sha2-asm`); sha2 0.11 selects the
+Arm `sha2` instructions at runtime through `cpufeatures` (read in the crates' `src/sha256.rs`). sha2 0.11.1 was
+already in the build through Tauri, so the change adds no new crate.

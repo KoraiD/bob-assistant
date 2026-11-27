@@ -32,6 +32,8 @@ pub enum ServiceError {
     UnknownModel(String),
     #[error("model {0} is not downloaded yet")]
     ModelMissing(String),
+    #[error("the file of model {0} changed after it was downloaded, so BOB deleted it; download it again")]
+    ModelDamaged(String),
     #[error("the built-in brain is not running (choose a model in the Brain panel)")]
     BuiltinNotRunning,
 }
@@ -347,6 +349,10 @@ impl BrainService {
         if !model.is_file() {
             return Err(ServiceError::ModelMissing(model_id.into()));
         }
+        // Hashed once per launch before llama-server parses it (code review SEC-13).
+        if !models::verified(&model, entry.sha256).await? {
+            return Err(ServiceError::ModelDamaged(model_id.into()));
+        }
         let binary = sidecar::locate_binary().ok_or(SidecarError::BinaryNotFound)?;
         self.stop_builtin().await;
         let cfg = SidecarConfig::new(binary, model, self.runtime_dir.clone());
@@ -531,6 +537,25 @@ mod tests {
             Some(ServiceError::UnknownModel("nope".into()))
         );
         assert!(svc.models().await.iter().all(|m| !m.installed && !m.active));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    /// Code review SEC-13: a model file swapped after its download is never handed to llama-server.
+    #[tokio::test]
+    async fn a_model_file_that_changed_after_download_is_refused_and_deleted() {
+        let (svc, root) = service("damaged");
+        let id = "qwen2.5-1.5b-instruct-q4km";
+        let model = models::installed_path(svc.models_dir(), models::find(id).unwrap());
+        std::fs::create_dir_all(model.parent().unwrap()).unwrap();
+        std::fs::write(&model, b"GGUF not the pinned model").unwrap();
+        assert_eq!(
+            svc.start_builtin(id, Duration::from_secs(1)).await.err(),
+            Some(ServiceError::ModelDamaged(id.into()))
+        );
+        assert!(!model.exists(), "the damaged file is deleted");
+        assert!(
+            svc.sidecar.lock().await.is_none(),
+            "no model server started"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
