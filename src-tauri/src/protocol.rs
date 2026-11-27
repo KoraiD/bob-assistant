@@ -215,6 +215,10 @@ pub enum NativeEvent {
     /// A captured key press (GT-10 to GT-12). Never sent while capture is off (GT-13).
     Key {
         key: Key,
+        /// The suggestion as the helper displayed it when the key was pressed (code review GT-14). Absent from older
+        /// helpers. A suggestion, never typed text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shown: Option<String>,
     },
     /// Any `type` this build does not know.
     #[serde(other)]
@@ -462,7 +466,11 @@ impl fmt::Debug for NativeEvent {
                 .field("error", error)
                 .finish(),
             NativeEvent::Error { .. } => f.debug_struct("Error").finish_non_exhaustive(),
-            NativeEvent::Key { key } => f.debug_struct("Key").field("key", key).finish(),
+            NativeEvent::Key { key, shown } => f
+                .debug_struct("Key")
+                .field("key", key)
+                .field("shown_chars", &shown.as_ref().map(|s| s.chars().count()))
+                .finish(),
             NativeEvent::Unknown => f.write_str("Unknown"),
         }
     }
@@ -776,7 +784,7 @@ mod tests {
                 ),
             "(?s).{0,60}".prop_map(|message| NativeEvent::Error { message }),
             prop_oneof![Just(Key::Tab), Just(Key::ShiftTab), Just(Key::Escape)]
-                .prop_map(|key| NativeEvent::Key { key }),
+                .prop_map(|key| NativeEvent::Key { key, shown: None }),
         ]
     }
 

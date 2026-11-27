@@ -617,7 +617,7 @@ impl Engine {
             }) => {
                 self.on_text(app_bundle_id, secure, before_caret, selection_len, caret);
             }
-            Input::Native(NativeEvent::Key { key }) => self.on_key(key),
+            Input::Native(NativeEvent::Key { key, shown }) => self.on_key(key, shown),
             Input::Native(NativeEvent::Typo {
                 word,
                 fix,
@@ -638,7 +638,13 @@ impl Engine {
                 fix,
             } => {
                 let current = self.ctx.as_ref().is_some_and(|c| c.before == before);
-                if generation != self.generation || !current || !self.enabled || self.paused {
+                let dismissed = self.dismissed_for.as_deref() == Some(before.as_str());
+                if generation != self.generation
+                    || !current
+                    || dismissed
+                    || !self.enabled
+                    || self.paused
+                {
                     log::trace!(
                         "ghost: stale chip dropped (generation {generation}, current {current})"
                     );
@@ -822,7 +828,7 @@ impl Engine {
         self.schedule(before, now);
     }
 
-    fn on_key(&mut self, key: Key) {
+    fn on_key(&mut self, key: Key, shown: Option<String>) {
         let (Some(chip), Some(ctx)) = (self.chip.clone(), self.ctx.clone()) else {
             return;
         };
@@ -868,6 +874,9 @@ impl Engine {
                 self.sink.send(CoreCommand::InsertText { text: word });
             }
             Key::ShiftTab => {
+                // Code review GT-14: take what the user saw, finishing its last word, not words that streamed in after
+                // the key press.
+                let visible = chip::accept_shown(&visible, shown.as_deref());
                 self.stat(|s| s.accepted_all += 1);
                 let n = crate::usage::words(&visible);
                 crate::usage::record(|d| {
@@ -976,10 +985,13 @@ impl Engine {
         }
     }
 
+    /// Stop the request in flight. Its tokens may already wait in the queue, so its generation is retired
+    /// too: nothing it sent is shown afterwards (code review GT-15: a dismissed chip came back 400 ms after Esc).
     fn cancel(&mut self) {
         if let Some(h) = self.pending.take() {
             h.abort();
         }
+        self.generation += 1;
         self.first_chip_pending = None;
     }
 
@@ -1379,7 +1391,10 @@ mod tests {
         g.native(text("over the"));
         settle(300).await;
         rec.take();
-        g.native(NativeEvent::Key { key: Key::Tab });
+        g.native(NativeEvent::Key {
+            key: Key::Tab,
+            shown: None,
+        });
         settle(50).await;
         assert_eq!(
             rec.take(),
@@ -1392,7 +1407,10 @@ mod tests {
         settle(50).await;
         assert_eq!(rec.chips(), vec![" dog.".to_string()]);
         rec.take();
-        g.native(NativeEvent::Key { key: Key::ShiftTab });
+        g.native(NativeEvent::Key {
+            key: Key::ShiftTab,
+            shown: None,
+        });
         settle(50).await;
         assert_eq!(
             rec.take(),
@@ -1423,7 +1441,10 @@ mod tests {
         settle(300).await;
         assert_eq!(rec.chips().last().unwrap(), "te the possibility of using");
         rec.take();
-        g.native(NativeEvent::Key { key: Key::Tab });
+        g.native(NativeEvent::Key {
+            key: Key::Tab,
+            shown: None,
+        });
         settle(30).await;
         rec.take();
         // Stale: caret already moved, text not yet.
@@ -1505,7 +1526,10 @@ mod tests {
             1,
             "no model call while the app completes"
         );
-        g.native(NativeEvent::Key { key: Key::Tab });
+        g.native(NativeEvent::Key {
+            key: Key::Tab,
+            shown: None,
+        });
         settle(30).await;
         assert!(!rec
             .take()
@@ -1526,7 +1550,10 @@ mod tests {
         assert_eq!(rec.chips(), vec!["teh → the".to_string()]);
         assert_eq!(server.request_count(), 0, "a typo fix needs no model call");
         rec.take();
-        g.native(NativeEvent::Key { key: Key::Tab });
+        g.native(NativeEvent::Key {
+            key: Key::Tab,
+            shown: None,
+        });
         settle(30).await;
         assert!(rec.take().contains(&CoreCommand::ReplaceBeforeCaret {
             expected: "teh ".into(),
@@ -1540,7 +1567,10 @@ mod tests {
             trailing: " ".into(),
         });
         settle(200).await;
-        g.native(NativeEvent::Key { key: Key::Escape });
+        g.native(NativeEvent::Key {
+            key: Key::Escape,
+            shown: None,
+        });
         settle(30).await;
         rec.take();
         g.native(text("so teh "));
@@ -1627,11 +1657,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tokens_already_queued_never_bring_a_dismissed_chip_back() {
+        // Code review GT-15 (Test Bench seed 7001): Esc hid "much cleaner"; a streamed update repainted "much cleaner and".
+        let (g, rec, _server, _root) = setup(&[" much", " cleaner"], Duration::ZERO).await;
+        g.native(text("The design looks"));
+        settle(300).await;
+        assert!(!rec.chips().is_empty());
+        g.native(NativeEvent::Key {
+            key: Key::Escape,
+            shown: None,
+        });
+        // Updates of that request that were already on their way, whatever their generation.
+        for generation in 0..20 {
+            let _ = g.tx.send(Input::Chip {
+                generation,
+                before: "The design looks".into(),
+                text: " much cleaner and".into(),
+                fix: None,
+            });
+        }
+        settle(50).await;
+        let cmds = rec.take();
+        let shown_after_hide = cmds
+            .iter()
+            .skip_while(|c| **c != CoreCommand::HideChip)
+            .any(|c| matches!(c, CoreCommand::ShowChip { .. }));
+        assert!(!shown_after_hide, "{cmds:?}");
+    }
+
+    #[tokio::test]
+    async fn shift_tab_inserts_what_the_helper_showed() {
+        // Code review GT-14: the engine's chip grew to " brown fox jumps" after the helper drew " brown fo".
+        let (g, rec, _server, _root) = setup(&[" brown", " fox", " jumps"], Duration::ZERO).await;
+        g.native(text("The quick"));
+        settle(300).await;
+        rec.take();
+        g.native(NativeEvent::Key {
+            key: Key::ShiftTab,
+            shown: Some(" brown fo".into()),
+        });
+        settle(30).await;
+        assert!(rec.take().contains(&CoreCommand::InsertText {
+            text: " brown fox".into()
+        }));
+    }
+
+    #[tokio::test]
     async fn escape_dismisses_until_the_text_changes() {
         let (g, rec, server, _root) = setup(&[" world"], Duration::ZERO).await;
         g.native(text("Hello"));
         settle(300).await;
-        g.native(NativeEvent::Key { key: Key::Escape });
+        g.native(NativeEvent::Key {
+            key: Key::Escape,
+            shown: None,
+        });
         settle(30).await;
         let cmds = rec.take();
         assert!(
@@ -1683,7 +1762,10 @@ mod tests {
     #[tokio::test]
     async fn keys_do_nothing_without_a_chip_and_capture_is_off_by_default() {
         let (g, rec, _server, _root) = setup(&[" x"], Duration::ZERO).await;
-        g.native(NativeEvent::Key { key: Key::Tab });
+        g.native(NativeEvent::Key {
+            key: Key::Tab,
+            shown: None,
+        });
         settle(30).await;
         assert!(rec.take().is_empty(), "GT-13: no chip, no action");
     }
@@ -1770,7 +1852,10 @@ mod tests {
         settle(30).await;
         rec.take();
         // A key now does nothing (no chip), and the next pause enables capture again.
-        g.native(NativeEvent::Key { key: Key::Tab });
+        g.native(NativeEvent::Key {
+            key: Key::Tab,
+            shown: None,
+        });
         g.native(text("Hello there"));
         settle(300).await;
         let cmds = rec.take();
@@ -1888,7 +1973,10 @@ mod tests {
             setup(&[" as", " soon", " as", " possible."], Duration::ZERO).await;
         g.native(text("I will get back to you"));
         settle(300).await;
-        g.native(NativeEvent::Key { key: Key::Tab });
+        g.native(NativeEvent::Key {
+            key: Key::Tab,
+            shown: None,
+        });
         settle(30).await;
         assert!(
             g.memory().phrases.is_empty(),
@@ -1896,7 +1984,10 @@ mod tests {
         );
         g.native(text("I will get back to you as"));
         settle(50).await;
-        g.native(NativeEvent::Key { key: Key::ShiftTab });
+        g.native(NativeEvent::Key {
+            key: Key::ShiftTab,
+            shown: None,
+        });
         settle(30).await;
         let m = g.memory();
         assert_eq!(

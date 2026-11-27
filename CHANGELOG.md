@@ -3,6 +3,12 @@
 All notable changes to BOB. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+### Fixed
+- Ghost Text: a suggestion that was dismissed with `Esc` while it was still arriving no longer comes back.
+- Ghost Text: `⇧Tab` inserts what was on screen (finishing its last word), not words that arrived after the
+  key press.
+- Ghost Text: line breaks the model writes out as text (`\n`) end the suggestion instead of being inserted.
 ## [0.1.0] - 2026-11-26
 
 The first release, built for Kiroween 2026.

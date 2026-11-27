@@ -28,6 +28,8 @@ public final class HelperRuntime: @unchecked Sendable {
     // Voice Dictation: audio and transcription stay in this process (VD-8).
     private let orb = OrbPanel()
     private let recorder = AudioRecorder(testAudioFile: TestHooks.audioFile)
+    /// The chip text on screen; written on the main thread, read by the key tap's thread (code review GT-14).
+    private let shownChip = Locked<String?>(nil)
     private let transcriber = Transcriber()
     private var dictationModel: String?
     private var dictationLanguage = ""
@@ -91,8 +93,10 @@ public final class HelperRuntime: @unchecked Sendable {
             exit(3)
         case let .showChip(text, anchor):
             chip.show(text: text, caretAX: anchor)
+            shownChip.value = chip.isVisible ? text : nil
         case .hideChip:
             chip.hide()
+            shownChip.value = nil
         case let .insertText(text):
             // VD-9 / GT-3: never type into a secure field, whoever asked.
             if let focused = AXReader.focusedElement(),
@@ -105,7 +109,10 @@ public final class HelperRuntime: @unchecked Sendable {
             // While a suggestion is visible, re-check the field a few times a second: some apps (Chrome,
             // Slack) skip change notifications, which left a stale or frozen chip.
             observer.setWatching(active)
-            if !active { chip.hide() }
+            if !active {
+                chip.hide()
+                shownChip.value = nil
+            }
         case .requestPermissions:
             _ = Permissions.accessibilityTrusted(prompt: true)
             Permissions.requestMicrophoneIfPossible { [weak self] _ in
@@ -201,7 +208,9 @@ public final class HelperRuntime: @unchecked Sendable {
         observeWake()
         observer.onSnapshot = { [weak self] snap, reason in self?.forward(snap, reason) }
         observer.start()
-        keyTap.onKey = { [weak self] key in try? self?.client?.send(NativeEvent.key(key)) }
+        keyTap.onKey = { [weak self] key in
+            try? self?.client?.send(NativeEvent.key(key, shown: self?.shownChip.value))
+        }
         hotkeys.onPress = { [weak self] slot in
             switch slot {
             case .selection: self?.selectionHotkey()
@@ -451,5 +460,20 @@ public final class HelperRuntime: @unchecked Sendable {
                let s = String(data: data, encoding: .utf8) { print(s) }
             exit(0)
         }
+    }
+}
+
+/// A value shared between the main thread and the key tap's thread.
+final class Locked<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+
+    init(_ value: Value) {
+        stored = value
+    }
+
+    var value: Value {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
     }
 }

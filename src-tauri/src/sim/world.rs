@@ -655,10 +655,12 @@ impl World {
                             before,
                         });
                     }
+                    // Like the helper: the chip as displayed travels with the key (code review GT-14).
+                    let shown = self.screen.as_ref().map(|s| s.text.clone());
                     self.push(
                         HOP,
                         Ev::ToEngine {
-                            ev: NativeEvent::Key { key },
+                            ev: NativeEvent::Key { key, shown },
                             before: None,
                         },
                     );

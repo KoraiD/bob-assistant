@@ -31,3 +31,4 @@
 {"type":"typo","word":"teh","fix":"the","trailing":" "}
 {"type":"selection","app_bundle_id":"com.apple.mail","text":"see you","secure":false,"source":"accessibility","anchor":null,"action":2}
 {"type":"woke"}
+{"type":"key","key":"shift_tab","shown":" brown fo"}

@@ -111,12 +111,22 @@ fn is_meta(s: &str) -> bool {
         || t.starts_with(['#', '*', '`', '>', '|', '"', '“'])
 }
 
+/// Code review GT-13: where the first line of `raw` ends: at a real line break, or at one the model wrote out as text
+/// (`\n`, `\r`, `\t` as a backslash and a letter), which would otherwise be shown and inserted literally.
+fn line_end(raw: &str) -> usize {
+    ["\n", "\r", "\\n", "\\r", "\\t"]
+        .iter()
+        .filter_map(|p| raw.find(p))
+        .min()
+        .unwrap_or(raw.len())
+}
+
 /// Polish `raw` (the model's continuation of `before_caret`) into a chip, or `None` when nothing worth
 /// showing remains. The result never has more than [`MAX_WORDS`] words or [`MAX_CHARS`] characters, is
 /// never empty or whitespace-only, never starts with a space when the caret already follows one, and
 /// never crosses a line or sentence boundary.
 pub fn polish(raw: &str, before_caret: &str) -> Option<String> {
-    let mut s: String = raw.split(['\n', '\r']).next().unwrap_or("").to_string();
+    let mut s: String = raw[..line_end(raw)].to_string();
 
     // After a space, the chip starts at the next word.
     if before_caret.ends_with(char::is_whitespace) || before_caret.is_empty() {
@@ -271,7 +281,7 @@ pub fn gap_chip(raw: &str, before: &str, after: &str) -> Option<(String, bool)> 
         Some(i) => (&raw[..i], true),
         None => (raw, false),
     };
-    if answer.contains(['[', '\n']) || answer.contains("...") {
+    if answer.contains('[') || answer.contains("...") || line_end(answer) < answer.len() {
         return None;
     }
     let mut text = answer.trim().to_string();
@@ -359,6 +369,24 @@ pub fn accept_word(chip: &str) -> (String, String) {
     let word_len = rest.find(char::is_whitespace).unwrap_or(rest.len());
     let split = lead + word_len;
     (chip[..split].to_string(), chip[split..].to_string())
+}
+
+/// Code review GT-14: what Shift+Tab inserts. `visible` is the engine's chip, which may have grown since the helper last
+/// drew it; `shown` is what the helper displayed at the key press. The shown text is taken and its last word
+/// is finished from `visible`, so no word the user did not see is inserted. Without a usable `shown` (an
+/// older helper, or a chip that changed in another way) the whole `visible` chip is taken.
+pub fn accept_shown(visible: &str, shown: Option<&str>) -> String {
+    let Some(shown) = shown.filter(|s| !s.trim().is_empty()) else {
+        return visible.to_string();
+    };
+    let Some(rest) = visible.strip_prefix(shown) else {
+        return visible.to_string();
+    };
+    if shown.ends_with(char::is_whitespace) {
+        return shown.to_string();
+    }
+    let finish = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    format!("{shown}{}", &rest[..finish])
 }
 
 #[cfg(test)]
@@ -589,6 +617,47 @@ mod tests {
     }
 
     #[test]
+    fn shift_tab_takes_what_was_shown_and_finishes_its_last_word() {
+        // Seed 7001: "option is better bec" was on screen.
+        let v = " option is better because it is";
+        assert_eq!(
+            accept_shown(v, Some(" option is better bec")),
+            " option is better because"
+        );
+        // Run of 26 Nov 22:40: "eam finished" was on screen and " the" was inserted too.
+        assert_eq!(
+            accept_shown("eam finished the", Some("eam finished")),
+            "eam finished"
+        );
+        assert_eq!(accept_shown(" a b", Some(" a ")), " a ");
+        // No usable shown text: the whole chip, as before.
+        assert_eq!(accept_shown(v, None), v);
+        assert_eq!(accept_shown(v, Some("  ")), v);
+        assert_eq!(accept_shown(v, Some(" something else")), v);
+    }
+
+    #[test]
+    fn escaped_line_breaks_from_the_model_end_the_chip() {
+        // Code review GT-13 (Test Bench, built-in model): twelve literal "\n" were shown and inserted.
+        assert_eq!(polish("\\n\\n\\n\\n", "for t"), None);
+        assert_eq!(
+            polish(" back to\\n\\nDear", "I will get"),
+            Some(" back to".into())
+        );
+        assert_eq!(polish(" back\\tto", "I will get"), Some(" back".into()));
+        assert_eq!(polish(" back\\r\\n", "I will get"), Some(" back".into()));
+        assert_eq!(
+            gap_chip("sending\\n]", "Thank you for ", " me the report"),
+            None
+        );
+        // A backslash on its own is ordinary text.
+        assert_eq!(
+            polish(" C:\\Users", "the folder"),
+            Some(" C:\\Users".into())
+        );
+    }
+
+    #[test]
     fn completion_detection() {
         assert!(is_final(" as soon as possible."));
         assert!(is_final(" one two three four five six"));
@@ -609,6 +678,7 @@ mod tests {
                 prop_assert!(c.split_whitespace().count() <= MAX_WORDS, "{c:?}");
                 prop_assert!(c.chars().count() <= MAX_CHARS, "{c:?}");
                 prop_assert!(!c.contains('\n') && !c.contains('\r'));
+                prop_assert!(!c.contains("\\n") && !c.contains("\\r") && !c.contains("\\t"), "{c:?}");
                 prop_assert!(!c.ends_with(char::is_whitespace));
                 if before.ends_with(char::is_whitespace) { prop_assert!(!c.starts_with(char::is_whitespace)); }
             }

@@ -226,7 +226,10 @@ async fn every_setting_combination_sends_only_what_is_allowed() {
                         _ => assert_eq!(last, " it's \"fine\" today.", "{label}"),
                     }
                     // Reset for the next case.
-                    r.ghost.native(NativeEvent::Key { key: Key::Escape });
+                    r.ghost.native(NativeEvent::Key {
+                        key: Key::Escape,
+                        shown: None,
+                    });
                     tokio::time::sleep(Duration::from_millis(5)).await;
                     r.rec.take();
                 }
@@ -313,7 +316,10 @@ async fn preferred_languages_filter_suggestions() {
             kept,
             "{langs:?}: {cmds:?}"
         );
-        r.ghost.native(NativeEvent::Key { key: Key::Escape });
+        r.ghost.native(NativeEvent::Key {
+            key: Key::Escape,
+            shown: None,
+        });
         tokio::time::sleep(Duration::from_millis(5)).await;
         r.rec.take();
     }
@@ -337,9 +343,18 @@ async fn randomized_sessions_keep_chip_and_key_capture_consistent() {
                     typed.push(c);
                     r.ghost.native(text(&typed, false, 0));
                 }
-                2 => r.ghost.native(NativeEvent::Key { key: Key::Tab }),
-                3 => r.ghost.native(NativeEvent::Key { key: Key::ShiftTab }),
-                4 => r.ghost.native(NativeEvent::Key { key: Key::Escape }),
+                2 => r.ghost.native(NativeEvent::Key {
+                    key: Key::Tab,
+                    shown: None,
+                }),
+                3 => r.ghost.native(NativeEvent::Key {
+                    key: Key::ShiftTab,
+                    shown: None,
+                }),
+                4 => r.ghost.native(NativeEvent::Key {
+                    key: Key::Escape,
+                    shown: None,
+                }),
                 5 => {
                     // A stale or repeated event.
                     r.ghost.native(text(&typed, false, 0));
@@ -378,7 +393,10 @@ async fn randomized_sessions_keep_chip_and_key_capture_consistent() {
                 "seed {seed}: capture must follow the chip"
             );
         }
-        r.ghost.native(NativeEvent::Key { key: Key::Escape });
+        r.ghost.native(NativeEvent::Key {
+            key: Key::Escape,
+            shown: None,
+        });
         tokio::time::sleep(Duration::from_millis(10)).await;
         r.rec.take();
     }

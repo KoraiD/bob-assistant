@@ -103,7 +103,8 @@ public enum NativeEvent: Equatable, Sendable {
     case dictationError(reason: String)
     case dictationStatus(modelLoaded: Bool, error: String?)
     case error(message: String)
-    case key(Key)
+    /// `shown`: the suggestion on screen at the key press (code review GT-14), so the core inserts what the user saw.
+    case key(Key, shown: String? = nil)
     /// Any `type` this build does not know (decode only).
     case unknown
 }
@@ -218,7 +219,8 @@ extension NativeEvent: Codable {
         case "error":
             self = .error(message: try c.decode(String.self, forKey: Keys("message")))
         case "key":
-            self = .key(try c.decode(Key.self, forKey: Keys("key")))
+            self = .key(try c.decode(Key.self, forKey: Keys("key")),
+                        shown: try c.decodeIfPresent(String.self, forKey: Keys("shown")))
         default:
             self = .unknown
         }
@@ -312,9 +314,10 @@ extension NativeEvent: Codable {
         case let .error(message):
             try c.encode("error", forKey: Keys("type"))
             try c.encode(message, forKey: Keys("message"))
-        case let .key(key):
+        case let .key(key, shown):
             try c.encode("key", forKey: Keys("type"))
             try c.encode(key, forKey: Keys("key"))
+            try c.encodeIfPresent(shown, forKey: Keys("shown"))
         case .unknown:
             try c.encode("unknown", forKey: Keys("type"))
         }
