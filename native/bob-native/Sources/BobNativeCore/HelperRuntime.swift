@@ -198,10 +198,10 @@ public final class HelperRuntime: @unchecked Sendable {
         }
     }
 
-    /// Test hook: `BOB_TEST_MAIN_STALL_MS` blocks the main thread that long every 2.5 s, to stand in for a slow
-    /// Accessibility read (an app that is busy or not responding). Used to prove typing never waits for it.
+    /// Test hook (`TestHooks.mainStallMs`, hooks builds only): block the main thread every 2.5 s, to stand in for a
+    /// slow Accessibility read (an app that is busy or not responding). Used to prove typing never waits for it.
     private func startStallTestIfRequested() {
-        guard let ms = ProcessInfo.processInfo.environment["BOB_TEST_MAIN_STALL_MS"].flatMap(Int.init), ms > 0 else { return }
+        guard let ms = TestHooks.mainStallMs else { return }
         FileHandle.standardError.write(Data("bob-native: test stall of \(ms) ms every 2.5 s is on\n".utf8))
         Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { _ in usleep(useconds_t(ms) * 1000) }
     }

@@ -93,7 +93,7 @@ flowchart LR
 | Quiet-apps and phrases editors, interactive ghost | `src/components/{GhostLists,GhostMark}.tsx` | done |
 | File locations and the separate profile (`BOB_HOME`) | `src-tauri/src/paths.rs` | done; unit tests, checked next to an installed BOB |
 | Test Bench (`BOB Test Bench.app`, with its own Accessibility switch): a typist types like a person into the bench's own editor while a test BOB (separate profile) suggests; every step is checked (text, Tab and Shift+Tab, chip following the text, Esc). Editor profiles: plain, smart quotes, and late (Accessibility reports the text 60 to 250 ms behind, like Chrome and Electron apps). It holds your BOB's instance lock, types only while its editor has focus, pauses while the mouse is used or another window is in front, and stops on any key press. It reads and writes only in `/tmp`. A fake OpenAI-compatible brain continues corpus sentences | `native/test-bench/`, `scripts/test-bench.sh`, `scripts/fake-brain.py` (`make test-bench`) | done; logic tests in CI (a correct fake BOB gives no findings, injected bugs are found) |
-| Test audio file for dictation (helper built with `-DBOB_TEST_HOOKS` only) | `TestHooks.swift`, `AudioRecorder(testAudioFile:)` | done; Swift tests |
+| Test audio file for dictation and the main-thread stall switch (helper built with `-DBOB_TEST_HOOKS` only) | `TestHooks.swift`, `AudioRecorder(testAudioFile:)` | done; Swift tests; neither variable name is in the release helper |
 
 ## Decisions log
 | Date | Decision | Reason |

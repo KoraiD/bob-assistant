@@ -50,6 +50,15 @@ struct TestAudioFileTests {
     @Test func theHookIsOffInNormalBuilds() {
         if !TestHooks.enabled {
             #expect(TestHooks.audioFile == nil)
+            // Code review SEC-02: the stall switch is compiled out too, whatever the environment says.
+            #expect(TestHooks.mainStallMs == nil)
         }
+    }
+    @Test func theStallSwitchAcceptsOnlyAPositiveBoundedValue() {
+        #expect(TestHooks.stallMs(from: ["BOB_TEST_MAIN_STALL_MS": "1500"]) == 1500)
+        for bad in ["", "0", "-5", "abc", "10001"] {
+            #expect(TestHooks.stallMs(from: ["BOB_TEST_MAIN_STALL_MS": bad]) == nil, "\(bad)")
+        }
+        #expect(TestHooks.stallMs(from: [:]) == nil)
     }
 }

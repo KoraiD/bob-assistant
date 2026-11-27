@@ -285,7 +285,8 @@ and the text was read twice per snapshot, so long documents in slow apps could s
 
 **Method:** a stress tool types 84 characters with real key events into a TextEdit document (5 KB and 200 KB) or a
 Chrome `contenteditable` page (10 KB and 80 KB) and checks that all of them arrive. A test-only switch,
-`BOB_TEST_MAIN_STALL_MS`, blocks the helper's main thread for that many ms every 2.5 s to stand in for a slow app.
+`BOB_TEST_MAIN_STALL_MS`, blocks the helper's main thread for that many ms every 2.5 s to stand in for a slow app
+(since code review SEC-02 only in a helper built with `-Xswiftc -DBOB_TEST_HOOKS`, at most 10,000 ms).
 The helper now logs `slow <kind>: N ms` for main-thread work over 30 ms and how long a key waited for the tap.
 
 | Main-thread stall | Before: keys lost | Before: key waited | After: keys lost | After: key waited |

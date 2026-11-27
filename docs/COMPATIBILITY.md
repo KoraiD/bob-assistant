@@ -175,8 +175,9 @@ PERFORMANCE.md. Known limit: shared letters (Hungarian and German "ü") cannot s
 
 To check that BOB never delays keys, type quickly in a long document (TextEdit, 200 KB) and in Chrome while a
 suggestion shows; no character may be lost. `~/Library/Logs/BOB/bob.log` lists `slow key tap (key waited)` if a key
-ever waited more than 30 ms for BOB. For testing only, starting the helper with `BOB_TEST_MAIN_STALL_MS=1500`
-blocks its main thread for 1.5 s every 2.5 s; typing must stay lossless (see `docs/PERFORMANCE.md`).
+ever waited more than 30 ms for BOB. For testing only, a helper built with `swift build -Xswiftc -DBOB_TEST_HOOKS`
+and started with `BOB_TEST_MAIN_STALL_MS=1500` blocks its main thread for 1.5 s every 2.5 s; typing must stay
+lossless (see `docs/PERFORMANCE.md`). Normal and release builds ignore the variable.
 
 ## Typing into apps without Accessibility (code review SEC-09, 2026-11-27)
 BOB checks the focused field before it types (a dictation, a Ghost accept, a typo fix). When the field cannot be read
