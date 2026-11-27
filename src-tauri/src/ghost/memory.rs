@@ -176,7 +176,7 @@ mod tests {
     fn records_most_recent_first_and_counts_reuse() {
         let mut m = Memory::default();
         assert!(m.record(" as soon as I can."));
-        assert!(m.record("Best regards, Zsófi"));
+        assert!(m.record("Best regards, Renée"));
         assert!(m.record("AS SOON AS I CAN."));
         assert_eq!(
             m.phrases[0],

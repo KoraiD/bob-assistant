@@ -69,10 +69,10 @@ pub fn window_title(trace_id: &str) -> Option<&'static str> {
 
 /// Sample profile for the context benchmark (written for this project).
 pub const PROFILE: &str = "# About me\n\
-- **Name:** Zsófi\n\
-- **Role:** PhD student and software engineer\n\
+- **Name:** Renée\n\
+- **Role:** product designer\n\
 - I write friendly, concise emails and chat messages in English.\n\
-- Sign-off: Best, Zsófi\n";
+- Sign-off: Best, Renée\n";
 
 /// Seed memory for the context benchmark: phrases a user might have accepted before. Six recur in the
 /// corpus and six do not, so the memory layer is measured both helping and distracting.
@@ -83,7 +83,7 @@ pub const MEMORY: &[&str] = &[
     "Thank you so much for your help",
     "Thursday afternoon",
     "Happy birthday!",
-    "Best, Zsófi",
+    "Best, Renée",
     "see you on Monday",
     "the latest build",
     "sounds good to me",

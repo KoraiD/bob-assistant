@@ -657,7 +657,7 @@ mod tests {
                 ghost: layers,
                 ..Default::default()
             },
-            "# Me\n- **Name:** Zsófi\n- I write short emails",
+            "# Me\n- **Name:** Renée\n- I write short emails",
         )
     }
 
@@ -671,7 +671,7 @@ mod tests {
         h.observe(&NativeEvent::ContextState {
             app_bundle_id: "com.apple.mail".into(),
             window_title: Some("Re: Dinner on Friday".into()),
-            after_caret: "\n\nBest,\nZsófi".into(),
+            after_caret: "\n\nBest,\nRenée".into(),
         });
     }
 
@@ -812,7 +812,7 @@ mod tests {
         let p = h.ghost_preamble(&["see you soon".into()]);
         assert_eq!(
             p,
-            "[Notes, not part of the text]\nAbout me: Me; Name: Zsófi; I write short emails\n\
+            "[Notes, not part of the text]\nAbout me: Me; Name: Renée; I write short emails\n\
              Phrases I often use: \"see you soon\"\nWriting in Mail: Re: Dinner on Friday\n[Text]\n"
         );
     }
@@ -887,12 +887,12 @@ mod tests {
         assert!(private.starts_with("You are BOB"));
         assert!(private.contains("Fix the grammar."));
         assert!(private.contains("language of the user's text"));
-        assert!(!private.contains("Zsófi"));
+        assert!(!private.contains("Renée"));
         assert!(!private.contains("Dinner"));
         let shared = h.chat_system("Fix the grammar.", true);
         assert!(shared.contains("## About the user"));
         assert!(shared.contains("Window: Re: Dinner on Friday"));
-        assert!(shared.contains("Text after the cursor: Best, Zsófi"));
+        assert!(shared.contains("Text after the cursor: Best, Renée"));
     }
 
     #[test]

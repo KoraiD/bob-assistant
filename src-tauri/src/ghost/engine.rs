@@ -1801,7 +1801,7 @@ mod tests {
                 },
                 ..Default::default()
             },
-            "- **Name:** Zsófi",
+            "- **Name:** Renée",
         ));
         let (g, _rec, server, _root, svc) = setup_ctx(&[" ok"], Duration::ZERO, ctx).await;
         let prompt = || {
@@ -1814,7 +1814,7 @@ mod tests {
         settle(300).await;
         assert_eq!(
             prompt(),
-            "[Notes, not part of the text]\nAbout me: Name: Zsófi\n[Text]\nSee you"
+            "[Notes, not part of the text]\nAbout me: Name: Renée\n[Text]\nSee you"
         );
         svc.set_share_context("local", false).await.unwrap();
         g.native(text("See you at"));
@@ -2019,7 +2019,7 @@ mod tests {
             .memory
             .lock()
             .unwrap()
-            .record("Best regards, Zsófi");
+            .record("Best regards, Renée");
         g.shared.save_memory();
         g.native(NativeEvent::Focus {
             app_bundle_id: "com.apple.Mail".into(),
@@ -2044,7 +2044,7 @@ mod tests {
         );
         assert!(!again.settings().enabled);
         assert!(again.settings().is_quiet("com.apple.Notes"));
-        assert_eq!(again.memory().phrases[0].text, "Best regards, Zsófi");
+        assert_eq!(again.memory().phrases[0].text, "Best regards, Renée");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

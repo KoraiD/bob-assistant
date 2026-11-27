@@ -303,7 +303,7 @@ function StyleNotes({ value, onCommit }: { value: string; onCommit: (v: string) 
     <label className="mt-4 block">
       <span className="text-sm font-medium">Style notes</span>
       <span className="block text-xs" style={muted}>
-        For rewrites and dictation cleanup, for example “short sentences, no emoji, sign as Zsófi”.
+        For rewrites and dictation cleanup, for example “short sentences, no emoji, sign as Renée”.
       </span>
       <textarea
         aria-label="Style notes"

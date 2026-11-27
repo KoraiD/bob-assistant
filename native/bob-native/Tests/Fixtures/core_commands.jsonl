@@ -16,7 +16,7 @@
 {"type":"hide_menu"}
 {"type":"replace_selection","expected":"teh quick","text":"the quick"}
 {"type":"set_hotkey","hotkey":{"key_code":38,"modifiers":["cmd","shift"]}}
-{"type":"set_dictation","hotkey":{"key_code":49,"modifiers":["option"]},"model_path":"/Users/me/Library/Application Support/dev.bob.assistant/models/ggml-large-v3-turbo-q5_0.bin","language":"","prompt":"Glossary: Kiroween, Zsófi, llama.cpp.","sounds":true}
+{"type":"set_dictation","hotkey":{"key_code":49,"modifiers":["option"]},"model_path":"/Users/me/Library/Application Support/dev.bob.assistant/models/ggml-large-v3-turbo-q5_0.bin","language":"","prompt":"Glossary: Kiroween, Renée, llama.cpp.","sounds":true}
 {"type":"set_dictation","hotkey":null,"model_path":null,"language":"hu","prompt":null,"sounds":true}
 {"type":"start_recording"}
 {"type":"stop_recording","transcribe":true}
