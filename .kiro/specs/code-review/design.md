@@ -30,7 +30,7 @@ move, split or cut findings.
 |---|---|---|---|
 | A | Security and privacy of what BOB starts and sends | SEC-12 (with 12b, 12c), SEC-13, VD-02, SEC-07 (07b), SEC-01, SEC-03, SEC-09, LOG-03, SEC-17, SEC-02 | other programs could use BOB's permissions; credentials can reach cloud brains; typing into password fields can fail open |
 | B | Ghost Text correctness (the owner's flaws) | GT-01 to GT-12, GT-16, GT-17, GT-18, P-01 | the twelve regression scenarios turn green; soak rate drops |
-| C | Selection Actions, Dictation and the shell | VD-01, VD-03, SA-01, PAUSE-01, SEC-05 (05b), BR-02, BR-03, Q-13 | voice edit is broken; cut answers replace text; pause can stick |
+| C | Selection Actions, Dictation and the shell | VD-01, VD-03, SA-01, PAUSE-01, SEC-05 (05b), BR-02, BR-03, Q-13, SUP-04 | voice edit is broken; cut answers replace text; pause can stick |
 | D | Hardening that needs design | SEC-06, SEC-16, SEC-15, SEC-04, SEC-10, SEC-11, SEC-14, SEC-08 | each needs a decision or a benchmark before code |
 | E | Logging, tests and performance | LOG-01, LOG-02, LOG-04, TEST-01 to TEST-07, P-02, P-03 | makes later bugs diagnosable and the helper testable |
 | F | Code quality and UI | Q-01 to Q-15 (open ones), UI-01, A11Y-01, Q-14, Q-15, SUP-01 | small, low risk; UI-01 goes with shortcut remapping |
