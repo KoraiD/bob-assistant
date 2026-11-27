@@ -1,0 +1,22 @@
+# Code review: tasks
+
+- [x] 1. Tools, inventory, findings files, baseline (coverage, test counts)
+- [x] 2. Simulator core: virtual clock, scripted brain, shared test recorder
+- [x] 3. Typist, regression scenarios, soak (GT-01 to GT-11 confirmed)
+- [x] 4. Simulators for Selection Actions, Dictation and Ghost settings; MCP and bridge fuzzing (VD-01, VD-02, SEC-01)
+- [x] 5. Separate profile (`BOB_HOME`) and a test audio file for dictation (compile flag)
+- [x] 6. Test Bench app, guarded typist, fake brain (GT-12 found and confirmed)
+- [x] 7. Test Bench sessions: 2 x 20 minutes; GT-13, GT-14, GT-15 fixed; late editor profile
+- [x] 8. Security review (tools and trust boundaries)
+- [x] 9. Line-by-line review of every group (security, correctness, performance, logging, tests, quality)
+- [x] 10. Docs, specs and CI review; DOC-01 fixed (neutral placeholder name)
+- [x] 11. Ranked findings and fix batches (this spec)
+- [ ] 12. Owner approval of the batches below (order, scope, cuts)
+- [ ] 13. Batch A: security and privacy of what BOB starts and sends (_SEC-12, SEC-13, VD-02, SEC-07, SEC-01, SEC-03, SEC-09, LOG-03, SEC-17, SEC-02_)
+- [ ] 14. Batch B: Ghost Text correctness (_GT-01 to GT-12, GT-16 to GT-18, P-01_); simulator scenarios un-ignored; soak and Test Bench numbers recorded
+- [ ] 15. Batch C: Selection Actions, Dictation and the shell (_VD-01, VD-03, SA-01, PAUSE-01, SEC-05, BR-02, BR-03, Q-13_)
+- [ ] 16. Batch D and E: hardening that needs design (_SEC-06, SEC-16, SEC-15, SEC-04, SEC-10, SEC-11, SEC-14, SEC-08_), logging, tests and performance (_LOG-01, LOG-02, LOG-04, TEST-01 to TEST-07, P-02, P-03_)
+- [ ] 17. Batch F: code quality and UI (_Q-01 to Q-15, UI-01, A11Y-01, SUP-01_)
+- [ ] 18. CI gates (_CI-01 to CI-04, Q-07_): actions pinned by commit, `cargo deny`, ESLint, SwiftLint config, timeouts
+- [ ] 19. Docs consolidation (_DOC-02, DOC-03, SUP-02, SUP-03, L-01_): no duplication, no stale claims, plain style
+- [ ] 20. Release 0.5.0 beta: version bump, update check (GitHub releases; compare and open the page, never download), shortcut remapping and disabling in Settings
