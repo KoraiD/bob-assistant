@@ -93,6 +93,28 @@ pub fn looks_secret(t: &str) -> bool {
         || (lower && !upper && digits >= 6 && letter_digit_switches(t) >= 6 && !t.contains("//"))
 }
 
+/// True while the caret is inside a word that may be the start of a credential (code review SEC-01): a
+/// known key prefix, or 6+ characters mixing letters and digits. `scrub` only recognizes a finished token
+/// (a prefix plus 8 characters, or 32 opaque characters), so the request for a cloud brain is skipped
+/// until the word ends; then `scrub` decides. Ordinary words never match, so prose is not affected.
+pub fn unfinished_secret(before: &str) -> bool {
+    if before.ends_with(char::is_whitespace) {
+        return false;
+    }
+    let word = before
+        .rsplit(|c: char| c.is_whitespace() || is_separator(c))
+        .next()
+        .unwrap_or_default();
+    // The value after `label:` or `key=`.
+    let piece = word.rsplit([':', '=']).next().unwrap_or(word);
+    if PREFIXES.iter().any(|p| piece.starts_with(p)) {
+        return true;
+    }
+    piece.chars().count() >= 6
+        && piece.chars().any(|c| c.is_ascii_digit())
+        && piece.chars().any(|c| c.is_ascii_alphabetic())
+}
+
 /// Replace secrets in `text`. PEM blocks are replaced whole; other tokens one by one.
 pub fn scrub(text: &str) -> String {
     let mut s = text.to_string();
@@ -192,6 +214,34 @@ mod tests {
             scrub(&format!("-----BEGIN {} KEY-----\nMIIabc", "RSA PRIVATE")),
             "[redacted]"
         );
+    }
+
+    /// Code review SEC-01: the start of a credential being typed is recognized before it is complete.
+    #[test]
+    fn a_credential_being_typed_is_recognized_from_its_start() {
+        for before in [
+            "my key is sk-",
+            "my key is sk-Kw4",
+            "token=ghp_",
+            "export AWS=AKIA",
+            "name,hf_",
+            "password: Tr7pQ2",
+            "(Tr7pQ2xL9vB4",
+        ] {
+            assert!(unfinished_secret(before), "{before}");
+        }
+        for before in [
+            "my key is sk",
+            "Tr7pQ",
+            "Thanks for the update, I will",
+            "iPhone15 ", // a finished word: scrub decides
+            "Meeting in room B-204",
+            "The deadline is 2026-11-23",
+            "See you at 10:30",
+            "",
+        ] {
+            assert!(!unfinished_secret(before), "{before}");
+        }
     }
 
     /// Code review SEC-07: keys glued to other text by punctuation, and lowercase random tokens.

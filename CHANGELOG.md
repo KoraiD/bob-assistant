@@ -13,6 +13,9 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
   model.
 - Dictation cleanup no longer sends a transcript that looks like it contains a password or key to a cloud brain;
   BOB types the transcript as you said it instead.
+- Ghost Text sends nothing to a cloud brain while you are typing what may be the start of a key or password
+  (a known key prefix, or six or more characters mixing letters and digits). Before, up to 31 characters of a key
+  could reach it before redaction recognized the key.
 - Redaction also finds keys glued to other text by punctuation (CSV, tables, code, quotes) and long lowercase
   tokens that mix letters and digits, such as UUIDs.
 ### Fixed

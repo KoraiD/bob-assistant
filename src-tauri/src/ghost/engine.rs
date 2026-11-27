@@ -362,6 +362,9 @@ pub async fn suggest_once(
     if !brain.config.capabilities.ghost {
         return Err("The Ghost Text brain cannot continue text.".into());
     }
+    if brain.config.is_cloud() && redact::unfinished_secret(&before) {
+        return Ok(None);
+    }
     let typed = redact::scrub(prompt::build(&before));
     if typed.trim().is_empty() {
         return Ok(None);
@@ -1039,6 +1042,10 @@ impl Engine {
                 Err(_) => return send_done(None), // Ghost is off or the built-in brain is asleep
             };
             if !brain.config.capabilities.ghost {
+                return send_done(None);
+            }
+            // Code review SEC-01: no request while the caret is inside what may be a credential.
+            if brain.config.is_cloud() && redact::unfinished_secret(&before) {
                 return send_done(None);
             }
             let typed = redact::scrub(prompt::build(&before));

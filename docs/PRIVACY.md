@@ -24,7 +24,7 @@ feature that changes the answer.
 ## Data handling
 | Data | Where it goes | Stored? |
 |---|---|---|
-| Text before the caret (Ghost Text) | the active Ghost brain, after redaction | not stored |
+| Text before the caret (Ghost Text) | the active Ghost brain, after redaction; a cloud brain gets nothing while the cursor is inside a word that may be the start of a key | not stored |
 | Accepted phrases | local `ghost-memory.json` (at most 200 phrases of 64 characters, most recent first; secret-looking text is never kept); not sent to any brain yet | yes, locally; view and "Forget all" in the Ghost card |
 | Quiet apps, Ghost on/off | local `ghost-settings.json` | yes, locally |
 | Recently used apps (bundle id and name, last 12) | the quiet-apps list in the Ghost card | in memory only, gone when BOB quits |

@@ -196,15 +196,16 @@ proptest! {
 /// SEC-01: while a credential is being typed, its start reaches a cloud Ghost Text brain until it is long
 /// enough to be recognized: a known prefix plus 8 characters, or 32 characters without a prefix.
 #[tokio::test(start_paused = true)]
-#[ignore = "SEC-01: the start of a credential reaches a cloud brain while it is being typed"]
 async fn a_credential_being_typed_never_reaches_a_cloud_brain() {
     use super::actor::{Script, Step};
     crate::logging::capture::start();
     // A known-prefix key, and an opaque token (a password pasted into a config file, typed here).
     // Built at run time, so the repository's secret scan never sees a key-shaped literal.
     let keys = [
-        (format!("sk-{}", "Kw4".repeat(12)), 3),
-        (format!("Tr7pQ2xL9vB4nM6k{}", "Z1wC8dF3gH5jK0sA2eR4tY6u"), 0),
+        // Allowed: the known prefix without its last character, and five characters of the opaque token
+        // (the request stops at six characters mixing letters and digits).
+        (format!("sk-{}", "Kw4".repeat(12)), 2),
+        (format!("Tr7pQ2xL9vB4nM6k{}", "Z1wC8dF3gH5jK0sA2eR4tY6u"), 5),
     ];
     let mut report = vec![];
     for (key, allowed) in &keys {
@@ -222,7 +223,11 @@ async fn a_credential_being_typed_never_reaches_a_cloud_brain() {
             longest = longest.max(
                 r.prompts
                     .iter()
-                    .map(|(_, p)| leaked_prefix(p, key))
+                    // Only where the key is typed ("The token is T..." always contains a "T").
+                    .map(|(_, p)| {
+                        p.find("token is ")
+                            .map_or(0, |i| leaked_prefix(&p[i + 9..], key))
+                    })
                     .max()
                     .unwrap_or(0),
             );

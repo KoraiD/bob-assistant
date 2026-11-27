@@ -26,6 +26,7 @@ What BOB protects, how, and how it is checked. Privacy (what data goes where) is
 | API keys only in the macOS Keychain, never in files, logs or `Debug` output | `brain/secrets.rs`, `brain/service.rs`, `brain/client.rs` tests |
 | API keys are never sent over plain http to a server outside this Mac (and the form says why) | `HttpBrain::new`, `validateDraft` |
 | Loopback brains bypass system proxies; cloud brains may use them | `HttpBrain::new` |
+| While the cursor is inside a word that may be the start of a credential (a known key prefix, or 6+ characters mixing letters and digits), a cloud Ghost brain gets no request; once the word ends, redaction decides. Limit: a finished token without a known prefix is recognized only from 32 characters, so a short password typed into a document still reaches a cloud Ghost brain | `redact::unfinished_secret`, `ghost/engine.rs` (simulator: `sim::settings`) |
 | Credential-like tokens are redacted from prompts; text that contains them is never sent to a cloud brain by Selection Actions or by Dictation cleanup (the raw transcript is typed instead) | `ghost/redact.rs`, `selection/engine.rs`, `dictation/engine.rs` (simulator: `sim::dictation`) |
 | Secure (password) fields are never read, typed into or captured | helper `AXReader`, `SelectionIO`, insert guard; engines |
 | One BOB per user (an exclusive lock), so a second copy cannot take over the helper socket | `native_ipc::acquire_instance_lock` |
