@@ -40,7 +40,7 @@ What BOB protects, how, and how it is checked. Privacy (what data goes where) is
 | A brain server cannot exhaust memory: 8 MB per streamed answer, 64 KB per error body, 4 MB per SSE event | `brain/client.rs`, `brain/sse.rs` (tests) |
 | Local sockets accept only processes of the same user (`getpeereid`), and the helper must say hello within 5 s | `native_ipc.rs`, `mcp.rs` (tests) |
 | AI agents (MCP) are off by default; when on: same rules as the hotkeys, 60 calls per minute, 256 KB per request, every call audited | `mcp.rs` (tests) |
-| Logs and the activity trail never contain text; every log line and audit value is redacted as a safety net | `logging.rs`, `audit.rs` (tests) |
+| Logs and the activity trail never contain text; every log line and audit value is redacted as a safety net. A panic is logged with its location; a message that quotes values (backticks or quotes, as Rust's slicing and `unwrap` messages do) is withheld, others are cut to one line of 200 characters | `logging.rs`, `audit.rs`, `panic_summary` (tests) |
 | One panicked thread cannot take the rest of BOB down through poisoned locks; panics are logged and audited | all `Mutex` use, `install_panic_hook` |
 | Clipboard context skips concealed and transient pasteboard items and quiet apps | `ClipboardWatcher.swift` (tests) |
 | Release builds: Developer ID signature with hardened runtime and secure timestamp; credentials stay in the keychain, never in files or CI | `scripts/build-release.sh`, docs/RELEASE.md |

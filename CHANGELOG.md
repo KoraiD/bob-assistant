@@ -22,6 +22,8 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
   failed Accessibility read let text be typed even into a password field. BOB shows why it did not type. Dictation
   into apps without Accessibility now stops with that message; the text stays in Type Last Dictation Again for two
   minutes.
+- A crash report in the log no longer quotes the values in Rust's panic message, which could include a piece of
+  the text being typed. The location is still logged.
 - Redaction also finds keys glued to other text by punctuation (CSV, tables, code, quotes) and long lowercase
   tokens that mix letters and digits, such as UUIDs.
 ### Fixed

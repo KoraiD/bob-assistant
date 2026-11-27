@@ -391,6 +391,27 @@ fn quit_on_signals(app: tauri::AppHandle) {
 
 /// A panic in any thread is logged (with its location) before the default handler runs, so a crash in
 /// an engine task leaves a trace in bob.log instead of a silently dead feature.
+/// Longest panic message written to the log.
+const PANIC_MESSAGE_MAX: usize = 200;
+
+/// What the log may say about a panic message (code review LOG-03). Rust's own messages quote the values
+/// involved: a string-slicing panic shows up to 256 bytes of the string (typed text), and `unwrap` on an
+/// error shows the error, so a message with backticks or quotes is withheld and only its length is kept.
+fn panic_summary(message: Option<&str>) -> String {
+    let Some(m) = message else {
+        return "(no message)".into();
+    };
+    if m.contains(['`', '"', '\'']) {
+        return format!("(message withheld, {} chars)", m.chars().count());
+    }
+    let first = m.lines().next().unwrap_or_default();
+    let mut out: String = first.chars().take(PANIC_MESSAGE_MAX).collect();
+    if out.len() < m.len() {
+        out.push('…');
+    }
+    out
+}
+
 fn install_panic_hook() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -398,16 +419,18 @@ fn install_panic_hook() {
             .location()
             .map(|l| format!("{}:{}", l.file(), l.line()))
             .unwrap_or_default();
-        log::error!(
-            "panic at {at}: {}",
-            info.payload()
-                .downcast_ref::<&str>()
-                .map(|s| s.to_string())
-                .or_else(|| info.payload().downcast_ref::<String>().cloned())
-                .unwrap_or_else(|| "(no message)".into())
-        );
+        let payload = info.payload();
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str));
+        log::error!("panic at {at}: {}", panic_summary(message));
         audit::record("app.panic", serde_json::json!({"at": at}));
-        default(info);
+        // The default hook prints the full message to stderr: only in debug builds, where stderr is the
+        // developer's terminal.
+        if cfg!(debug_assertions) {
+            default(info);
+        }
     }));
 }
 
@@ -756,5 +779,69 @@ mod tests {
         assert_eq!(microphone_label(&st), "Microphone: granted");
         st.microphone = Some(MicStatus::Denied);
         assert_eq!(microphone_label(&st), "Microphone: denied");
+    }
+}
+
+#[cfg(test)]
+mod panic_tests {
+    use super::*;
+
+    /// Code review LOG-03: text quoted in a panic message never reaches the log.
+    #[test]
+    fn panic_messages_that_quote_values_are_withheld() {
+        let typed = "Dear Renée, the code is";
+        // The message Rust writes for a slice through a character.
+        let slicing = std::panic::catch_unwind(|| {
+            let i = typed.find('é').unwrap() + 1;
+            typed[..i].len()
+        })
+        .unwrap_err();
+        // Rust 1.9x quotes the character ("inside 'é'"); older toolchains quoted up to 256 bytes of the string.
+        let msg = slicing.downcast_ref::<String>().unwrap();
+        for m in [
+            msg.clone(),
+            format!("byte index 9 is not a char boundary of `{typed}`"),
+        ] {
+            let summary = panic_summary(Some(&m));
+            assert!(
+                !summary.contains('é') && !summary.contains("Ren"),
+                "{summary}"
+            );
+            assert!(summary.starts_with("(message withheld, "), "{summary}");
+        }
+        assert_eq!(
+            panic_summary(Some("called `Result::unwrap()` on an `Err` value: private")),
+            "(message withheld, 52 chars)"
+        );
+        assert_eq!(
+            panic_summary(Some("index out of bounds")),
+            "index out of bounds"
+        );
+        assert_eq!(panic_summary(None), "(no message)");
+        let long = "x".repeat(500);
+        assert_eq!(
+            panic_summary(Some(&long)).chars().count(),
+            PANIC_MESSAGE_MAX + 1
+        );
+        assert_eq!(panic_summary(Some("first line\nsecond")), "first line…");
+    }
+
+    /// The installed hook logs the location and no quoted text.
+    #[test]
+    fn the_panic_hook_logs_the_location_without_the_text() {
+        crate::logging::capture::start();
+        install_panic_hook();
+        let marker = "Qv7typedmarker";
+        let _ = std::panic::catch_unwind(|| {
+            panic!("called `unwrap()` on `{marker}`");
+        });
+        // Back to the default hook (the test harness installs none).
+        let _ = std::panic::take_hook();
+        assert!(crate::logging::capture::find(marker).is_empty());
+        let lines = crate::logging::capture::find("panic at src/lib.rs:");
+        assert!(
+            lines.iter().any(|l| l.contains("message withheld")),
+            "{lines:?}"
+        );
     }
 }
