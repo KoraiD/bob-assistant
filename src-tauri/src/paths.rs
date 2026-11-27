@@ -14,6 +14,107 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
 pub const ENV: &str = "BOB_HOME";
+
+/// Environment overrides that pick binaries, sockets or the profile. Development and test builds only: in a
+/// release build another program could otherwise start BOB with them (`open --env ...`) and get its own binary run
+/// as BOB's child, with BOB's Accessibility, Microphone and Screen Recording permissions (code review SEC-12).
+pub const DEV_ONLY_ENV: [&str; 4] = [
+    ENV,
+    "BOB_NATIVE_PATH",
+    "BOB_LLAMA_SERVER",
+    "BOB_CONTROL_SOCKET",
+];
+
+/// The value of a development-only override (`DEV_ONLY_ENV`); always `None` in release builds.
+pub fn dev_env(name: &str) -> Option<std::ffi::OsString> {
+    debug_assert!(
+        DEV_ONLY_ENV.contains(&name),
+        "{name} is not a development override"
+    );
+    if cfg!(debug_assertions) {
+        std::env::var_os(name)
+    } else {
+        None
+    }
+}
+
+/// The search path a release build uses for every program it starts.
+pub const SYSTEM_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+/// What a release build sets in its own environment at startup, before any thread or child exists (pure, tested):
+/// the overrides removed, `HOME` and `TMPDIR` from the system (not from whoever started BOB), and `PATH` fixed.
+pub fn release_environment(
+    home: Option<PathBuf>,
+    temp: Option<PathBuf>,
+) -> Vec<(&'static str, Option<std::ffi::OsString>)> {
+    let mut plan: Vec<(&'static str, Option<std::ffi::OsString>)> =
+        DEV_ONLY_ENV.iter().map(|v| (*v, None)).collect();
+    if let Some(h) = home {
+        plan.push(("HOME", Some(h.into_os_string())));
+    }
+    if let Some(t) = temp {
+        plan.push(("TMPDIR", Some(t.into_os_string())));
+    }
+    plan.push(("PATH", Some(SYSTEM_PATH.into())));
+    plan
+}
+
+/// Apply [`release_environment`] in release builds (a no-op in development and tests). Call first in `run()`.
+pub fn harden_environment() {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    for (name, value) in release_environment(system_home(), system_temp()) {
+        match value {
+            Some(v) => std::env::set_var(name, v),
+            None => std::env::remove_var(name),
+        }
+    }
+}
+
+/// The user's home folder from the user database (`getpwuid_r`), not from `$HOME`.
+pub fn system_home() -> Option<PathBuf> {
+    use std::ffi::CStr;
+    use std::os::unix::ffi::OsStrExt;
+    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut buf = vec![0 as libc::c_char; 4096];
+    let mut result: *mut libc::passwd = std::ptr::null_mut();
+    // SAFETY: valid out-pointers and a buffer of the given length; `result` points into `pwd` on success.
+    let rc = unsafe {
+        libc::getpwuid_r(
+            libc::geteuid(),
+            &mut pwd,
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut result,
+        )
+    };
+    if rc != 0 || result.is_null() || pwd.pw_dir.is_null() {
+        return None;
+    }
+    // SAFETY: `pw_dir` is a NUL-terminated string inside `buf`, which is still alive.
+    let dir = unsafe { CStr::from_ptr(pwd.pw_dir) };
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(dir.to_bytes())))
+}
+
+/// The per-user temporary folder macOS assigns (`confstr(_CS_DARWIN_USER_TEMP_DIR)`), not `$TMPDIR`.
+pub fn system_temp() -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    let mut buf = vec![0u8; 1024];
+    // SAFETY: the buffer is writable for its full length; confstr writes at most that many bytes.
+    let n = unsafe {
+        libc::confstr(
+            libc::_CS_DARWIN_USER_TEMP_DIR,
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+        )
+    };
+    if n == 0 || n > buf.len() {
+        return None;
+    }
+    buf.truncate(n - 1); // drop the NUL
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(&buf)))
+}
 /// Keychain service for API keys.
 pub const KEYCHAIN_SERVICE: &str = "dev.bob.assistant";
 /// Keychain service for API keys of a separate profile (`BOB_HOME`).
@@ -91,7 +192,7 @@ pub fn validate(value: &OsStr, user_home: Option<&Path>) -> Result<PathBuf, Stri
 
 /// The profile from the environment (`Default` when `BOB_HOME` is unset).
 pub fn profile_from_env() -> Result<Profile, String> {
-    match std::env::var_os(ENV) {
+    match dev_env(ENV) {
         None => Ok(Profile::Default),
         Some(v) if v.is_empty() => Ok(Profile::Default),
         Some(v) => {
@@ -163,14 +264,10 @@ pub fn keychain_service() -> &'static str {
     }
 }
 
-/// The current user's id, found without `unsafe`: the home folder is owned by the user on macOS. Falls back
-/// to 0 only if `HOME` is unset or unreadable (the runtime folder is still 0700).
+/// The current user's id.
 fn current_uid() -> u32 {
-    use std::os::unix::fs::MetadataExt;
-    std::env::var_os("HOME")
-        .and_then(|h| std::fs::metadata(h).ok())
-        .map(|m| m.uid())
-        .unwrap_or(0)
+    // SAFETY: no arguments, cannot fail.
+    unsafe { libc::geteuid() }
 }
 
 #[cfg(test)]
@@ -219,6 +316,30 @@ mod tests {
             "x".repeat(MAX_SOCKET_PATH - "/tmp/".len() - "/run/control.sock".len())
         );
         assert!(ok(&fits).is_ok(), "{}", fits.len());
+    }
+
+    #[test]
+    fn release_builds_drop_overrides_and_take_home_temp_and_path_from_the_system() {
+        let plan = release_environment(Some("/Users/u".into()), Some("/var/folders/x/T".into()));
+        for v in DEV_ONLY_ENV {
+            assert!(plan.contains(&(v, None)), "{v} is removed");
+        }
+        assert!(plan.contains(&("HOME", Some("/Users/u".into()))));
+        assert!(plan.contains(&("TMPDIR", Some("/var/folders/x/T".into()))));
+        assert!(plan.contains(&("PATH", Some(SYSTEM_PATH.into()))));
+        // Without system values, HOME and TMPDIR are left alone, but the overrides still go.
+        let bare = release_environment(None, None);
+        assert!(!bare.iter().any(|(k, _)| *k == "HOME" || *k == "TMPDIR"));
+        assert_eq!(bare.len(), DEV_ONLY_ENV.len() + 1);
+    }
+
+    #[test]
+    fn the_system_home_and_temp_folder_are_found() {
+        let home = system_home().expect("home from the user database");
+        assert!(home.is_absolute() && home.is_dir(), "{}", home.display());
+        let temp = system_temp().expect("per-user temp folder");
+        assert!(temp.is_absolute() && temp.is_dir(), "{}", temp.display());
+        assert_eq!(current_uid(), unsafe { libc::geteuid() });
     }
 
     #[test]

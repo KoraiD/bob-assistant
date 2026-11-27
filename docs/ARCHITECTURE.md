@@ -132,6 +132,7 @@ flowchart LR
 | 2026-11-24 | Re-read the focused field after each change in the helper | Chrome updates the caret before the text; three cheap re-reads fix the stale chip at its source |
 | 2026-11-24 | Usage is a process-wide recorder saved at most every 30 s and at exit | engines count without new plumbing; counts only, never text |
 | 2026-11-26 | A separate profile through `BOB_HOME`, models shared | the Test Bench needs a second BOB that cannot touch the user's settings, memory, logs, keys or sockets; sharing models avoids a second 1 GB download. A bad value stops BOB (exit 2) instead of falling back to the real folders |
+| 2026-11-27 | Development overrides only in debug builds; release builds reset `HOME`, `TMPDIR` and `PATH` at launch (code review SEC-12) | any same-user process could start a release BOB with `open --env BOB_NATIVE_PATH=...` and have its own program run with BOB's Accessibility and Microphone permissions. Checking the signatures of the bundled programs was left out: macOS already protects a notarized bundle from other apps |
 | 2026-11-26 | The Test Bench types into its own editor only, through the HID event stream | BOB's key tap only sees events at the HID or session level, so `postToPid` would skip BOB; the bench owns the window it types into, checks focus before every key and watches for other input, and reads BOB's chip label through Accessibility |
 | 2026-11-26 | Test hooks behind a compile flag, not `#if DEBUG` | `build-app.sh` builds the helper with `-c release` even for dev builds, so `DEBUG` would not include them; a flag keeps them out of every shipped build |
 | 2026-11-23 | Dictation state machine in Rust, audio in Swift | the core owns timing rules (250 ms minimum hold, 5-minute cap) as a pure, property-tested machine; the helper only records, gates silence and transcribes |
@@ -178,6 +179,11 @@ and cannot change the login item, and its tray tooltip and window title end in "
 storage (theme, welcome tour seen) is still shared, because WebKit keeps it per app bundle. `bob-mcp` follows
 `BOB_HOME` too, so an agent reaches the matching BOB.
 
+`BOB_HOME` and the other development overrides (`BOB_NATIVE_PATH`, `BOB_LLAMA_SERVER`, `BOB_CONTROL_SOCKET`) work in
+debug builds only (`make app`, which the Test Bench uses). Release builds remove them at launch and take `HOME`,
+`TMPDIR` and `PATH` from the system (`getpwuid_r`, `confstr(_CS_DARWIN_USER_TEMP_DIR)`, `/usr/bin:/bin:/usr/sbin:/sbin`),
+so `$TMPDIR` in the table above means the system's per-user temporary folder; `bob-mcp` does the same.
+
 ## Native bridge protocol (v1)
 Version 2. Newline-delimited JSON over `native.sock` in the runtime folder (File locations). Helper to core: `hello`, `permissions`, `focus`,
 `text_state`, `error`, `key`. Core to helper: `hello_ack`, `reject`, `show_chip`, `hide_chip`, `insert_text`, `capture_keys`,
@@ -187,5 +193,6 @@ Typed text only travels in `text_state.before_caret`, is capped to the last 2000
 
 ## Dependencies
 Rust: tauri 2, serde, serde_json (float_roundtrip), log, env_logger, tokio, reqwest 0.13 (rustls), futures-util, bytes,
-thiserror, sha2, hex, rand, url, keyring (apple-native); dev: proptest. JS: react 18, vite 6, tailwind 4, vitest 3,
+thiserror, sha2, hex, rand, url, keyring (apple-native), libc (system home and temp folders; it was already in the
+build through other crates); dev: proptest. JS: react 18, vite 6, tailwind 4, vitest 3,
 @tauri-apps/api. Swift: standard library and Swift Testing only (no third-party packages).

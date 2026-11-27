@@ -52,7 +52,7 @@ feature that changes the answer.
 | Activity trail | `~/Library/Logs/BOB/audit.jsonl` (0600, rotated at 2 MB): settings changes, brains (never keys), text sent to brains as feature, brain, cloud or not, character count and whether personal context was included; AI agent calls as tool, characters, duration and outcome | yes, locally |
 | AI agents (MCP, opt-in) | text an agent sends goes to your brains with the same rules as the hotkeys; only same-user processes can connect | not stored (audited without text) |
 | Transcripts, typed text, selections | never logged | no |
-| Separate profile (`BOB_HOME`, for testing) | its settings, logs, keys and sockets stay under that folder and a separate Keychain service; only downloaded models and the window's theme are shared with your BOB | yes, in that folder |
+| Separate profile (`BOB_HOME`, for testing; development builds only) | its settings, logs, keys and sockets stay under that folder and a separate Keychain service; only downloaded models and the window's theme are shared with your BOB | yes, in that folder |
 | API keys | macOS Keychain | yes |
 
 ## Brains

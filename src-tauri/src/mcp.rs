@@ -24,7 +24,7 @@ pub const MAX_REQUEST_BYTES: usize = 256 * 1024;
 /// Next to the helper socket in the profile's runtime folder (`paths`, so the `bob-mcp` bridge follows
 /// `BOB_HOME` too); `BOB_CONTROL_SOCKET` overrides it (tests).
 pub fn control_socket_path() -> PathBuf {
-    if let Some(p) = std::env::var_os("BOB_CONTROL_SOCKET") {
+    if let Some(p) = crate::paths::dev_env("BOB_CONTROL_SOCKET") {
         return PathBuf::from(p);
     }
     crate::paths::runtime_dir().join(CONTROL_SOCKET)

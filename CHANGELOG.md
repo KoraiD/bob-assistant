@@ -4,6 +4,10 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
 [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Security
+- Release builds ignore the development environment variables (`BOB_HOME`, `BOB_NATIVE_PATH`,
+  `BOB_LLAMA_SERVER`, `BOB_CONTROL_SOCKET`) and take `HOME`, `TMPDIR` and `PATH` from the system. Before, another
+  program could start BOB with its own helper and have it run with BOB's Accessibility and Microphone permissions.
 ### Fixed
 - Ghost Text: a suggestion that was dismissed with `Esc` while it was still arriving no longer comes back.
 - Ghost Text: `⇧Tab` inserts what was on screen (finishing its last word), not words that arrived after the

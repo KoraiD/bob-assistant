@@ -81,10 +81,10 @@ pub enum SidecarError {
     Io(String),
 }
 
-/// Locate `llama-server`: `$BOB_LLAMA_SERVER`, next to the app executable (bundled), then the dev
-/// location `src-tauri/binaries/llama/llama-server` created by `make sidecars` (debug builds only).
+/// Locate `llama-server`: inside the app bundle; development builds also accept `$BOB_LLAMA_SERVER` and
+/// `src-tauri/binaries/llama/llama-server` from `make sidecars` (code review SEC-12).
 pub fn locate_binary() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("BOB_LLAMA_SERVER").map(PathBuf::from) {
+    if let Some(p) = crate::paths::dev_env("BOB_LLAMA_SERVER").map(PathBuf::from) {
         return p.is_file().then_some(p);
     }
     let exe = std::env::current_exe().ok()?;
@@ -153,7 +153,8 @@ pub fn kill_stale(runtime_dir: &Path) -> bool {
     let Ok(pid) = text.trim().parse::<u32>() else {
         return false;
     };
-    let comm = std::process::Command::new("ps")
+    // Absolute paths: never a program found through PATH (code review SEC-12).
+    let comm = std::process::Command::new("/bin/ps")
         .args(["-p", &pid.to_string(), "-o", "comm="])
         .output();
     let is_llama = comm
@@ -165,7 +166,7 @@ pub fn kill_stale(runtime_dir: &Path) -> bool {
         })
         .unwrap_or(false);
     if is_llama {
-        let _ = std::process::Command::new("kill")
+        let _ = std::process::Command::new("/bin/kill")
             .arg(pid.to_string())
             .status();
     }

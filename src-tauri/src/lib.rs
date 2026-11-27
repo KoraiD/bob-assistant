@@ -412,6 +412,8 @@ fn install_panic_hook() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Release builds: no environment overrides, and HOME, TMPDIR and PATH from the system (code review SEC-12).
+    paths::harden_environment();
     // A separate profile (BOB_HOME) is decided before anything is written; a bad value never falls back to
     // the user's own folders.
     let profile = match paths::init() {

@@ -16,5 +16,8 @@ async fn main() {
         );
         return;
     }
+    // Release builds find the socket where the app puts it (the system temp folder), whatever the agent set
+    // (code review SEC-12). Runs before any thread is started: the runtime is current-thread.
+    bob_lib::paths::harden_environment();
     bob_lib::mcp::serve_stdio().await;
 }

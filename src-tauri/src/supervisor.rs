@@ -31,9 +31,10 @@ impl Backoff {
     }
 }
 
-/// Locate the helper binary: `BOB_NATIVE_PATH`, next to the core executable, or the dev build.
+/// Locate the helper binary: next to the core executable (inside the app bundle). Development builds also accept
+/// `BOB_NATIVE_PATH` and the SwiftPM build folder; release builds never do (code review SEC-12).
 pub fn locate_helper() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("BOB_NATIVE_PATH") {
+    if let Some(p) = crate::paths::dev_env("BOB_NATIVE_PATH") {
         let p = PathBuf::from(p);
         if p.is_file() {
             return Some(p);
@@ -44,6 +45,9 @@ pub fn locate_helper() -> Option<PathBuf> {
     let sibling = dir.join("bob-native");
     if sibling.is_file() {
         return Some(sibling);
+    }
+    if !cfg!(debug_assertions) {
+        return None;
     }
     // Development: <repo>/native/bob-native/.build/{debug,release}/bob-native
     let mut cur = Some(dir);

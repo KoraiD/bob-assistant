@@ -7,6 +7,10 @@ What BOB protects, how, and how it is checked. Privacy (what data goes where) is
 - **Trust boundary 1, other local processes:** the core and the helper talk over a Unix socket in a per-user 0700
   directory (socket 0600). The built-in model server listens on 127.0.0.1 only, needs a random per-launch key (read
   from a 0600 file, never on the command line), and has its web UI off.
+- **Trust boundary 1b, the launch environment:** another process of the same user can start BOB with any
+  environment variables. Release builds ignore them for every choice of program or folder (see the table).
+  BOB does not check its helper's and model server's signatures before starting them: they sit inside the signed,
+  notarized bundle, which macOS (App Management) protects from other apps.
 - **Trust boundary 2, the network:** only the brains you configure and Hugging Face downloads (pinned URLs,
   SHA-256 verified before install).
 - **Trust boundary 3, the web view:** strict CSP (`default-src 'self'`, no remote scripts, no `eval`). IPC is limited
@@ -35,6 +39,7 @@ What BOB protects, how, and how it is checked. Privacy (what data goes where) is
 | Clipboard context skips concealed and transient pasteboard items and quiet apps | `ClipboardWatcher.swift` (tests) |
 | Release builds: Developer ID signature with hardened runtime and secure timestamp; credentials stay in the keychain, never in files or CI | `scripts/build-release.sh`, docs/RELEASE.md |
 | Typo fixes delete only the exact word they were made for, and never in a password field | `HelperRuntime.swift` (`replace_before_caret`) |
+| Release builds start only their own bundled programs and use only their own folders: the development overrides (`BOB_HOME`, `BOB_NATIVE_PATH`, `BOB_LLAMA_SERVER`, `BOB_CONTROL_SOCKET`) are read in debug builds only, and at launch BOB removes them and takes `HOME`, `TMPDIR` and `PATH` from the system, not from whoever started it (`open --env`, a login item). System tools run by absolute path | `paths::dev_env`, `paths::harden_environment` (tests), `supervisor::locate_helper`, `brain/sidecar.rs` |
 
 ## Dependency advisories
 `make audit` runs `cargo audit` (RustSec) and `npm audit`; CI runs both on every push.
