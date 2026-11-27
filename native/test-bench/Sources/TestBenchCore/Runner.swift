@@ -6,6 +6,9 @@ public enum EditorProfile: String, Codable, CaseIterable, Sendable {
     case plain
     /// Smart quotes and dashes on (TextEdit's defaults for rich text).
     case smart
+    /// Plain, but Accessibility reports the text and caret as they were 60 to 250 ms earlier, like Chrome and
+    /// Electron apps (Kiro, Slack) that update their accessibility tree after the screen.
+    case late
 }
 
 /// What the runner needs from the world: the real app posts key events and reads the chip through
@@ -292,7 +295,10 @@ public final class Runner {
         }
         if let insert {
             let want = normalized(before) + insert
-            if normalized(after) == want {
+            // Shift+Tab may finish the last word on screen from the full suggestion (code review GT-14 rule).
+            let finishedWord = key == .shiftTab && !want.hasSuffix(" ") && normalized(after).hasPrefix(want)
+                && !normalized(after).dropFirst(want.count).contains(where: { $0.isWhitespace })
+            if normalized(after) == want || finishedWord {
                 summary.acceptsOK += 1
                 lastAccepted = (insert, io.nowMs())
             } else if !(racy && after == before + "\t") {

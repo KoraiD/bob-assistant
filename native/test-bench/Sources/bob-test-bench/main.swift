@@ -226,6 +226,49 @@ final class ChipReader {
 final class BenchTextView: NSTextView {
     /// Shift+Tab would move focus out of the editor; keep it here (BOB takes it when a chip shows).
     override func insertBacktab(_ sender: Any?) {}
+
+    /// The `late` profile: Accessibility answers with the text and selection as they were this long ago.
+    var lateMs = 0.0
+    private var history: [(ms: Double, text: String, selection: NSRange)] = []
+
+    private func record() {
+        guard lateMs > 0 else { return }
+        let now = CACurrentMediaTime() * 1000
+        history.append((now, string, selectedRange()))
+        // Keep two seconds, and always the newest entry older than the delay.
+        if let keep = history.lastIndex(where: { $0.ms <= now - 2_000 }) { history.removeFirst(keep) }
+    }
+
+    func resetHistory() {
+        history = []
+        record()
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        record()
+    }
+
+    override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity,
+                                    stillSelecting stillSelectingFlag: Bool) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelectingFlag)
+        record()
+    }
+
+    private var lateSnapshot: (text: String, selection: NSRange)? {
+        guard lateMs > 0, let first = history.first else { return nil }
+        let cutoff = CACurrentMediaTime() * 1000 - lateMs
+        let entry = history.last(where: { $0.ms <= cutoff }) ?? first
+        return (entry.text, entry.selection)
+    }
+
+    override func accessibilityValue() -> String? {
+        lateSnapshot?.text ?? super.accessibilityValue()
+    }
+
+    override func accessibilitySelectedTextRange() -> NSRange {
+        lateSnapshot?.selection ?? super.accessibilitySelectedTextRange()
+    }
 }
 
 final class Bench: NSObject, NSApplicationDelegate, BenchIO {
@@ -295,6 +338,9 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
     /// Insert a word every 300 ms for 10 s through the editor's own editing path (as typing would), without
     /// key events or activation, so another process can watch the editor through Accessibility.
     func runDiagnostics() {
+        configure(options.profiles.count == 1 ? options.profiles[0] : .plain)
+        editor.resetHistory()
+        if editor.lateMs > 0 { say(String(format: "diag: late editor, %.0f ms", editor.lateMs)) }
         var n = 0
         Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] t in
             guard let self else { return }
@@ -350,6 +396,7 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
 
     func configure(_ p: EditorProfile) {
         let smart = p == .smart
+        editor.lateMs = p == .late ? Double.random(in: 60...250) : 0
         editor.isRichText = false
         editor.isAutomaticQuoteSubstitutionEnabled = smart
         editor.isAutomaticDashSubstitutionEnabled = smart
@@ -497,9 +544,11 @@ final class Bench: NSObject, NSApplicationDelegate, BenchIO {
         DispatchQueue.main.sync {
             configure(profile)
             editor.string = ""
+            editor.resetHistory()
             window.makeFirstResponder(nil)  // focus moves into the editor, like a click
             window.makeFirstResponder(editor)
-            status.stringValue = "Typing (\(profile.rawValue) editor). Moving the mouse pauses; any key stops the run."
+            let late = profile == .late ? String(format: ", reports %.0f ms late", editor.lateMs) : ""
+            status.stringValue = "Typing (\(profile.rawValue) editor\(late)). Moving the mouse pauses; any key stops the run."
         }
     }
 

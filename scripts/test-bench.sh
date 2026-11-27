@@ -2,7 +2,7 @@
 # Run the BOB Test Bench: a test copy of BOB (separate profile in /tmp/bob-test) suggests while the Test Bench
 # types like a person into its own editor, and every step is checked.
 #
-#   scripts/test-bench.sh [--brain fake|builtin] [--minutes 5] [--seed N] [--profiles plain,smart] [--bob-first]
+#   scripts/test-bench.sh [--brain fake|builtin] [--minutes 5] [--seed N] [--profiles plain,smart,late] [--bob-first]
 #
 # Before you start: quit your own BOB (the Test Bench refuses to run while it runs) and build the dev app
 # (`make app`). The first run asks for Accessibility for "BOB Test Bench" (System Settings > Privacy & Security
@@ -16,7 +16,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-brain=fake minutes=5 seed=$(( $(date +%s) % 100000 )) profiles=plain,smart bob_first=0
+brain=fake minutes=5 seed=$(( $(date +%s) % 100000 )) profiles=plain,smart,late bob_first=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --brain) brain=$2; shift 2 ;;
