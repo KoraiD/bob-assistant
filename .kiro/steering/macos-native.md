@@ -20,6 +20,8 @@ Some notes were written from memory and must be validated in the Task 2 spike; r
   "chip visible" flag, swallow Tab/Shift+Tab/Esc/arrows/Enter only when it is set. Re-enable the tap on
   `tapDisabledByTimeout` and `tapDisabledByUserInput`.
 - **Secure input:** event taps do not see keys in secure fields. Also treat `AXSecureTextField` as a quiet zone.
+  Before typing, `InsertGuard` refuses while `IsSecureEventInputEnabled()` is true or the focused field cannot be read
+  (fail closed, code review SEC-09).
 - **Insertion order:** synthetic Unicode key events (`CGEventKeyboardSetUnicodeString`) first, then AX selected-text
   replacement, then Cmd+V with clipboard save/restore.
 - **Overlay:** transparent, non-activating, click-through `NSPanel` (`.nonactivatingPanel`, `ignoresMouseEvents`,

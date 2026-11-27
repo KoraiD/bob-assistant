@@ -224,6 +224,7 @@ fn start_native_bridge(
                     | NativeEvent::Transcript { .. }
                     | NativeEvent::DictationError { .. }
                     | NativeEvent::DictationStatus { .. }
+                    | NativeEvent::InsertRefused { .. }
                     | NativeEvent::Focus { .. }
                     | NativeEvent::TextState { .. }
                     | NativeEvent::Hello { .. }

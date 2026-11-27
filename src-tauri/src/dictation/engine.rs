@@ -35,6 +35,10 @@ pub const MIC_HELP: &str =
     "BOB needs the microphone: System Settings > Privacy & Security > Microphone > BOB.";
 pub const MODEL_HELP: &str = "Download a dictation model first (Overview > Voice Dictation).";
 pub const SECURE_HELP: &str = "BOB never types into password fields.";
+pub const SECURE_INPUT_HELP: &str =
+    "BOB does not type while macOS secure input is on (a password field or a protected app has the keyboard).";
+pub const UNREADABLE_HELP: &str =
+    "BOB could not check the field at the cursor, so it did not type.";
 pub const CHECKING_HELP: &str = "BOB is checking the dictation model; try again in a moment.";
 pub const DAMAGED_HELP: &str =
     "The dictation model changed after it was downloaded, so BOB deleted it. Download it again.";
@@ -416,6 +420,22 @@ impl Engine {
                     s.last_error = Some(message.clone());
                 });
                 self.feed(Input::Failed { reason: message });
+            }
+            // The helper refused to type (code review SEC-09), for a dictation or a Ghost accept: say why.
+            In::Native(NativeEvent::InsertRefused { reason }) => {
+                let mut message = match reason.as_str() {
+                    "secure_input" => SECURE_INPUT_HELP,
+                    "secure_field" => SECURE_HELP,
+                    _ => UNREADABLE_HELP,
+                }
+                .to_string();
+                if self.shared.last().is_some() {
+                    message.push_str(
+                        " The dictation is kept for two minutes: Type Last Dictation Again in the menu bar.",
+                    );
+                }
+                self.stats(|s| s.last_error = Some(message.clone()));
+                self.orb(OrbState::Error, Some(message));
             }
             In::Native(NativeEvent::DictationStatus {
                 model_loaded,
@@ -1028,6 +1048,30 @@ mod tests {
             panic!()
         };
         assert!(hotkey.is_none(), "disabled dictation registers no hotkey");
+    }
+    /// Code review SEC-09: when the helper refuses to type, the user sees why.
+    #[tokio::test]
+    async fn a_refused_insert_is_explained() {
+        let (h, rec, root) = setup(true);
+        for (reason, help) in [
+            ("secure_input", SECURE_INPUT_HELP),
+            ("secure_field", SECURE_HELP),
+            ("unreadable", UNREADABLE_HELP),
+        ] {
+            h.native(NativeEvent::InsertRefused {
+                reason: reason.into(),
+            });
+            settle(20).await;
+            assert!(
+                rec.take().contains(&CoreCommand::Orb {
+                    state: OrbState::Error,
+                    text: Some(help.into())
+                }),
+                "{reason}"
+            );
+            assert_eq!(h.stats().last_error.as_deref(), Some(help));
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
     /// Code review SEC-13: the helper only gets a speech model that BOB verified this launch.
     #[tokio::test]

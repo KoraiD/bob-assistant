@@ -103,6 +103,9 @@ public enum NativeEvent: Equatable, Sendable {
     case dictationError(reason: String)
     case dictationStatus(modelLoaded: Bool, error: String?)
     case error(message: String)
+    /// `insert_text` or `replace_before_caret` was not typed (code review SEC-09): `reason` is "secure_input",
+    /// "secure_field" or "unreadable".
+    case insertRefused(reason: String)
     /// `shown`: the suggestion on screen at the key press (code review GT-14), so the core inserts what the user saw.
     case key(Key, shown: String? = nil)
     /// Any `type` this build does not know (decode only).
@@ -218,6 +221,8 @@ extension NativeEvent: Codable {
                                     error: try c.decodeIfPresent(String.self, forKey: Keys("error")))
         case "error":
             self = .error(message: try c.decode(String.self, forKey: Keys("message")))
+        case "insert_refused":
+            self = .insertRefused(reason: try c.decode(String.self, forKey: Keys("reason")))
         case "key":
             self = .key(try c.decode(Key.self, forKey: Keys("key")),
                         shown: try c.decodeIfPresent(String.self, forKey: Keys("shown")))
@@ -314,6 +319,9 @@ extension NativeEvent: Codable {
         case let .error(message):
             try c.encode("error", forKey: Keys("type"))
             try c.encode(message, forKey: Keys("message"))
+        case let .insertRefused(reason):
+            try c.encode("insert_refused", forKey: Keys("type"))
+            try c.encode(reason, forKey: Keys("reason"))
         case let .key(key, shown):
             try c.encode("key", forKey: Keys("type"))
             try c.encode(key, forKey: Keys("key"))

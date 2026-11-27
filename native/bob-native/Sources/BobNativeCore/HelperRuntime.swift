@@ -98,9 +98,9 @@ public final class HelperRuntime: @unchecked Sendable {
             chip.hide()
             shownChip.value = nil
         case let .insertText(text):
-            // VD-9 / GT-3: never type into a secure field, whoever asked.
-            if let focused = AXReader.focusedElement(),
-               AXReader.string(focused, kAXSubroleAttribute) == (kAXSecureTextFieldSubrole as String) {
+            // VD-9 / GT-3: never type into a secure field, whoever asked. Fails closed (code review SEC-09).
+            if let refusal = InsertGuard.check() {
+                try? client?.send(NativeEvent.insertRefused(reason: refusal.rawValue))
                 break
             }
             TextInserter.insert(text)
@@ -141,6 +141,10 @@ public final class HelperRuntime: @unchecked Sendable {
             }
         case let .replaceBeforeCaret(expected, text):
             // Only if the text before the caret is still what the fix was made for, and never in a password field.
+            if let refusal = InsertGuard.check() {
+                try? client?.send(NativeEvent.insertRefused(reason: refusal.rawValue))
+                break
+            }
             guard let focused = AXReader.focusedElement() else { break }
             let snap = AXReader.snapshot(of: focused)
             guard !snap.secure, (snap.beforeCaret ?? "").replacingOccurrences(of: "\u{a0}", with: " ").hasSuffix(expected) else { break }

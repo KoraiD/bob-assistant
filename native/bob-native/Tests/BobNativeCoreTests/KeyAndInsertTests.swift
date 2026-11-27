@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 @testable import BobNativeCore
 
@@ -60,5 +61,24 @@ struct TextInserterTests {
 
     @Test func emptyTextHasNoChunks() {
         #expect(TextInserter.chunks("").isEmpty)
+    }
+}
+
+/// Code review SEC-09: the last check before typing fails closed.
+@Suite("InsertGuard")
+struct InsertGuardTests {
+    @Test func typesOnlyIntoAReadableNonSecureFieldWithSecureInputOff() {
+        #expect(InsertGuard.decide(secureEventInput: false, field: .readable(secure: false)) == nil)
+        #expect(InsertGuard.decide(secureEventInput: false, field: .readable(secure: true)) == .secureField)
+        #expect(InsertGuard.decide(secureEventInput: false, field: .unreadable) == .unreadable)
+        for field: FocusedField in [.readable(secure: false), .readable(secure: true), .unreadable] {
+            #expect(InsertGuard.decide(secureEventInput: true, field: field) == .secureInput)
+        }
+    }
+    @Test func refusalsUseTheProtocolReasons() throws {
+        let reasons = [InsertRefusal.secureInput, .secureField, .unreadable].map(\.rawValue)
+        #expect(reasons == ["secure_input", "secure_field", "unreadable"])
+        let line = String(decoding: try JSONEncoder().encode(NativeEvent.insertRefused(reason: "unreadable")), as: UTF8.self)
+        #expect(line.contains("\"type\":\"insert_refused\""))
     }
 }

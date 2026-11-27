@@ -177,3 +177,10 @@ To check that BOB never delays keys, type quickly in a long document (TextEdit, 
 suggestion shows; no character may be lost. `~/Library/Logs/BOB/bob.log` lists `slow key tap (key waited)` if a key
 ever waited more than 30 ms for BOB. For testing only, starting the helper with `BOB_TEST_MAIN_STALL_MS=1500`
 blocks its main thread for 1.5 s every 2.5 s; typing must stay lossless (see `docs/PERFORMANCE.md`).
+
+## Typing into apps without Accessibility (code review SEC-09, 2026-11-27)
+BOB checks the focused field before it types (a dictation, a Ghost accept, a typo fix). When the field cannot be read
+(an app without Accessibility, or one that does not answer within 0.4 s) or macOS secure input is on, BOB does not
+type and the orb says why. Before, it typed anyway, which could put text into a password field whose type could not
+be read. Apps without Accessibility get no Ghost Text either way; for dictation there, the text stays in Type Last
+Dictation Again (menu bar) or Copy last dictation for two minutes.

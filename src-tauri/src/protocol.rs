@@ -212,6 +212,11 @@ pub enum NativeEvent {
     Error {
         message: String,
     },
+    /// `insert_text` or `replace_before_caret` was not typed (code review SEC-09): `reason` is "secure_input"
+    /// (macOS secure input is on), "secure_field" or "unreadable" (the focused field could not be checked).
+    InsertRefused {
+        reason: String,
+    },
     /// A captured key press (GT-10 to GT-12). Never sent while capture is off (GT-13).
     Key {
         key: Key,
@@ -466,6 +471,10 @@ impl fmt::Debug for NativeEvent {
                 .field("error", error)
                 .finish(),
             NativeEvent::Error { .. } => f.debug_struct("Error").finish_non_exhaustive(),
+            NativeEvent::InsertRefused { reason } => f
+                .debug_struct("InsertRefused")
+                .field("reason", reason)
+                .finish(),
             NativeEvent::Key { key, shown } => f
                 .debug_struct("Key")
                 .field("key", key)
@@ -783,6 +792,7 @@ mod tests {
                     }
                 ),
             "(?s).{0,60}".prop_map(|message| NativeEvent::Error { message }),
+            "[a-z_]{0,20}".prop_map(|reason| NativeEvent::InsertRefused { reason }),
             prop_oneof![Just(Key::Tab), Just(Key::ShiftTab), Just(Key::Escape)]
                 .prop_map(|key| NativeEvent::Key { key, shown: None }),
         ]

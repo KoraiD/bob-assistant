@@ -18,6 +18,10 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
   could reach it before redaction recognized the key.
 - Brain requests no longer follow redirects. A server on this Mac could answer with a redirect and have your
   text sent to another address without the cloud rules; BOB now shows the redirect as an error.
+- BOB no longer types when it cannot check the field at the cursor, or while macOS secure input is on. Before, a
+  failed Accessibility read let text be typed even into a password field. BOB shows why it did not type. Dictation
+  into apps without Accessibility now stops with that message; the text stays in Type Last Dictation Again for two
+  minutes.
 - Redaction also finds keys glued to other text by punctuation (CSV, tables, code, quotes) and long lowercase
   tokens that mix letters and digits, such as UUIDs.
 ### Fixed
