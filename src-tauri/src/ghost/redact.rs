@@ -26,12 +26,36 @@ const PREFIXES: &[&str] = &[
     "hf_",
 ];
 
+/// Characters that end a token inside a word: a key glued to other text in CSV, tables, code or quotes
+/// (`name,sk-...`, `a|ghp_...`, `f(sk-...)`) is checked on its own (code review SEC-07). None of them
+/// occurs in base64, hex or JWT keys.
+fn is_separator(c: char) -> bool {
+    matches!(
+        c,
+        ',' | ';' | '|' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | '\'' | '"' | '`'
+    )
+}
+
+/// Adjacent letter/digit pairs: high in random tokens, low in names like `report-2026-11-23-v2`.
+fn letter_digit_switches(t: &str) -> usize {
+    t.as_bytes()
+        .windows(2)
+        .filter(|w| {
+            (w[0].is_ascii_alphabetic() && w[1].is_ascii_digit())
+                || (w[0].is_ascii_digit() && w[1].is_ascii_alphabetic())
+        })
+        .count()
+}
+
 fn is_token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '/' | '+' | '=' | '.')
 }
 
 /// True when `t` (a whitespace-free token) looks like a secret.
 pub fn looks_secret(t: &str) -> bool {
+    if t.contains(is_separator) {
+        return t.split(is_separator).any(looks_secret);
+    }
     let t = t.trim_matches(|c: char| !is_token_char(c));
     if t.is_empty() || t == MARK {
         return false;
@@ -63,7 +87,10 @@ pub fn looks_secret(t: &str) -> bool {
     let hex = t.chars().all(|c| c.is_ascii_hexdigit());
     // Long hex (hashes, API keys) or long mixed-case alphanumerics with digits. Plain long words or
     // URLs with dots and slashes but few digits are kept.
-    (hex && digits > 0) || (upper && lower && digits >= 4 && !t.contains("//"))
+    // Long lowercase-and-digit tokens (base36 keys, UUIDs) when letters and digits are mixed throughout.
+    (hex && digits > 0)
+        || (upper && lower && digits >= 4 && !t.contains("//"))
+        || (lower && !upper && digits >= 6 && letter_digit_switches(t) >= 6 && !t.contains("//"))
 }
 
 /// Replace secrets in `text`. PEM blocks are replaced whole; other tokens one by one.
@@ -84,7 +111,8 @@ pub fn scrub(text: &str) -> String {
     }
     let mut out = String::with_capacity(s.len());
     let mut token = String::new();
-    let flush = |token: &mut String, out: &mut String| {
+    // One piece of a word (between separators) at a time.
+    let piece = |token: &mut String, out: &mut String| {
         if looks_secret(token) {
             // Keep surrounding punctuation like quotes or a trailing comma.
             let lead: String = token.chars().take_while(|c| !is_token_char(*c)).collect();
@@ -105,14 +133,14 @@ pub fn scrub(text: &str) -> String {
         token.clear();
     };
     for c in s.chars() {
-        if c.is_whitespace() {
-            flush(&mut token, &mut out);
+        if c.is_whitespace() || is_separator(c) {
+            piece(&mut token, &mut out);
             out.push(c);
         } else {
             token.push(c);
         }
     }
-    flush(&mut token, &mut out);
+    piece(&mut token, &mut out);
     out
 }
 
@@ -166,6 +194,34 @@ mod tests {
         );
     }
 
+    /// Code review SEC-07: keys glued to other text by punctuation, and lowercase random tokens.
+    #[test]
+    fn redacts_keys_glued_by_punctuation_and_lowercase_random_tokens() {
+        let sk = fake("sk-proj-", 40);
+        let gh = fake("ghp_", 36);
+        assert_eq!(scrub(&format!("name,{sk},x")), "name,[redacted],x");
+        assert_eq!(scrub(&format!("| a|{gh}|")), "| a|[redacted]|");
+        assert_eq!(scrub(&format!("foo({sk});")), "foo([redacted]);");
+        assert_eq!(scrub(&format!("key='{gh}'")), "key='[redacted]'");
+        assert_eq!(
+            scrub(&format!("{{\"k\":\"{sk}\"}}")),
+            "{\"k\":\"[redacted]\"}"
+        );
+        assert_eq!(scrub(&format!("`{gh}`")), "`[redacted]`");
+        assert_eq!(scrub(&format!("<{sk}>")), "<[redacted]>");
+        // Lowercase letters and digits mixed throughout (base36 keys, UUIDs).
+        let base36: String = "k3j9x2m7q4w8z1p5r6t0".repeat(2);
+        assert_eq!(
+            scrub(&format!("token {base36} here")),
+            "token [redacted] here"
+        );
+        assert_eq!(
+            scrub("id 550e8400-e29b-41d4-a716-446655440000"),
+            "id [redacted]"
+        );
+        assert!(looks_secret(&format!("csv,{sk}")));
+    }
+
     #[test]
     fn keeps_ordinary_prose_urls_and_long_words() {
         for text in [
@@ -174,6 +230,9 @@ mod tests {
             "Antidisestablishmentarianism-and-floccinaucinihilipilification",
             "Meeting at 10:30 on 2026-11-23, room B-204",
             "sk-short",
+            "Files: quarterly-report-2026-11-23-final-v2.pdf, notes(1).txt; [draft] {ok} <b>",
+            "see release-notes-for-version-12-of-2026.md and \"quoted text\" or 'single' (aside)",
+            "order 2026-11-23T10:30:00Z|status|shipped|box 12 of 40|(see invoice-2026-0042)",
         ] {
             assert_eq!(scrub(text), text, "{text}");
         }
@@ -186,15 +245,21 @@ mod tests {
             words in proptest::collection::vec("[a-zA-Z]{1,10}", 0..12),
             secrets in proptest::collection::vec(prop_oneof![
                 "sk-[a-zA-Z0-9]{20,40}", "ghp_[a-zA-Z0-9]{36}", "AKIA[A-Z0-9]{16}", "[0-9a-f]{40}",
+                "([a-z][0-9]){16,20}",
             ], 0..4),
-            seps in proptest::collection::vec(prop_oneof![Just(" "), Just("\n"), Just(", "), Just(" = ")], 0..16),
+            seps in proptest::collection::vec(prop_oneof![
+                Just(" "), Just("\n"), Just(", "), Just(" = "),
+                // Code review SEC-07: glued by punctuation, no whitespace.
+                Just(","), Just(";"), Just("|"), Just("("), Just(")"), Just("["), Just("]"),
+                Just("{"), Just("}"), Just("<"), Just(">"), Just("'"), Just("\""), Just("`"),
+            ], 0..16),
         ) {
             let mut parts: Vec<String> = words.clone();
             for (i, s) in secrets.iter().enumerate() { parts.insert(i.min(parts.len()), s.clone()); }
             let text: String = parts.iter().enumerate().map(|(i, p)| format!("{p}{}", seps.get(i).copied().unwrap_or(" "))).collect();
             let once = scrub(&text);
             for s in &secrets { prop_assert!(!once.contains(s.as_str()), "leaked {s} in {once}"); }
-            for tok in once.split_whitespace() { prop_assert!(!looks_secret(tok), "secret-looking token {tok} survived"); }
+            for tok in once.split(|c: char| c.is_whitespace() || is_separator(c)) { prop_assert!(!looks_secret(tok), "secret-looking token {tok} survived"); }
             prop_assert_eq!(scrub(&once), once);
         }
 

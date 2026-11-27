@@ -13,6 +13,8 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
   model.
 - Dictation cleanup no longer sends a transcript that looks like it contains a password or key to a cloud brain;
   BOB types the transcript as you said it instead.
+- Redaction also finds keys glued to other text by punctuation (CSV, tables, code, quotes) and long lowercase
+  tokens that mix letters and digits, such as UUIDs.
 ### Fixed
 - Ghost Text: a suggestion that was dismissed with `Esc` while it was still arriving no longer comes back.
 - Ghost Text: `⇧Tab` inserts what was on screen (finishing its last word), not words that arrived after the

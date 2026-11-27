@@ -66,7 +66,9 @@ feature that changes the answer.
 
 ## Redaction
 Before a prompt leaves the machine, credential-like tokens are dropped or replaced (`sk-`, `AKIA`, `ghp_`, JWTs,
-PEM blocks, long opaque or hex tokens). Behavior is property-tested.
+PEM blocks, long opaque or hex tokens, long lowercase tokens that mix letters and digits such as UUIDs). A token
+glued to other text by punctuation (`name,sk-...`, `a|ghp_...`, `f(...)`, quotes) is checked on its own.
+Behavior is property-tested.
 
 ## Quiet zones
 BOB does not read or suggest in secure text fields, when no caret position is known, or while text is selected.
