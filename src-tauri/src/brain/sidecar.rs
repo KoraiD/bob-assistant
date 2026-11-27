@@ -348,6 +348,7 @@ async fn supervise(
 ) {
     let http = reqwest::Client::builder()
         .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap_or_default();
     let mut attempt = 0u32;

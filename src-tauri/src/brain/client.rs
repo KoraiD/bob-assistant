@@ -63,7 +63,11 @@ impl HttpBrain {
                 "API keys are only sent over https to servers outside this Mac".into(),
             ));
         }
-        let mut builder = reqwest::Client::builder().connect_timeout(CONNECT_TIMEOUT);
+        // Brain APIs never redirect. Following one would let a server BOB treats as local (loopback, a
+        // local proxy) forward the text to any address, without the cloud rules (code review SEC-03).
+        let mut builder = reqwest::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none());
         if !cloud {
             // Servers on this Mac must not go through a system proxy; cloud brains may need one.
             builder = builder.no_proxy();
@@ -226,6 +230,15 @@ async fn send(rb: reqwest::RequestBuilder) -> Result<reqwest::Response, BrainErr
     let status = resp.status().as_u16();
     if status == 401 || status == 403 {
         return Err(BrainError::Unauthorized(status));
+    }
+    if (300..400).contains(&status) {
+        return Err(BrainError::Http {
+            status,
+            message:
+                "the brain sent BOB to another address, which BOB does not follow; enter the final \
+                      address as the endpoint"
+                    .into(),
+        });
     }
     if !(200..300).contains(&status) {
         let text = read_bounded(resp, MAX_ERROR_BODY).await;
@@ -602,6 +615,46 @@ mod tests {
                 status: 404,
                 message: "model 'm' not found".into()
             })
+        );
+    }
+
+    /// Code review SEC-03: a redirect is reported, never followed (the text never reaches the target).
+    #[tokio::test]
+    async fn redirects_are_reported_and_never_followed() {
+        let target = TestServer::start(|_| Response::json(200, serde_json::json!({}))).await;
+        let to = target.base.clone();
+        let server = TestServer::start(move |req| {
+            Response::new(307).header("location", &format!("{to}{}", req.path))
+        })
+        .await;
+        let mut cfg = config(ProviderKind::OpenAiCompatible, &server.base);
+        cfg.capabilities = Capabilities {
+            ghost: true,
+            chat: true,
+        };
+        let brain = HttpBrain::new(cfg, None).unwrap();
+        let req = ChatRequest {
+            system: "s".into(),
+            user: "private text".into(),
+            max_tokens: 1,
+            temperature: 0.0,
+        };
+        assert!(matches!(
+            brain.chat_stream(&req).await.err(),
+            Some(BrainError::Http { status: 307, .. })
+        ));
+        assert!(matches!(
+            brain
+                .complete_stream(&CompletionRequest::ghost("x"))
+                .await
+                .err(),
+            Some(BrainError::Http { status: 307, .. })
+        ));
+        assert_eq!(server.request_count(), 2);
+        assert_eq!(
+            target.request_count(),
+            0,
+            "the redirect target got a request"
         );
     }
 

@@ -211,6 +211,7 @@ impl BrainService {
         let Some(ep) = ep else { return false };
         let http = reqwest::Client::builder()
             .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .unwrap_or_default();
         sidecar::warm_up(&http, &ep).await;

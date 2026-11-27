@@ -16,6 +16,8 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
 - Ghost Text sends nothing to a cloud brain while you are typing what may be the start of a key or password
   (a known key prefix, or six or more characters mixing letters and digits). Before, up to 31 characters of a key
   could reach it before redaction recognized the key.
+- Brain requests no longer follow redirects. A server on this Mac could answer with a redirect and have your
+  text sent to another address without the cloud rules; BOB now shows the redirect as an error.
 - Redaction also finds keys glued to other text by punctuation (CSV, tables, code, quotes) and long lowercase
   tokens that mix letters and digits, such as UUIDs.
 ### Fixed
