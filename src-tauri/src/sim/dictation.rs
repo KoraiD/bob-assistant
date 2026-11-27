@@ -559,7 +559,6 @@ mod tests {
     /// The same with a cloud brain: dictated credentials must not leave the Mac. Voice edits are safe (the
     /// instruction is part of the system prompt, which `chat_system_opts` redacts); cleanup is not.
     #[tokio::test(start_paused = true)]
-    #[ignore = "VD-02: dictation cleanup sends a dictated credential to a cloud brain"]
     async fn dictated_credentials_never_reach_a_cloud_brain() {
         crate::logging::capture::start();
         let mut leaks: Vec<String> = vec![];

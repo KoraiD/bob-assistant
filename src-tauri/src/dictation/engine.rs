@@ -672,6 +672,19 @@ async fn run_cleanup(
     if !brain.config.capabilities.chat {
         return Err("the dictation brain cannot follow instructions".into());
     }
+    // Code review VD-02, as SA-9 for Selection Actions: a dictated credential never goes to a cloud brain.
+    // Redacting would put "[redacted]" into the text, so cleanup is skipped and the machine inserts the raw
+    // transcript (P2), which never left the Mac.
+    if brain.config.is_cloud() && crate::ghost::redact::scrub(text) != text {
+        crate::audit::record(
+            "dictation_cleanup.withheld",
+            serde_json::json!({ "brain": brain.config.id, "chars": text.chars().count() }),
+        );
+        return Err(
+            "this dictation looks like it contains a password or key, so it was not sent to a cloud brain"
+                .into(),
+        );
+    }
     let system = context.chat_system_opts(task, brain.config.shares_context(), !sets_language);
     crate::audit::sent(
         "dictation_cleanup",

@@ -36,7 +36,7 @@ feature that changes the answer.
 | Explain and Reply | same as Selection Actions; the answer is shown in BOB's panel and goes to the clipboard only when you choose Copy | not stored |
 | Clipboard (Selection Actions fallback) | borrowed for Cmd+C / Cmd+V when an app hides its selection from Accessibility, then restored item by item | not stored |
 | Audio (Dictation) | recorded only while you hold the dictation key, kept in memory inside BOB's helper and transcribed there by whisper.cpp; a recording is at most 5 minutes | never written to disk, never sent |
-| Transcripts | typed at the cursor; sent to the Dictation brain only when you pick a cleanup preset (and only with personal context if that brain is allowed) | not stored, never logged |
+| Transcripts | typed at the cursor; sent to the Dictation brain only when you pick a cleanup preset (and only with personal context if that brain is allowed); a transcript that looks like it contains a password or key is never sent to a cloud brain and is typed without cleanup | not stored, never logged |
 | Last dictation (for "Type Last Dictation Again") | in memory only, forgotten after two minutes or when BOB quits | no |
 | Voice edit | the selection is read with Accessibility when you start dictating over it; selection and spoken instruction go to the Selection brain, with the same cloud and secret rules as Selection Actions | not stored |
 | Dictation vocabulary and replacements | local `dictation-settings.json`; the vocabulary is given to whisper on this Mac only | yes, locally |
