@@ -9,6 +9,12 @@ public enum FocusedField: Equatable, Sendable {
     case unreadable
 }
 
+/// A typo fix deletes characters before the caret, so it runs only if no key of the user's reached the app
+/// since the Tab that asked for it (code review GT-09). Pure, so it is unit-testable.
+public enum TypoFixGuard {
+    public static func unchanged(keysAtTab: UInt64, keysNow: UInt64) -> Bool { keysAtTab == keysNow }
+}
+
 /// Why typing was refused; the raw value is the `insert_refused` reason sent to the core.
 public enum InsertRefusal: String, Equatable, Sendable {
     case secureInput = "secure_input"

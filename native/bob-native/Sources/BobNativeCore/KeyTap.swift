@@ -86,6 +86,8 @@ public let bobSyntheticEventMarker: Int64 = 0x0B0B_0B0B
 /// The callback only reads atomic flags and returns. Requires Accessibility permission.
 public final class KeyTap: @unchecked Sendable {
     private let capturing = OSAllocatedUnfairLock(initialState: false)
+    /// The user's own keys that went to apps, and that count when a key was last swallowed.
+    private let passed = OSAllocatedUnfairLock(initialState: (total: UInt64(0), atSwallow: UInt64(0)))
     private let menuOpen = OSAllocatedUnfairLock(initialState: false)
     /// Called on the main run loop for every swallowed menu key.
     public var onMenuKey: ((MenuKey) -> Void)?
@@ -111,6 +113,10 @@ public final class KeyTap: @unchecked Sendable {
     }
 
     public var isInstalled: Bool { tap != nil }
+    /// How many of the user's own keys have gone to apps (code review GT-09: a typo fix waits for none).
+    public var passedKeys: UInt64 { passed.withLock { $0.total } }
+    /// `passedKeys` when the last key was swallowed, taken in the tap itself (no main-thread delay).
+    public var passedKeysAtLastSwallow: UInt64 { passed.withLock { $0.atSwallow } }
 
     /// Install the tap. Returns false when the system refuses (no Accessibility permission).
     @discardableResult
@@ -173,6 +179,7 @@ public final class KeyTap: @unchecked Sendable {
                                           synthetic: synthetic, menuOpen: menuOpen)
         switch decision {
         case .pass:
+            if !synthetic { passed.withLock { $0.total &+= 1 } }
             // While a chip is shown, tell the core what the key does before Accessibility reports it.
             if capturing, !synthetic, !menuOpen, let callback = onEdit,
                let (kind, text) = EditDecision.classify(keyCode: keyCode, flags: event.flags, text: typedText(event)) {
@@ -180,6 +187,7 @@ public final class KeyTap: @unchecked Sendable {
             }
             return Unmanaged.passUnretained(event)
         case let .swallow(key):
+            passed.withLock { $0.atSwallow = $0.total }
             let callback = onKey
             DispatchQueue.main.async { callback?(key) }
             return nil

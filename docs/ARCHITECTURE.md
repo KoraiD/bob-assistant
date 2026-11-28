@@ -190,7 +190,7 @@ Version 2. Newline-delimited JSON over `native.sock` in the runtime folder (File
 `text_state`, `error`, `key`, `edit` (while a chip is shown: what a key that went to the app did, `type` with its text, `backspace` or `other`), `insert_refused` (with `reason`: `secure_input`, `secure_field` or `unreadable`). Core to helper: `hello_ack`, `reject`, `show_chip`, `hide_chip`, `insert_text`, `post_key` (give a swallowed key back), `capture_keys`,
 `request_permissions`, `quit`. Unknown `type` values are
 ignored on both sides. Shared fixtures: `native/bob-native/Tests/Fixtures/*.jsonl` (decoded and re-encoded by both test suites).
-Typed text only travels in `text_state.before_caret`, is capped to the last 2000 characters, and is never logged.
+Typed text travels only in `text_state.before_caret` (at most 2000 characters, starting at a multiple of 256 so the start stays put while typing) and in `edit` while a chip is shown, and is never logged.
 
 ## Dependencies
 Rust: tauri 2, serde, serde_json (float_roundtrip), log, env_logger, tokio, reqwest 0.13 (rustls), futures-util, bytes,

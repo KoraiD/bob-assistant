@@ -214,7 +214,6 @@ async fn h6_the_chip_survives_smart_quotes() {
 /// H7 (GT-07): the Deletes of a typo fix look like typing; nothing should be requested while the fix is being
 /// typed.
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-07: after a typo fix BOB asks the model about the misspelled or half-deleted text"]
 async fn h7_a_typo_fix_asks_nothing_for_the_half_deleted_word() {
     let steps = vec![
         Step::Type("We will recieve ", ms(180)),
@@ -241,7 +240,6 @@ async fn h7_a_typo_fix_asks_nothing_for_the_half_deleted_word() {
 /// A typo fix while the user keeps typing: the helper checks the word against what Accessibility shows, which
 /// lags in Electron apps, then deletes from the real text. Found while writing H7 (GT-09).
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-09: a typo fix can delete the wrong characters when the user kept typing"]
 async fn h7b_a_typo_fix_never_deletes_what_the_user_typed_after_it() {
     for seed in 1..=10 {
         let steps = vec![
@@ -265,7 +263,6 @@ async fn h7b_a_typo_fix_never_deletes_what_the_user_typed_after_it() {
 /// H8 (GT-08): past 2000 characters the helper's text window slides with every key, so typing through the
 /// chip no longer matches and every key hides the chip and asks the model again.
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-08: the 2000-character window breaks typing through in long documents"]
 async fn h8_typing_through_works_in_a_long_document() {
     let long =
         "The quarterly report covers sales, hiring and the budget for next year. ".repeat(30);

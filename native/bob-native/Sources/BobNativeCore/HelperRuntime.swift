@@ -143,6 +143,9 @@ public final class HelperRuntime: @unchecked Sendable {
             }
         case let .replaceBeforeCaret(expected, text):
             // Only if the text before the caret is still what the fix was made for, and never in a password field.
+            // Accessibility can still show the misspelled word after the user typed on (Electron apps), so a
+            // key that reached the app since the Tab cancels the fix (code review GT-09).
+            guard TypoFixGuard.unchanged(keysAtTab: keyTap.passedKeysAtLastSwallow, keysNow: keyTap.passedKeys) else { break }
             if let refusal = InsertGuard.check() {
                 try? client?.send(NativeEvent.insertRefused(reason: refusal.rawValue))
                 break

@@ -128,9 +128,23 @@ struct TextWindowTests {
         #expect(TextWindow.beforeCaret(value: "", caretUTF16: 0) == "")
     }
 
-    @Test func keepsOnlyTheLastNCharacters() {
-        #expect(TextWindow.beforeCaret(value: "0123456789", caretUTF16: 10, maxChars: 4) == "6789")
+    @Test func keepsAtMostNCharactersFromAStepBoundary() {
+        // Ten characters, at most four, steps of four: the window starts at character 8.
+        #expect(TextWindow.beforeCaret(value: "0123456789", caretUTF16: 10, maxChars: 4) == "89")
         #expect(TextWindow.beforeCaret(value: "abc", caretUTF16: 3, maxChars: 0) == "")
+    }
+    /// Code review GT-08: in a long document the window's start stays put while the user types.
+    @Test func theWindowStartStaysPutWhileTyping() {
+        let doc = String(repeating: "The quarterly report covers sales. ", count: 70)  // 2,450 characters
+        var starts = Set<String>()
+        for extra in 0..<200 {
+            let text = doc + String(repeating: "x", count: extra)
+            let window = TextWindow.beforeCaret(value: text, caretUTF16: text.utf16.count)
+            #expect(window.count <= TextWindow.defaultMaxChars)
+            #expect(text.hasSuffix(window))
+            starts.insert(String(window.prefix(40)))
+        }
+        #expect(starts.count <= 2, "the start moved \(starts.count) times in 200 keys")
     }
 
     @Test func utf16OffsetsAreHonoredForEmojiAndNeverCrash() {

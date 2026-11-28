@@ -29,6 +29,10 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
 - Redaction also finds keys glued to other text by punctuation (CSV, tables, code, quotes) and long lowercase
   tokens that mix letters and digits, such as UUIDs.
 ### Fixed
+- Ghost Text typo fixes: a fix never deletes characters you typed after the word, and BOB asks the model
+  nothing about the half-corrected word.
+- Ghost Text in documents longer than 2,000 characters: typing through a suggestion works again instead of
+  asking the model at every key.
 - Ghost Text in Chrome, Electron and other apps that report text late: a quick second Tab takes the next word
   instead of the same one again; Tab right after typing part of a suggestion finishes the word ("you", not
   "yyou"); a Backspace right after Tab is seen; a word that arrives after Tab no longer brings the accepted word

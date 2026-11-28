@@ -94,6 +94,8 @@ const WATCH_MS: u64 = 250;
 const COALESCE_MS: u64 = 4;
 /// `TextWindow.defaultMaxChars`.
 pub const WINDOW_CHARS: usize = 2000;
+/// `TextWindow.step`.
+pub const WINDOW_STEP: usize = 256;
 /// Unix socket hop between helper and core.
 const HOP: Duration = Duration::from_micros(200);
 /// From a key event or inserted text to the field changing.
@@ -251,6 +253,9 @@ pub struct World {
     engine_chip: bool,
     engine_capture: bool,
     capture_mismatch: bool,
+    /// `KeyTap.passedKeys` and its value at the last swallowed key (code review GT-09).
+    passed_keys: u64,
+    passed_at_swallow: u64,
     ghost: GhostHandle,
     context: Arc<ContextHub>,
     calls: Calls,
@@ -362,6 +367,8 @@ impl World {
             engine_chip: false,
             engine_capture: false,
             capture_mismatch: false,
+            passed_keys: 0,
+            passed_at_swallow: 0,
             ghost,
             context,
             calls,
@@ -653,6 +660,7 @@ impl World {
             Action::Press(key) => {
                 self.stats.keys += 1;
                 if self.capturing {
+                    self.passed_at_swallow = self.passed_keys;
                     self.note("user", format!("{key:?} (swallowed)"));
                     let continuation = self.screen.as_ref().and_then(|s| s.claim.clone());
                     if key != Key::Escape && continuation.is_some() {
@@ -699,6 +707,7 @@ impl World {
     /// Like the helper's key tap: while it captures (a chip is shown), every key that goes to the app is
     /// also reported to the engine (code review GT-01).
     fn report_edit(&mut self, kind: EditKind, text: Option<String>) {
+        self.passed_keys += 1;
         if self.capturing {
             self.push(
                 HOP,
@@ -862,11 +871,10 @@ impl World {
             format!("{how}: text {:?}, caret x {}", tail(&before, 30), caret.x),
         );
         self.last_delivered = Some((before.clone(), caret));
+        // `TextWindow.beforeCaret`: at most WINDOW_CHARS, starting at a multiple of WINDOW_STEP (GT-08).
         let n = before.chars().count();
-        let window: String = before
-            .chars()
-            .skip(n.saturating_sub(WINDOW_CHARS))
-            .collect();
+        let skip = n.saturating_sub(WINDOW_CHARS).div_ceil(WINDOW_STEP) * WINDOW_STEP;
+        let window: String = before.chars().skip(skip).collect();
         self.push(
             HOP,
             Ev::ToEngine {
@@ -968,7 +976,10 @@ impl World {
                 // `HelperRuntime`: re-read the field; replace only if the word is still there (in what
                 // Accessibility shows, which can lag behind the field).
                 let (before, _, _) = self.snapshot();
-                if normalize_typed(&before).ends_with(&expected) {
+                // `TypoFixGuard`: no key of the user's reached the app since the Tab.
+                if self.passed_keys == self.passed_at_swallow
+                    && normalize_typed(&before).ends_with(&expected)
+                {
                     self.stats.fixes += 1;
                     self.push(
                         Duration::ZERO,

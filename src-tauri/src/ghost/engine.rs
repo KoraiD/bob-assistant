@@ -969,6 +969,11 @@ impl Engine {
                         expected: fix.expected.clone(),
                         text: fix.text.clone(),
                     });
+                    // The deletions and the late report of the misspelled word are not the user typing:
+                    // nothing is asked until the fixed text arrives (code review GT-07).
+                    if let Some(stem) = base.strip_suffix(engine_text(&fix.expected).as_str()) {
+                        self.predict(format!("{stem}{}", engine_text(&fix.text)));
+                    }
                 }
                 Key::Escape => {
                     self.dismissed_typos.insert(fix.word.clone());

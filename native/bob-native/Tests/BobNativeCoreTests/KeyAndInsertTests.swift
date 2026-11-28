@@ -106,3 +106,12 @@ struct EditDecisionTests {
         #expect(cmd == .postKey(.tab))
     }
 }
+
+/// Code review GT-09: a typo fix never runs after the user typed on.
+@Suite("TypoFixGuard")
+struct TypoFixGuardTests {
+    @Test func aKeyAfterTheTabCancelsTheFix() {
+        #expect(TypoFixGuard.unchanged(keysAtTab: 41, keysNow: 41))
+        #expect(!TypoFixGuard.unchanged(keysAtTab: 41, keysNow: 42))
+    }
+}

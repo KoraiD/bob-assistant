@@ -147,16 +147,25 @@ public struct OrientationMemory: Sendable {
 /// Extracts the text before the caret to send to the core.
 public enum TextWindow {
     public static let defaultMaxChars = 2000
+    /// The window's start moves in steps of this many characters, like the core's prompt window
+    /// (`prompt::STEP`), so it stays put while the user types and the core can follow typing through a
+    /// suggestion (code review GT-08: a start that moved with every key broke it past 2000 characters).
+    public static let step = 256
 
-    /// Accessibility ranges are measured in UTF-16 code units. Returns the last `maxChars` characters
-    /// (grapheme clusters) before `caretUTF16`. Out-of-range offsets are clamped, and a caret inside a
-    /// surrogate pair yields a replacement character rather than a crash.
+    /// Accessibility ranges are measured in UTF-16 code units. Returns at most `maxChars` characters
+    /// (grapheme clusters) before `caretUTF16`, starting at a multiple of `step` characters. Out-of-range
+    /// offsets are clamped, and a caret inside a surrogate pair yields a replacement character rather than a
+    /// crash.
     public static func beforeCaret(value: String, caretUTF16: Int, maxChars: Int = defaultMaxChars) -> String {
         let units = Array(value.utf16)
         let end = min(max(caretUTF16, 0), units.count)
         guard end > 0, maxChars > 0 else { return "" }
         let prefix = String(decoding: units[0..<end], as: UTF16.self)
-        return String(prefix.suffix(maxChars))
+        let n = prefix.count
+        guard n > maxChars else { return prefix }
+        let step = min(Self.step, maxChars)
+        let skip = (n - maxChars + step - 1) / step * step
+        return String(prefix.dropFirst(skip))
     }
 
     /// Context after the caret (PC-3) is kept short: it only tells the brain what follows.
