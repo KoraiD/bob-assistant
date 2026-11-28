@@ -82,3 +82,27 @@ struct InsertGuardTests {
         #expect(line.contains("\"type\":\"insert_refused\""))
     }
 }
+
+/// Code review GT-01: what a key that reaches the app does, for the core's expected text.
+@Suite("EditDecision")
+struct EditDecisionTests {
+    @Test func typedTextBackspaceAndCaretKeys() {
+        #expect(EditDecision.classify(keyCode: 16, flags: [], text: "y")! == (.type, "y"))
+        #expect(EditDecision.classify(keyCode: 16, flags: .maskShift, text: "Y")! == (.type, "Y"))
+        #expect(EditDecision.classify(keyCode: 51, flags: [], text: "\u{8}")! == (.backspace, nil))
+        #expect(EditDecision.classify(keyCode: 51, flags: .maskAlternate, text: "")! == (.other, nil))
+        for code: Int64 in [123, 124, 125, 126, 115, 119, 117, 36] {
+            #expect(EditDecision.classify(keyCode: code, flags: [], text: "")! == (.other, nil), "\(code)")
+        }
+        #expect(EditDecision.classify(keyCode: 9, flags: .maskCommand, text: "v")! == (.other, nil), "Cmd+V")
+        #expect(EditDecision.classify(keyCode: 32, flags: [], text: "") == nil, "a dead key types nothing yet")
+        #expect(EditDecision.classify(keyCode: 122, flags: [], text: "\u{F704}") == nil, "F1")
+    }
+    @Test func editEventsAndPostKeyRoundTrip() throws {
+        let ev = NativeEvent.edit(kind: .type, text: "y")
+        let back = try JSONDecoder().decode(NativeEvent.self, from: JSONEncoder().encode(ev))
+        #expect(back == ev)
+        let cmd = try JSONDecoder().decode(CoreCommand.self, from: Data(#"{"type":"post_key","key":"tab"}"#.utf8))
+        #expect(cmd == .postKey(.tab))
+    }
+}

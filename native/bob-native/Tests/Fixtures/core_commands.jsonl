@@ -29,3 +29,4 @@
 {"type":"replace_before_caret","expected":"teh ","text":"the "}
 {"type":"set_action_hotkeys","hotkeys":[{"index":0,"hotkey":{"key_code":18,"modifiers":["control","option"]}}]}
 {"type":"set_action_hotkeys","hotkeys":[]}
+{"type":"post_key","key":"shift_tab"}

@@ -56,6 +56,27 @@ public enum KeyDecision: Equatable, Sendable {
     }
 }
 
+/// What a key that goes to the app does to the text, for the core while a chip is shown (code review GT-01).
+/// Pure, so it is unit-testable. `nil`: nothing to report (a dead key, a function key); the next
+/// Accessibility report tells.
+public enum EditDecision {
+    static let backspaceKeyCode: Int64 = 51
+    /// Keys that move the caret or change text in ways the core cannot predict: arrows, Home, End, Page
+    /// Up/Down, Forward Delete, Return, Enter, Tab and Esc when they are not swallowed.
+    static let otherKeyCodes: Set<Int64> = [123, 124, 125, 126, 115, 119, 116, 121, 117, 36, 76, 48, 53]
+
+    public static func classify(keyCode: Int64, flags: CGEventFlags, text: String) -> (EditKind, String?)? {
+        if !flags.intersection([.maskCommand, .maskControl]).isEmpty { return (.other, nil) }
+        if keyCode == backspaceKeyCode { return flags.contains(.maskAlternate) ? (.other, nil) : (.backspace, nil) }
+        if otherKeyCodes.contains(keyCode) { return (.other, nil) }
+        guard !text.isEmpty else { return nil }
+        // Function keys report characters in the private use area; control characters are not text.
+        if text.unicodeScalars.contains(where: { (0xF700...0xF8FF).contains($0.value) }) { return nil }
+        if text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) { return (.other, nil) }
+        return (.type, text)
+    }
+}
+
 /// Marker stored in `eventSourceUserData` of every event BOB posts, so the tap never captures them.
 public let bobSyntheticEventMarker: Int64 = 0x0B0B_0B0B
 
@@ -79,6 +100,8 @@ public final class KeyTap: @unchecked Sendable {
     private var tapLoop: CFRunLoop?
     /// Called on the main run loop for every swallowed key.
     public var onKey: ((Key) -> Void)?
+    /// Called on the main run loop for every key that goes to the app while capturing (code review GT-01).
+    public var onEdit: ((EditKind, String?) -> Void)?
 
     public init() {}
 
@@ -142,15 +165,19 @@ public final class KeyTap: @unchecked Sendable {
         // How long the key waited before the tap saw it (the whole system waits for an active tap).
         let lagMs = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) &- event.timestamp) / 1e6
         Stall.report("key tap (key waited)", ms: lagMs, threshold: 30)
-        let decision = KeyDecision.decide(
-            keyCode: event.getIntegerValueField(.keyboardEventKeycode),
-            flags: event.flags,
-            capturing: isCapturing,
-            synthetic: event.getIntegerValueField(.eventSourceUserData) == bobSyntheticEventMarker,
-            menuOpen: isMenuOpen
-        )
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        let capturing = isCapturing
+        let synthetic = event.getIntegerValueField(.eventSourceUserData) == bobSyntheticEventMarker
+        let menuOpen = isMenuOpen
+        let decision = KeyDecision.decide(keyCode: keyCode, flags: event.flags, capturing: capturing,
+                                          synthetic: synthetic, menuOpen: menuOpen)
         switch decision {
         case .pass:
+            // While a chip is shown, tell the core what the key does before Accessibility reports it.
+            if capturing, !synthetic, !menuOpen, let callback = onEdit,
+               let (kind, text) = EditDecision.classify(keyCode: keyCode, flags: event.flags, text: typedText(event)) {
+                DispatchQueue.main.async { callback(kind, text) }
+            }
             return Unmanaged.passUnretained(event)
         case let .swallow(key):
             let callback = onKey
@@ -162,6 +189,14 @@ public final class KeyTap: @unchecked Sendable {
             return nil
         }
     }
+}
+
+/// The characters a key-down types (empty for keys that type nothing).
+private func typedText(_ event: CGEvent) -> String {
+    var length = 0
+    var chars = [UniChar](repeating: 0, count: 8)
+    event.keyboardGetUnicodeString(maxStringLength: chars.count, actualStringLength: &length, unicodeString: &chars)
+    return String(utf16CodeUnits: chars, count: min(length, chars.count))
 }
 
 private func keyTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {

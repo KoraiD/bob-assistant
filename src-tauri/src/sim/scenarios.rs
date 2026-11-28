@@ -57,7 +57,6 @@ fn first_tab_us(r: &Report) -> u64 {
 
 /// H1 (GT-01): a second Tab before the app reported the first insertion inserts the same word again.
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-01: Tab uses the text the app last reported, not what BOB just inserted"]
 async fn h1_a_quick_second_tab_takes_the_next_word() {
     for profile in [ELECTRON, CHROME] {
         let mut steps = type_and_wait();
@@ -74,7 +73,6 @@ async fn h1_a_quick_second_tab_takes_the_next_word() {
 
 /// H1, second trigger: typing the chip's first letters and pressing Tab before the app reported them.
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-01: Tab uses the text the app last reported, not what the user just typed"]
 async fn h1_tab_right_after_typing_part_of_the_chip() {
     for seed in 1..=5 {
         let mut steps = type_and_wait();
@@ -90,7 +88,6 @@ async fn h1_tab_right_after_typing_part_of_the_chip() {
 
 /// H2 (GT-02): typing through a chip while it still streams freezes it at a part of a word.
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-02: tokens after a type-through are dropped, so a word fragment stays on screen"]
 async fn h2_typing_through_a_streaming_chip_never_leaves_a_fragment() {
     let model = Model::Paced {
         table: vec![("about the", " possibility of a meeting next week")],
@@ -112,7 +109,6 @@ async fn h2_typing_through_a_streaming_chip_never_leaves_a_fragment() {
 /// H3 (GT-03): a token that arrives after Tab, before the app reported the insertion, paints the whole chip
 /// again ("to you" + " you as soon" on screen), and the next Tab inserts the accepted word a second time.
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-03: a streamed token after Tab repaints the accepted word"]
 async fn h3_a_token_after_tab_does_not_bring_the_word_back() {
     let model = Model::Paced {
         table: vec![ANSWER],
@@ -142,7 +138,6 @@ async fn h3_a_token_after_tab_does_not_bring_the_word_back() {
 /// within milliseconds, which ends the stale window early; in Electron apps one Accessibility update can carry
 /// both the insertion and the Backspace.
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-04: a Backspace within 500 ms of an accept is ignored"]
 async fn h4_backspace_right_after_an_accept_is_seen() {
     // Seed 34: the insertion and the first Backspace reach Accessibility together (1 in 40 Electron seeds).
     for (profile, seed) in [(TEXTEDIT, 1), (ELECTRON, 34)] {
@@ -181,7 +176,6 @@ async fn h5_a_gap_suggestion_keeps_its_space() {
 /// must survive without asking the model again; today the rewrite looks like the user typing something else,
 /// so the chip disappears and the next Tab reaches the app unless a new suggestion arrived in time.
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-06: an app rewrite of BOB's text hides the chip and costs a new request"]
 async fn h6_the_chip_survives_smart_quotes() {
     let steps = vec![
         Step::Type("Honestly I", ms(180)),
@@ -303,7 +297,6 @@ async fn h8_typing_through_works_in_a_long_document() {
 /// GT-10 (found by the random sessions): after typing part of a chip, the left arrow brings the chip back as
 /// if the caret were still at the end, ignoring the text now after the caret; Tab glues it on ("morningm").
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-10: a caret move back into typed-through text brings back a chip that ignores the text after the caret"]
 async fn gt10_moving_the_caret_back_does_not_revive_the_chip() {
     let mut steps = type_and_wait();
     steps.extend([

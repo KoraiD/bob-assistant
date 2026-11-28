@@ -374,16 +374,38 @@ pub enum TypeThrough {
     Diverged,
 }
 
-/// GT-7 / GT-8: compare `typed` (what was just inserted at the caret) with the chip.
+/// A quote as the engine compares it: curly quotes count as straight ones (code review GT-06).
+fn fold_quote(c: char) -> char {
+    match c {
+        '\u{2018}' | '\u{2019}' | '\u{201B}' | '\u{2032}' => '\'',
+        '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{2033}' => '"',
+        c => c,
+    }
+}
+
+/// `text` with curly quotes and apostrophes made straight.
+pub fn fold_quotes(text: &str) -> String {
+    text.chars().map(fold_quote).collect()
+}
+
+/// GT-7 / GT-8: compare `typed` (what was just inserted at the caret) with the chip. Quotes match in either
+/// style, because apps with smart quotes rewrite what BOB and the user type (code review GT-06).
 pub fn type_through(chip: &str, typed: &str) -> TypeThrough {
     if typed.is_empty() {
         return TypeThrough::Advance(chip.to_string());
     }
-    match chip.strip_prefix(typed) {
-        Some("") => TypeThrough::Exhausted,
-        Some(rest) if !rest.trim().is_empty() => TypeThrough::Advance(rest.to_string()),
-        Some(_) => TypeThrough::Exhausted,
-        None => TypeThrough::Diverged,
+    let mut rest = chip;
+    for t in typed.chars() {
+        let mut chars = rest.chars();
+        match chars.next() {
+            Some(c) if fold_quote(c) == fold_quote(t) => rest = chars.as_str(),
+            _ => return TypeThrough::Diverged,
+        }
+    }
+    if rest.trim().is_empty() {
+        TypeThrough::Exhausted
+    } else {
+        TypeThrough::Advance(rest.to_string())
     }
 }
 

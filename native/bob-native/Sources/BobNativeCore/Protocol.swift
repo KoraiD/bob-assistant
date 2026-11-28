@@ -76,6 +76,13 @@ public enum Key: String, Codable, Equatable, Sendable {
     case escape
 }
 
+/// What a key that went to the app did, while a chip was shown (code review GT-01).
+public enum EditKind: String, Codable, Equatable, Sendable {
+    case type
+    case backspace
+    case other
+}
+
 /// Messages sent by this helper to the core.
 public enum NativeEvent: Equatable, Sendable {
     case hello(version: Int, pid: Int)
@@ -106,6 +113,8 @@ public enum NativeEvent: Equatable, Sendable {
     /// `insert_text` or `replace_before_caret` was not typed (code review SEC-09): `reason` is "secure_input",
     /// "secure_field" or "unreadable".
     case insertRefused(reason: String)
+    /// A key went to the app while a chip was shown (code review GT-01): typed text, Backspace, or other.
+    case edit(kind: EditKind, text: String?)
     /// `shown`: the suggestion on screen at the key press (code review GT-14), so the core inserts what the user saw.
     case key(Key, shown: String? = nil)
     /// Any `type` this build does not know (decode only).
@@ -119,6 +128,8 @@ public enum CoreCommand: Equatable, Sendable {
     case showChip(text: String, anchor: Rect)
     case hideChip
     case insertText(text: String)
+    /// Give a swallowed key back to the app (code review GT-17).
+    case postKey(Key)
     case captureKeys(active: Bool)
     case requestPermissions
     case setContextMode(scope: ContextScope, exclude: [String], clipboard: Bool)
@@ -223,6 +234,9 @@ extension NativeEvent: Codable {
             self = .error(message: try c.decode(String.self, forKey: Keys("message")))
         case "insert_refused":
             self = .insertRefused(reason: try c.decode(String.self, forKey: Keys("reason")))
+        case "edit":
+            self = .edit(kind: (try? c.decode(EditKind.self, forKey: Keys("kind"))) ?? .other,
+                         text: try c.decodeIfPresent(String.self, forKey: Keys("text")))
         case "key":
             self = .key(try c.decode(Key.self, forKey: Keys("key")),
                         shown: try c.decodeIfPresent(String.self, forKey: Keys("shown")))
@@ -322,6 +336,10 @@ extension NativeEvent: Codable {
         case let .insertRefused(reason):
             try c.encode("insert_refused", forKey: Keys("type"))
             try c.encode(reason, forKey: Keys("reason"))
+        case let .edit(kind, text):
+            try c.encode("edit", forKey: Keys("type"))
+            try c.encode(kind, forKey: Keys("kind"))
+            try c.encodeIfPresent(text, forKey: Keys("text"))
         case let .key(key, shown):
             try c.encode("key", forKey: Keys("type"))
             try c.encode(key, forKey: Keys("key"))
@@ -346,6 +364,7 @@ extension CoreCommand: Codable {
                              anchor: try c.decode(Rect.self, forKey: Keys("anchor")))
         case "hide_chip": self = .hideChip
         case "insert_text": self = .insertText(text: try c.decode(String.self, forKey: Keys("text")))
+        case "post_key": self = .postKey(try c.decode(Key.self, forKey: Keys("key")))
         case "capture_keys": self = .captureKeys(active: try c.decode(Bool.self, forKey: Keys("active")))
         case "request_permissions": self = .requestPermissions
         case "set_context_mode":
@@ -406,6 +425,9 @@ extension CoreCommand: Codable {
         case let .insertText(text):
             try c.encode("insert_text", forKey: Keys("type"))
             try c.encode(text, forKey: Keys("text"))
+        case let .postKey(key):
+            try c.encode("post_key", forKey: Keys("type"))
+            try c.encode(key, forKey: Keys("key"))
         case let .captureKeys(active):
             try c.encode("capture_keys", forKey: Keys("type"))
             try c.encode(active, forKey: Keys("active"))

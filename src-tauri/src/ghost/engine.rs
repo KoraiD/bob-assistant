@@ -15,7 +15,7 @@ use crate::brain::registry::Role;
 use crate::brain::service::BrainService;
 use crate::brain::CompletionRequest;
 use crate::context::{ContextHub, GHOST_MEMORY_PHRASES};
-use crate::protocol::{CoreCommand, Key, NativeEvent, Rect};
+use crate::protocol::{CoreCommand, EditKind, Key, NativeEvent, Rect};
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -475,7 +475,7 @@ pub fn spawn_ctx(
         dismissed_for: None,
         capturing: false,
         first_chip_pending: None,
-        expect: None,
+        predicted: None,
         sideways_since: None,
         dismissed_typos: Default::default(),
     };
@@ -504,9 +504,9 @@ struct Engine {
     capturing: bool,
     /// Keystroke time for the request whose first chip is not painted yet.
     first_chip_pending: Option<(u64, Instant)>,
-    /// After BOB inserted accepted text: the text expected before the caret, and when. Text events that
-    /// still show an older prefix of it are stale (the app updated Accessibility late) and are ignored.
-    expect: Option<(String, Instant)>,
+    /// What is before the caret while Accessibility is behind: BOB's insertions and the user's keys since
+    /// the last report that matched (code review GT-01, GT-04).
+    predicted: Option<Prediction>,
     /// Since when the caret has moved while the text stayed the same.
     sideways_since: Option<Instant>,
     /// Words whose fix the user dismissed with Esc (this session only).
@@ -516,9 +516,43 @@ struct Engine {
 /// How long a stale text event after an insertion is ignored before BOB believes the app.
 pub const STALE_WINDOW: Duration = Duration::from_millis(500);
 
+/// Most predicted steps kept; a report older than these is believed.
+const PREDICTED_STEPS: usize = 64;
+
+/// The text BOB expects before the caret, step by step, since the last report that matched: `states[0]`
+/// is that report, the last entry is the newest prediction. A report that equals an earlier step, or is a
+/// shorter start of the newest, is the app catching up and is ignored.
+#[derive(Debug, Clone)]
+struct Prediction {
+    states: Vec<String>,
+    at: Instant,
+}
+
+impl Prediction {
+    fn newest(&self) -> &str {
+        self.states.last().map_or("", String::as_str)
+    }
+
+    /// Whether `report` is an older state of what BOB predicted (Accessibility is behind).
+    fn is_late(&self, report: &str) -> bool {
+        let newest = self.newest();
+        self.at.elapsed() < STALE_WINDOW
+            && report != newest
+            && (self.states.iter().any(|s| s == report)
+                || (report.len() < newest.len() && newest.starts_with(report)))
+    }
+}
+
 /// Text as the engine compares it: apps (Chrome, contenteditable) report typed spaces as no-break spaces.
 pub fn normalize_typed(text: &str) -> String {
     text.replace('\u{a0}', " ")
+}
+
+/// Text as the engine keeps it: [`normalize_typed`], and curly quotes as straight ones, because apps with
+/// smart quotes rewrite what BOB types ("don't" lands as "don’t") and that is not the user typing something
+/// else (code review GT-06). The chip's own style is applied again when it is shown.
+pub fn engine_text(text: &str) -> String {
+    chip::fold_quotes(&normalize_typed(text))
 }
 
 impl Engine {
@@ -566,6 +600,78 @@ impl Engine {
             if changed {
                 self.shared.save_memory();
             }
+        }
+    }
+
+    /// What is before the caret as far as BOB knows: the newest prediction, or the last report.
+    fn base(&self) -> Option<String> {
+        self.predicted
+            .as_ref()
+            .map(|p| p.newest().to_string())
+            .or_else(|| self.ctx.as_ref().map(|c| c.before.clone()))
+    }
+
+    /// Add `next` as the newest expected text before the caret.
+    fn predict(&mut self, next: String) {
+        let Some(report) = self.ctx.as_ref().map(|c| c.before.clone()) else {
+            return;
+        };
+        let p = self.predicted.get_or_insert_with(|| Prediction {
+            states: vec![report],
+            at: Instant::now(),
+        });
+        p.states.push(next);
+        if p.states.len() > PREDICTED_STEPS {
+            p.states.remove(1);
+        }
+        p.at = Instant::now();
+    }
+
+    /// Give a key the helper swallowed back to the app (code review GT-17).
+    fn give_back(&mut self, key: Key) {
+        log::trace!("ghost: {key:?} given back to the app");
+        self.sink.send(CoreCommand::PostKey { key });
+    }
+
+    /// A key reached the app while a chip was shown (code review GT-01, GT-04, GT-10).
+    fn on_edit(&mut self, kind: EditKind, text: Option<String>) {
+        let (Some(chip), Some(base)) = (self.chip.clone(), self.base()) else {
+            return;
+        };
+        let next = match kind {
+            EditKind::Type => match text.filter(|t| !t.is_empty()) {
+                Some(t) => format!("{base}{}", engine_text(&t)),
+                None => return,
+            },
+            EditKind::Backspace => {
+                let mut b = base;
+                if b.pop().is_none() {
+                    return;
+                }
+                b
+            }
+            EditKind::Other => {
+                // The caret may have moved: what the chip continues is no longer known (code review GT-10).
+                self.predicted = None;
+                self.hide();
+                self.cancel();
+                return;
+            }
+        };
+        let still = chip.fix.is_none()
+            && next
+                .strip_prefix(chip.before.as_str())
+                .is_some_and(|typed| {
+                    matches!(
+                        chip::type_through(&chip.text, typed),
+                        TypeThrough::Advance(_)
+                    )
+                });
+        self.predict(next);
+        // A chip the keys still match stays; the app's report moves it (it carries the caret position).
+        if !still {
+            self.hide();
+            self.cancel();
         }
     }
 
@@ -621,6 +727,7 @@ impl Engine {
                 self.on_text(app_bundle_id, secure, before_caret, selection_len, caret);
             }
             Input::Native(NativeEvent::Key { key, shown }) => self.on_key(key, shown),
+            Input::Native(NativeEvent::Edit { kind, text }) => self.on_edit(kind, text),
             Input::Native(NativeEvent::Typo {
                 word,
                 fix,
@@ -640,7 +747,15 @@ impl Engine {
                 text,
                 fix,
             } => {
-                let current = self.ctx.as_ref().is_some_and(|c| c.before == before);
+                // What the user typed or accepted since the request was made (code review GT-02, GT-03): later
+                // tokens still count, but only the part not yet typed or accepted is shown.
+                let base = self.base();
+                let typed = base
+                    .as_deref()
+                    .and_then(|b| b.strip_prefix(before.as_str()))
+                    .filter(|t| fix.is_none() || t.is_empty())
+                    .map(str::to_string);
+                let current = typed.is_some();
                 let dismissed = self.dismissed_for.as_deref() == Some(before.as_str());
                 if generation != self.generation
                     || !current
@@ -684,15 +799,12 @@ impl Engine {
                     style.quotes,
                     before.chars().last(),
                 );
-                self.show(
-                    Chip {
-                        text: text.clone(),
-                        before,
-                        fix,
-                    },
-                    caret,
-                    text,
-                );
+                let visible = match chip::type_through(&text, typed.as_deref().unwrap_or_default())
+                {
+                    TypeThrough::Advance(rest) => rest,
+                    TypeThrough::Exhausted | TypeThrough::Diverged => return,
+                };
+                self.show(Chip { text, before, fix }, caret, visible);
             }
             Input::Done { generation, error } => {
                 log::trace!("ghost: request {generation} done");
@@ -717,18 +829,15 @@ impl Engine {
         selection_len: u32,
         caret: Option<Rect>,
     ) {
-        let before = normalize_typed(&before);
-        // Stale after an insertion: the app still reports text from before it. Wait for the real update
-        // (the helper re-reads shortly after every change) instead of repainting the old chip.
-        if let Some((expected, at)) = &self.expect {
-            if at.elapsed() < STALE_WINDOW
-                && before.len() < expected.len()
-                && expected.starts_with(&before)
-                && !secure
-            {
+        let before = engine_text(&before);
+        // Accessibility is behind what BOB inserted or the user typed: wait for the real update (the helper
+        // re-reads shortly after every change) instead of acting on the old text (GT-01, GT-04).
+        if let Some(p) = &self.predicted {
+            if !secure && p.is_late(&before) {
+                log::trace!("ghost: late text report ignored");
                 return;
             }
-            self.expect = None;
+            self.predicted = None;
         }
         // Quiet zones (GT-3, GT-4): secure fields, no caret position, an active selection.
         // Plus apps on the quiet list (terminals, password managers, BOB, user choices).
@@ -832,17 +941,25 @@ impl Engine {
     }
 
     fn on_key(&mut self, key: Key, shown: Option<String>) {
-        let (Some(chip), Some(ctx)) = (self.chip.clone(), self.ctx.clone()) else {
-            return;
+        // The helper swallowed the key; whenever there is nothing to do with it, the app gets it back.
+        let (Some(chip), Some(base)) = (self.chip.clone(), self.base()) else {
+            return self.give_back(key);
         };
-        // What is still visible after any typing-through.
-        let visible = if ctx.before.starts_with(&chip.before) {
-            match chip::type_through(&chip.text, &ctx.before[chip.before.len()..]) {
-                TypeThrough::Advance(rest) => rest,
-                _ => return,
+        // What is still visible after any typing-through, from what is before the caret now: BOB's last
+        // insertion and the user's keys may not be in the app's report yet (code review GT-01).
+        let visible = match base.strip_prefix(chip.before.as_str()) {
+            Some(typed) if chip.fix.is_none() || typed.is_empty() => {
+                match chip::type_through(&chip.text, typed) {
+                    TypeThrough::Advance(rest) => Some(rest),
+                    _ => None,
+                }
             }
-        } else {
-            return;
+            _ => None,
+        };
+        let Some(visible) = visible else {
+            self.hide();
+            self.cancel();
+            return self.give_back(key);
         };
         if let Some(fix) = &chip.fix {
             match key {
@@ -855,7 +972,7 @@ impl Engine {
                 }
                 Key::Escape => {
                     self.dismissed_typos.insert(fix.word.clone());
-                    self.dismissed_for = Some(ctx.before);
+                    self.dismissed_for = Some(base);
                 }
             }
             self.hide();
@@ -873,7 +990,7 @@ impl Engine {
                 });
                 self.remember_phrase(&word);
                 // The chip stays; the text event caused by the insertion advances it (typing-through).
-                self.expect = Some((format!("{}{word}", ctx.before), Instant::now()));
+                self.predict(format!("{base}{}", engine_text(&word)));
                 self.sink.send(CoreCommand::InsertText { text: word });
             }
             Key::ShiftTab => {
@@ -887,12 +1004,12 @@ impl Engine {
                     d.ghost_words += n;
                 });
                 self.remember_phrase(&visible);
-                self.expect = Some((format!("{}{visible}", ctx.before), Instant::now()));
+                self.predict(format!("{base}{}", engine_text(&visible)));
                 self.sink.send(CoreCommand::InsertText { text: visible });
             }
             Key::Escape => {
                 self.stat(|s| s.dismissed += 1);
-                self.dismissed_for = Some(ctx.before);
+                self.dismissed_for = Some(base);
                 self.hide();
                 self.cancel();
             }
@@ -917,7 +1034,7 @@ impl Engine {
             || self.paused
             || fix.trim().is_empty()
             || fix == word
-            || !ctx.before.ends_with(&expected)
+            || !ctx.before.ends_with(&engine_text(&expected))
             || self.dismissed_typos.contains(&key)
             || self.dismissed_for.as_deref() == Some(ctx.before.as_str())
         {
@@ -1775,7 +1892,8 @@ mod tests {
             shown: None,
         });
         settle(30).await;
-        assert!(rec.take().is_empty(), "GT-13: no chip, no action");
+        // GT-13: no chip, no action of BOB's own; code review GT-17: the swallowed key goes back to the app.
+        assert_eq!(rec.take(), vec![CoreCommand::PostKey { key: Key::Tab }]);
     }
 
     #[tokio::test]

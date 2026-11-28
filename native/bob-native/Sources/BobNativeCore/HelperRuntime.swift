@@ -104,6 +104,8 @@ public final class HelperRuntime: @unchecked Sendable {
                 break
             }
             TextInserter.insert(text)
+        case let .postKey(key):
+            TextInserter.post(key)
         case let .captureKeys(active):
             keyTap.isCapturing = active
             // While a suggestion is visible, re-check the field a few times a second: some apps (Chrome,
@@ -214,6 +216,10 @@ public final class HelperRuntime: @unchecked Sendable {
         observer.start()
         keyTap.onKey = { [weak self] key in
             try? self?.client?.send(NativeEvent.key(key, shown: self?.shownChip.value))
+        }
+        // Typed text travels like `text_state` (never logged), only while a chip is shown.
+        keyTap.onEdit = { [weak self] kind, text in
+            try? self?.client?.send(NativeEvent.edit(kind: kind, text: text))
         }
         hotkeys.onPress = { [weak self] slot in
             switch slot {

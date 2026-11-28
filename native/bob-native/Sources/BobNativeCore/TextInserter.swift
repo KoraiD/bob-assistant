@@ -38,6 +38,19 @@ public enum TextInserter {
         }
     }
 
+    /// Give a swallowed key back to the app (code review GT-17), marked as BOB's own so the tap lets it pass.
+    public static func post(_ key: Key) {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+        source.userData = bobSyntheticEventMarker
+        let code: CGKeyCode = key == .escape ? CGKeyCode(KeyDecision.escapeKeyCode) : CGKeyCode(KeyDecision.tabKeyCode)
+        for keyDown in [true, false] {
+            guard let ev = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: keyDown) else { continue }
+            ev.flags = key == .shiftTab ? .maskShift : []
+            ev.setIntegerValueField(.eventSourceUserData, value: bobSyntheticEventMarker)
+            ev.post(tap: .cghidEventTap)
+        }
+    }
+
     /// Post the text as keyboard events marked as BOB's own (so the key tap never captures them).
     public static func insert(_ text: String) {
         guard let source = CGEventSource(stateID: .hidSystemState) else { return }

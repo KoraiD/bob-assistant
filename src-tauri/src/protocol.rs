@@ -53,6 +53,19 @@ pub enum Key {
     Escape,
 }
 
+/// What a key that reached the app did, as the helper's key tap saw it (code review GT-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EditKind {
+    /// Typed `text` at the caret.
+    Type,
+    /// Deleted the character before the caret.
+    Backspace,
+    /// Anything else that may change the text or move the caret (arrows, Return, shortcuts).
+    #[serde(other)]
+    Other,
+}
+
 /// How much of the screen BOB may read for context (personal-context spec, PC-4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -212,6 +225,14 @@ pub enum NativeEvent {
     Error {
         message: String,
     },
+    /// A key went to the app while a chip was shown (code review GT-01, GT-04, GT-10). Accessibility reports the
+    /// text up to 250 ms later in some apps; with these the core knows what is before the caret in time for the
+    /// next Tab. Only while key capture is on; `text` only for `type`. Never logged.
+    Edit {
+        kind: EditKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
     /// `insert_text` or `replace_before_caret` was not typed (code review SEC-09): `reason` is "secure_input"
     /// (macOS secure input is on), "secure_field" or "unreadable" (the focused field could not be checked).
     InsertRefused {
@@ -248,6 +269,10 @@ pub enum CoreCommand {
     /// Type `text` at the caret of the focused app (GT-14).
     InsertText {
         text: String,
+    },
+    /// Give a swallowed key back to the app: the core had nothing to do with it (code review GT-17).
+    PostKey {
+        key: Key,
     },
     /// Swallow Tab / Shift+Tab / Esc and report them as `Key` events, only while `active` (GT-13).
     CaptureKeys {
@@ -471,6 +496,11 @@ impl fmt::Debug for NativeEvent {
                 .field("error", error)
                 .finish(),
             NativeEvent::Error { .. } => f.debug_struct("Error").finish_non_exhaustive(),
+            NativeEvent::Edit { kind, text } => f
+                .debug_struct("Edit")
+                .field("kind", kind)
+                .field("chars", &text.as_ref().map(|t| t.chars().count()))
+                .finish(),
             NativeEvent::InsertRefused { reason } => f
                 .debug_struct("InsertRefused")
                 .field("reason", reason)
@@ -793,6 +823,15 @@ mod tests {
                 ),
             "(?s).{0,60}".prop_map(|message| NativeEvent::Error { message }),
             "[a-z_]{0,20}".prop_map(|reason| NativeEvent::InsertRefused { reason }),
+            (
+                prop_oneof![
+                    Just(EditKind::Type),
+                    Just(EditKind::Backspace),
+                    Just(EditKind::Other)
+                ],
+                proptest::option::of("(?s).{1,4}")
+            )
+                .prop_map(|(kind, text)| NativeEvent::Edit { kind, text }),
             prop_oneof![Just(Key::Tab), Just(Key::ShiftTab), Just(Key::Escape)]
                 .prop_map(|key| NativeEvent::Key { key, shown: None }),
         ]

@@ -16,7 +16,7 @@ use super::model::Calls;
 use crate::context::ContextHub;
 use crate::ghost::chip;
 use crate::ghost::engine::{normalize_typed, GhostHandle};
-use crate::protocol::{CoreCommand, Key, NativeEvent, Rect};
+use crate::protocol::{CoreCommand, EditKind, Key, NativeEvent, Rect};
 use rand::rngs::StdRng;
 use rand::Rng;
 use std::cmp::Ordering;
@@ -441,7 +441,13 @@ impl World {
         let claim = match &cmd {
             CoreCommand::ShowChip { text, .. } => {
                 self.engine_chip = true;
-                Some(format!("{}{text}", self.engine_before))
+                // The chip continues what is really before the caret, once the keys and insertions already
+                // on their way to the app have landed. The engine knows about those before Accessibility
+                // reports them (code review GT-01, GT-03).
+                Some(format!(
+                    "{}{text}",
+                    normalize_typed(&self.before_after_queued_edits())
+                ))
             }
             CoreCommand::HideChip => {
                 self.engine_chip = false;
@@ -606,6 +612,7 @@ impl World {
             Action::Type(c) => {
                 self.stats.keys += 1;
                 self.note("user", format!("types {c:?}"));
+                self.report_edit(EditKind::Type, Some(c.to_string()));
                 self.push(
                     INPUT,
                     Ev::AppEdit {
@@ -617,6 +624,7 @@ impl World {
             Action::Backspace => {
                 self.stats.keys += 1;
                 self.note("user", "Backspace".into());
+                self.report_edit(EditKind::Backspace, None);
                 self.push(
                     INPUT,
                     Ev::AppEdit {
@@ -628,6 +636,7 @@ impl World {
             Action::Caret(delta) => {
                 self.stats.keys += 1;
                 self.note("user", format!("arrow {delta:+}"));
+                self.report_edit(EditKind::Other, None);
                 self.push(
                     INPUT,
                     Ev::AppEdit {
@@ -685,6 +694,56 @@ impl World {
             }
         }
         None
+    }
+
+    /// Like the helper's key tap: while it captures (a chip is shown), every key that goes to the app is
+    /// also reported to the engine (code review GT-01).
+    fn report_edit(&mut self, kind: EditKind, text: Option<String>) {
+        if self.capturing {
+            self.push(
+                HOP,
+                Ev::ToEngine {
+                    ev: NativeEvent::Edit { kind, text },
+                    before: None,
+                },
+            );
+        }
+    }
+
+    /// The text before the caret after every edit already queued for the app has landed.
+    fn before_after_queued_edits(&self) -> String {
+        let mut queued: Vec<(&Instant, u64, &Edit)> = self
+            .queue
+            .iter()
+            .filter_map(|i| match &i.ev {
+                Ev::AppEdit { edit, .. } => Some((&i.at, i.seq, edit)),
+                _ => None,
+            })
+            .collect();
+        queued.sort_by_key(|(at, seq, _)| (**at, *seq));
+        let (mut doc, mut caret) = (self.doc.clone(), self.caret);
+        for (_, _, edit) in queued {
+            match edit {
+                Edit::Insert(t) => {
+                    let landed = if self.profile.smart_quotes {
+                        smart_quote(&doc[..caret], t)
+                    } else {
+                        t.clone()
+                    };
+                    doc.insert_str(caret, &landed);
+                    caret += landed.len();
+                }
+                Edit::Backspace => {
+                    if let Some((i, _)) = doc[..caret].char_indices().last() {
+                        doc.replace_range(i..caret, "");
+                        caret = i;
+                    }
+                }
+                // A caret move ends any claim: the next chip is made for the new place.
+                Edit::Caret(_) => {}
+            }
+        }
+        doc[..caret].to_string()
     }
 
     // ---- the app ----
@@ -881,6 +940,19 @@ impl World {
                 } else if !active {
                     self.watching = false;
                     self.watch_generation += 1;
+                }
+            }
+            // The engine gave a swallowed key back (code review GT-17): it reaches the app like any key.
+            CoreCommand::PostKey { key } => {
+                self.note("helper", format!("gives {key:?} back to the app"));
+                if key == Key::Tab {
+                    self.push(
+                        INPUT,
+                        Ev::AppEdit {
+                            edit: Edit::Insert("\t".into()),
+                            by: Origin::User,
+                        },
+                    );
                 }
             }
             CoreCommand::InsertText { text } => {

@@ -29,6 +29,13 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
 - Redaction also finds keys glued to other text by punctuation (CSV, tables, code, quotes) and long lowercase
   tokens that mix letters and digits, such as UUIDs.
 ### Fixed
+- Ghost Text in Chrome, Electron and other apps that report text late: a quick second Tab takes the next word
+  instead of the same one again; Tab right after typing part of a suggestion finishes the word ("you", not
+  "yyou"); a Backspace right after Tab is seen; a word that arrives after Tab no longer brings the accepted word
+  back; typing through a suggestion that is still arriving never leaves part of a word.
+- Ghost Text: moving the cursor inside a suggestion you typed through hides it instead of gluing it on.
+- Ghost Text: apps with smart quotes ("don't" becomes "don’t") keep the suggestion.
+- Ghost Text: a Tab or Esc that comes too late for a suggestion reaches the app instead of being lost.
 - Ghost Text: a suggestion no longer ends in the middle of a word ("…of the repo") when it reaches six words
   or the length limit; one very long word (a URL) is not suggested cut off.
 - Ghost Text: Tab on a suggestion inside a sentence keeps its space ("latest report", not "latestreport").

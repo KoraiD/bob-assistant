@@ -261,6 +261,7 @@ fn start_native_bridge(
                 NativeEvent::TextState { .. }
                     | NativeEvent::Focus { .. }
                     | NativeEvent::Key { .. }
+                    | NativeEvent::Edit { .. }
                     | NativeEvent::Typo { .. }
                     | NativeEvent::Hello { .. }
             ) {

@@ -24,6 +24,7 @@ feature that changes the answer.
 ## Data handling
 | Data | Where it goes | Stored? |
 |---|---|---|
+| Keys typed while a suggestion is shown | from the helper to BOB's core over the local socket, so Tab acts on what you really typed even when the app reports it late; like the text before the caret, never logged and never sent anywhere else | not stored |
 | Text before the caret (Ghost Text) | the active Ghost brain, after redaction; a cloud brain gets nothing while the cursor is inside a word that may be the start of a key | not stored |
 | Accepted phrases | local `ghost-memory.json` (at most 200 phrases of 64 characters, most recent first; secret-looking text is never kept); not sent to any brain yet | yes, locally; view and "Forget all" in the Ghost card |
 | Quiet apps, Ghost on/off | local `ghost-settings.json` | yes, locally |

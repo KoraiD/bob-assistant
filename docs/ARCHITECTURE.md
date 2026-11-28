@@ -187,7 +187,7 @@ so `$TMPDIR` in the table above means the system's per-user temporary folder; `b
 
 ## Native bridge protocol (v1)
 Version 2. Newline-delimited JSON over `native.sock` in the runtime folder (File locations). Helper to core: `hello`, `permissions`, `focus`,
-`text_state`, `error`, `key`, `insert_refused` (with `reason`: `secure_input`, `secure_field` or `unreadable`). Core to helper: `hello_ack`, `reject`, `show_chip`, `hide_chip`, `insert_text`, `capture_keys`,
+`text_state`, `error`, `key`, `edit` (while a chip is shown: what a key that went to the app did, `type` with its text, `backspace` or `other`), `insert_refused` (with `reason`: `secure_input`, `secure_field` or `unreadable`). Core to helper: `hello_ack`, `reject`, `show_chip`, `hide_chip`, `insert_text`, `post_key` (give a swallowed key back), `capture_keys`,
 `request_permissions`, `quit`. Unknown `type` values are
 ignored on both sides. Shared fixtures: `native/bob-native/Tests/Fixtures/*.jsonl` (decoded and re-encoded by both test suites).
 Typed text only travels in `text_state.before_caret`, is capped to the last 2000 characters, and is never logged.

@@ -33,3 +33,6 @@
 {"type":"woke"}
 {"type":"key","key":"shift_tab","shown":" brown fo"}
 {"type":"insert_refused","reason":"secure_input"}
+{"type":"edit","kind":"type","text":"y"}
+{"type":"edit","kind":"backspace"}
+{"type":"edit","kind":"other"}
