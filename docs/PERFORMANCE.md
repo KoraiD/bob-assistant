@@ -320,3 +320,15 @@ For comparison, `openssl dgst -sha256` (OpenSSL 4.1) takes 0.46 s for the 1.12 G
 compiles its aarch64 backend only with the `asm` feature (a C build through `sha2-asm`); sha2 0.11 selects the
 Arm `sha2` instructions at runtime through `cpufeatures` (read in the crates' `src/sha256.rs`). sha2 0.11.1 was
 already in the build through Tauri, so the change adds no new crate.
+
+## Saving accepted phrases off the typing path (code review P-01, 2026-11-27)
+Each accepted phrase saved `ghost-memory.json` on the Ghost engine task, so the next text event waited for the
+write. `write_private_file` syncs with `F_FULLFSYNC` on macOS. **Method:** the ignored test
+`ghost::engine::tests::accept_save_cost` (release build, Apple M4 Max) records 60 phrases into a memory of 200
+and times what the engine task spends per accept.
+| Path | Memory file | Engine task per accept, p50 | max |
+|---|---|---|---|
+| Before: synchronous save | 14.5 KB | 5.587 ms | 15.460 ms |
+| After: background save, phrases within 2 s written together | 14.5 KB | 0.0001 ms | 0.037 ms |
+Settings and memory are now copied under their lock and written after it is released, so `is_quiet` (taken on
+every text event) never waits for a write either. Unsaved phrases are written at exit.

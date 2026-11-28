@@ -162,31 +162,65 @@ struct Shared {
     recent: Mutex<Vec<RecentApp>>,
     /// Config directory for `ghost-settings.json` and `ghost-memory.json` (None: in memory only).
     storage: Option<PathBuf>,
+    /// Memory changed since it was last written (code review P-01).
+    memory_dirty: std::sync::atomic::AtomicBool,
+    /// A background save is waiting.
+    memory_save_pending: std::sync::atomic::AtomicBool,
 }
 
+/// How long accepted phrases wait before they are written together (code review P-01).
+const MEMORY_SAVE_DELAY: Duration = Duration::from_secs(2);
+
 impl Shared {
+    /// Written outside the lock: `is_quiet` takes it on every text event, and a synced write takes about 5 ms
+    /// (code review P-01).
     fn save_settings(&self) {
         if let Some(dir) = &self.storage {
-            if let Err(e) = self
+            let settings = self
                 .settings
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .save(&dir.join(SETTINGS_FILE))
-            {
+                .clone();
+            if let Err(e) = settings.save(&dir.join(SETTINGS_FILE)) {
                 log::warn!("ghost: cannot save settings: {e}");
             }
         }
     }
     fn save_memory(&self) {
         if let Some(dir) = &self.storage {
-            if let Err(e) = self
+            self.memory_dirty
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            let memory = self
                 .memory
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .save(&dir.join(MEMORY_FILE))
-            {
+                .clone();
+            if let Err(e) = memory.save(&dir.join(MEMORY_FILE)) {
                 log::warn!("ghost: cannot save memory: {e}");
             }
+        }
+    }
+    /// From the engine task: write the memory in the background, phrases accepted within
+    /// [`MEMORY_SAVE_DELAY`] together, so an accept never waits for the disk (code review P-01).
+    fn save_memory_soon(self: &Arc<Self>) {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.memory_dirty.store(true, SeqCst);
+        if self.storage.is_none() || self.memory_save_pending.swap(true, SeqCst) {
+            return;
+        }
+        let me = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(MEMORY_SAVE_DELAY).await;
+            me.memory_save_pending.store(false, SeqCst);
+            if me.memory_dirty.load(SeqCst) {
+                let _ = tokio::task::spawn_blocking(move || me.save_memory()).await;
+            }
+        });
+    }
+    /// Write what is still unsaved (at exit).
+    fn flush(&self) {
+        if self.memory_dirty.load(std::sync::atomic::Ordering::SeqCst) {
+            self.save_memory();
         }
     }
 }
@@ -338,6 +372,11 @@ impl GhostHandle {
         self.shared.save_memory();
     }
 
+    /// Write accepted phrases that are not saved yet (at exit).
+    pub fn flush(&self) {
+        self.shared.flush();
+    }
+
     pub fn stats(&self) -> GhostStats {
         self.stats
             .lock()
@@ -457,6 +496,8 @@ pub fn spawn_ctx(
         memory: Mutex::new(memory),
         recent: Mutex::new(vec![]),
         storage,
+        memory_dirty: Default::default(),
+        memory_save_pending: Default::default(),
     });
     let engine = Engine {
         config,
@@ -598,7 +639,7 @@ impl Engine {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .record(text);
             if changed {
-                self.shared.save_memory();
+                self.shared.save_memory_soon();
             }
         }
     }
@@ -2180,6 +2221,98 @@ mod tests {
         assert!(!again.settings().enabled);
         assert!(again.settings().is_quiet("com.apple.Notes"));
         assert_eq!(again.memory().phrases[0].text, "Best regards, Renée");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn shared_in(dir: &std::path::Path) -> Arc<Shared> {
+        Arc::new(Shared {
+            settings: Mutex::new(GhostSettings::default()),
+            memory: Mutex::new(Memory::default()),
+            recent: Mutex::new(vec![]),
+            storage: Some(dir.to_path_buf()),
+            memory_dirty: Default::default(),
+            memory_save_pending: Default::default(),
+        })
+    }
+
+    /// Code review P-01: accepted phrases are written in the background, together, and at exit.
+    #[tokio::test(start_paused = true)]
+    async fn accepted_phrases_are_saved_later_together_and_at_exit() {
+        let dir = std::env::temp_dir().join(format!("bob-p01-{}", rand::random::<u32>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shared = shared_in(&dir);
+        let file = dir.join(MEMORY_FILE);
+        for phrase in ["see you tomorrow", "thanks for the update"] {
+            shared.memory.lock().unwrap().record(phrase);
+            shared.save_memory_soon();
+        }
+        assert!(!file.exists(), "nothing is written on the engine task");
+        tokio::time::sleep(MEMORY_SAVE_DELAY + Duration::from_millis(50)).await;
+        // The write itself runs on a blocking thread, outside the paused clock.
+        for _ in 0..200 {
+            if file.exists() {
+                break;
+            }
+            tokio::task::yield_now().await;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let saved = std::fs::read_to_string(&file).unwrap();
+        assert!(saved.contains("see you tomorrow") && saved.contains("thanks for the update"));
+        // A phrase accepted right before quitting is written by the exit flush.
+        shared.memory.lock().unwrap().record("talk to you soon");
+        shared
+            .memory_dirty
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        shared.flush();
+        assert!(std::fs::read_to_string(&file)
+            .unwrap()
+            .contains("talk to you soon"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// What an accepted phrase costs the engine task (docs/PERFORMANCE.md, code review P-01).
+    #[tokio::test]
+    #[ignore = "local measurement"]
+    async fn accept_save_cost() {
+        let dir = std::env::temp_dir().join(format!("bob-p01m-{}", rand::random::<u32>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shared = shared_in(&dir);
+        for i in 0..200 {
+            shared
+                .memory
+                .lock()
+                .unwrap()
+                .record(&format!("a phrase worth keeping {i}"));
+        }
+        let p50 = |mut v: Vec<f64>| {
+            v.sort_by(f64::total_cmp);
+            (v[v.len() / 2], v[v.len() - 1])
+        };
+        let mut before = vec![];
+        let mut after = vec![];
+        for i in 0..60 {
+            shared
+                .memory
+                .lock()
+                .unwrap()
+                .record(&format!("accepted phrase number {i}"));
+            let t = std::time::Instant::now();
+            shared.save_memory(); // the old path: on the engine task
+            before.push(t.elapsed().as_secs_f64() * 1000.0);
+            let t = std::time::Instant::now();
+            shared.save_memory_soon(); // the new path
+            after.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        let bytes = std::fs::metadata(dir.join(MEMORY_FILE))
+            .map(|m| m.len())
+            .unwrap_or(0);
+        eprintln!(
+            "memory file {bytes} bytes; synchronous save p50/max {:.3}/{:.3} ms; background save call p50/max {:.4}/{:.4} ms",
+            p50(before.clone()).0,
+            p50(before).1,
+            p50(after.clone()).0,
+            p50(after).1
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

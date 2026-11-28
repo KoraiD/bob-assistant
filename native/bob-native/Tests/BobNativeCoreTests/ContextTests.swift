@@ -97,3 +97,24 @@ struct CapturePolicyTests {
         #expect(s.policy.exclude.contains("dev.bob.assistant.native"))
     }
 }
+
+/// Code review GT-12: an app whose Accessibility was not ready when it came to the front is tried again.
+@Suite("AttachRetry")
+struct AttachRetryTests {
+    @Test func retriesUntilBothTheAppAndAFieldAreObserved() {
+        #expect(AttachRetry.needed(appSubscribed: false, elementObserved: true))
+        #expect(AttachRetry.needed(appSubscribed: true, elementObserved: false))
+        #expect(!AttachRetry.needed(appSubscribed: true, elementObserved: true))
+    }
+    @Test func delaysGrowAndStopWithinTenSeconds() {
+        let d = AttachRetry.delaysMs
+        #expect(zip(d, d.dropFirst()).allSatisfy { $0 < $1 })
+        #expect(d.reduce(0, +) < 10_000)
+    }
+    @Test func alreadyRegisteredCountsAsSubscribed() {
+        #expect(AttachRetry.subscribed(.success))
+        #expect(AttachRetry.subscribed(.notificationAlreadyRegistered))
+        #expect(!AttachRetry.subscribed(.cannotComplete))
+        #expect(!AttachRetry.subscribed(.apiDisabled))
+    }
+}

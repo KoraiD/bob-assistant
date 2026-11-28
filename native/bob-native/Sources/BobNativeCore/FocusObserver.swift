@@ -16,6 +16,23 @@ public enum TransientApps {
     }
 }
 
+/// When to try again to observe an app whose Accessibility was not ready (code review GT-12: an app that
+/// comes to the front while it launches refuses the subscriptions, and nothing retried until the next
+/// activation). Pure, so it is unit-testable.
+public enum AttachRetry {
+    /// Delays between attempts, about 7.75 s in all.
+    public static let delaysMs = [250, 500, 1000, 2000, 4000]
+
+    public static func needed(appSubscribed: Bool, elementObserved: Bool) -> Bool {
+        !appSubscribed || !elementObserved
+    }
+
+    /// `AXObserverAddNotification` results that mean the subscription is in place.
+    public static func subscribed(_ result: AXError) -> Bool {
+        result == .success || result == .notificationAlreadyRegistered
+    }
+}
+
 /// Observes the frontmost app's focused text element with `AXObserver` (no polling, requirement NB-7).
 /// Must be created and used on the main thread; callbacks arrive on the main run loop.
 public final class FocusObserver {
@@ -77,6 +94,9 @@ public final class FocusObserver {
     private var observedElement: AXUIElement?
     private var pendingReason: Reason?
     private var workspaceToken: NSObjectProtocol?
+    /// Bumped on every attach and detach, so retries for an earlier app stop.
+    private var attachGeneration = 0
+    private var appSubscribed = false
 
     public init() {}
 
@@ -102,6 +122,8 @@ public final class FocusObserver {
     // MARK: attach / detach
 
     private func detach() {
+        attachGeneration += 1
+        appSubscribed = false
         if let obs = observer {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
         }
@@ -125,14 +147,38 @@ public final class FocusObserver {
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
 
         AXReader.enableManualAccessibility(pid: pid)
+        appSubscribed = subscribeApp(obs, pid: pid)
+        observeFocusedElement()
+        schedule(reason)
+        if AttachRetry.needed(appSubscribed: appSubscribed, elementObserved: observedElement != nil) {
+            retryAttach(attempt: 0, generation: attachGeneration)
+        }
+    }
+
+    /// App-level notifications; true when the focus notification is in place.
+    private func subscribeApp(_ obs: AXObserver, pid: pid_t) -> Bool {
         let appElement = AXUIElementCreateApplication(pid)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
-        AXObserverAddNotification(obs, appElement, kAXFocusedUIElementChangedNotification as CFString, refcon)
+        let focus = AXObserverAddNotification(obs, appElement, kAXFocusedUIElementChangedNotification as CFString, refcon)
         // Switching windows inside the same app does not always move focus notifications.
         AXObserverAddNotification(obs, appElement, kAXFocusedWindowChangedNotification as CFString, refcon)
         AXObserverAddNotification(obs, appElement, kAXMainWindowChangedNotification as CFString, refcon)
-        observeFocusedElement()
-        schedule(reason)
+        return AttachRetry.subscribed(focus)
+    }
+
+    /// Code review GT-12: try again while the app is still starting; read the field as soon as one appears.
+    private func retryAttach(attempt: Int, generation: Int) {
+        guard attempt < AttachRetry.delaysMs.count else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(AttachRetry.delaysMs[attempt])) { [weak self] in
+            guard let self, generation == self.attachGeneration, let obs = self.observer else { return }
+            if !self.appSubscribed { self.appSubscribed = self.subscribeApp(obs, pid: self.observedPID) }
+            let hadElement = self.observedElement != nil
+            self.observeFocusedElement()
+            if !hadElement, self.observedElement != nil { self.schedule(.focusChanged) }
+            if AttachRetry.needed(appSubscribed: self.appSubscribed, elementObserved: self.observedElement != nil) {
+                self.retryAttach(attempt: attempt + 1, generation: generation)
+            }
+        }
     }
 
     /// Subscribe to value/selection changes on the element that currently has focus.

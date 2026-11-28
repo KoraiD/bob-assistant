@@ -701,6 +701,9 @@ pub fn run() {
                 audit::record("app.exit", serde_json::json!({}));
                 crate::mcp::stop_control(None);
                 usage::flush();
+                if let Some(ghost) = app.try_state::<ghost::engine::GhostHandle>() {
+                    ghost.flush();
+                }
                 if let Some(brains) = app.try_state::<commands::Brains>() {
                     let brains = brains.inner().clone();
                     tauri::async_runtime::block_on(brains.stop_builtin());

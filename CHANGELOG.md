@@ -29,6 +29,10 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
 - Redaction also finds keys glued to other text by punctuation (CSV, tables, code, quotes) and long lowercase
   tokens that mix letters and digits, such as UUIDs.
 ### Fixed
+- Ghost Text now works in an app that comes to the front while it is still launching (a new TextEdit or Mail
+  window); before, suggestions only started after switching away and back.
+- Ghost Text: an accepted suggestion no longer waits for the phrase memory to be written to disk (5.6 ms
+  median before).
 - Ghost Text typo fixes: a fix never deletes characters you typed after the word, and BOB asks the model
   nothing about the half-corrected word.
 - Ghost Text in documents longer than 2,000 characters: typing through a suggestion works again instead of
