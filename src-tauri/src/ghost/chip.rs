@@ -126,6 +126,13 @@ fn line_end(raw: &str) -> usize {
 /// never empty or whitespace-only, never starts with a space when the caret already follows one, and
 /// never crosses a line or sentence boundary.
 pub fn polish(raw: &str, before_caret: &str) -> Option<String> {
+    polish_capped(raw, before_caret).map(|(s, _)| s)
+}
+
+/// [`polish`], plus whether a word or character cap cut text off. A cut means the next word had already
+/// started, so the chip's last word is complete and the stream can stop (code review GT-11: stopping at the
+/// sixth word while it was still streaming left "…of the repo" for "report").
+pub fn polish_capped(raw: &str, before_caret: &str) -> Option<(String, bool)> {
     let mut s: String = raw[..line_end(raw)].to_string();
 
     // After a space, the chip starts at the next word.
@@ -135,7 +142,9 @@ pub fn polish(raw: &str, before_caret: &str) -> Option<String> {
     if s.trim().is_empty() || is_meta(&s) {
         return None;
     }
-    if let Some(i) = degenerate_at(&s) {
+    // A degenerate word is cut whole, so what is left ends in a complete word.
+    let degenerate = degenerate_at(&s);
+    if let Some(i) = degenerate {
         s.truncate(i);
         if s.trim().is_empty() {
             return None;
@@ -216,6 +225,7 @@ pub fn polish(raw: &str, before_caret: &str) -> Option<String> {
             }
         }
     }
+    let mut capped = cut < s.len() || degenerate.is_some();
     s.truncate(cut);
     if s.chars().count() > MAX_CHARS {
         let limit = s
@@ -223,18 +233,20 @@ pub fn polish(raw: &str, before_caret: &str) -> Option<String> {
             .nth(MAX_CHARS)
             .map(|(i, _)| i)
             .unwrap_or(s.len());
-        let head = &s[..limit];
-        let at = head
+        // Cut before the last word that does not fit. A chip of one long word (a URL, a path) is dropped,
+        // never cut inside the word (code review GT-18).
+        let first_word = s.len() - s.trim_start().len();
+        let at = s[..limit]
             .rfind(char::is_whitespace)
-            .filter(|&p| p > 0)
-            .unwrap_or(limit);
+            .filter(|&p| p > first_word)?;
         s.truncate(at);
+        capped = true;
     }
     let s = s.trim_end().to_string();
     if s.trim().is_empty() {
         return None;
     }
-    Some(s)
+    Some((s, capped))
 }
 
 /// Split into pieces of "leading whitespace + one word", keeping every character.
@@ -297,11 +309,13 @@ pub fn gap_chip(raw: &str, before: &str, after: &str) -> Option<(String, bool)> 
             .rsplit(|c: char| !c.is_alphanumeric() && c != '\'')
             .next()
             .unwrap_or("");
-        let lower = text.to_lowercase();
-        if !lower.starts_with(&partial.to_lowercase()) || lower.len() == partial.len() {
+        // Character by character: a character whose lowercase has another length in bytes (the Kelvin sign
+        // "K") must not shift the cut into the middle of a character (code review GT-16).
+        let rest = strip_prefix_ignoring_case(&text, partial)?;
+        if rest.is_empty() {
             return None;
         }
-        text = text[partial.len()..].to_string();
+        text = rest.to_string();
     } else if !before.is_empty() && !before.ends_with(char::is_whitespace) {
         text.insert(0, ' ');
     }
@@ -325,16 +339,28 @@ pub fn gap_chip(raw: &str, before: &str, after: &str) -> Option<(String, bool)> 
     Some((text, done))
 }
 
-/// Whether the polished chip is complete, so the stream can be dropped early (saves generation time).
+/// `text` without a leading `prefix`, compared character by character without case.
+fn strip_prefix_ignoring_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let mut chars = text.char_indices();
+    for p in prefix.chars() {
+        let (_, t) = chars.next()?;
+        if !t.to_lowercase().eq(p.to_lowercase()) {
+            return None;
+        }
+    }
+    Some(chars.next().map_or("", |(i, _)| &text[i..]))
+}
+
+/// Whether the polished chip ends its sentence, so the stream can be dropped early (saves generation time).
+/// The word and character caps are reported by [`polish_capped`] instead: only a cap that actually cut text
+/// proves the last word is complete (code review GT-11).
 pub fn is_final(chip: &str) -> bool {
     // A closing quote or bracket ends the chip only after sentence punctuation (`done."`), not in the
     // middle of a sentence (`it's "fine" today`), which the Ghost matrix test caught.
     let t = chip.trim_end_matches(['"', ')', '”', '’', '\'']);
     let closed = t.len() < chip.len();
     let sentence = t.ends_with(['.', '!', '?', '。', '！', '？']);
-    (sentence && (closed || chip == t))
-        || chip.split_whitespace().count() >= MAX_WORDS
-        || chip.chars().count() >= MAX_CHARS - 4
+    sentence && (closed || chip == t)
 }
 
 /// Result of the user typing while a chip is visible.
@@ -368,6 +394,11 @@ pub fn accept_word(chip: &str) -> (String, String) {
     let rest = &chip[lead..];
     let word_len = rest.find(char::is_whitespace).unwrap_or(rest.len());
     let split = lead + word_len;
+    // The space a suggestion inside a sentence owns ("latest " before "report") goes with its last word
+    // (code review GT-05: "latestreport").
+    if chip[split..].trim().is_empty() {
+        return (chip.to_string(), String::new());
+    }
     (chip[..split].to_string(), chip[split..].to_string())
 }
 
@@ -660,8 +691,47 @@ mod tests {
     #[test]
     fn completion_detection() {
         assert!(is_final(" as soon as possible."));
-        assert!(is_final(" one two three four five six"));
         assert!(!is_final(" as soon"));
+        // Code review GT-11: six words are complete only once a seventh has started.
+        assert!(!is_final(" one two three four five six"));
+        assert_eq!(
+            polish_capped(" the latest version of the repo", "Please review"),
+            Some((" the latest version of the repo".into(), false))
+        );
+        assert_eq!(
+            polish_capped(" the latest version of the report to", "Please review"),
+            Some((" the latest version of the report".into(), true))
+        );
+    }
+
+    /// Code review GT-18: one word longer than the character cap is dropped, never cut.
+    #[test]
+    fn a_word_longer_than_the_cap_is_never_cut() {
+        let url = format!(" https://example.com/{}", "abcdefgh".repeat(8));
+        assert_eq!(polish(&url, "see"), None);
+        let two = format!(" see https://example.com/{}", "abcdefgh".repeat(8));
+        assert_eq!(polish_capped(&two, "please"), Some((" see".into(), true)));
+    }
+
+    /// Code review GT-16: a partial word is matched character by character.
+    #[test]
+    fn a_partial_word_is_completed_by_characters_not_bytes() {
+        assert_eq!(
+            gap_chip("\u{212A}elvin]", "the k", " scale"),
+            Some(("elvin".into(), true))
+        );
+        assert_eq!(
+            gap_chip("ÉTÉ]", "en é", " prochain"),
+            Some(("TÉ".into(), true))
+        );
+    }
+
+    /// Code review GT-05: the space a gap suggestion owns goes with its last word.
+    #[test]
+    fn tab_keeps_the_space_a_gap_suggestion_owns() {
+        assert_eq!(accept_word("latest "), ("latest ".into(), String::new()));
+        assert_eq!(accept_word(" next one "), (" next".into(), " one ".into()));
+        assert_eq!(accept_word(" you as"), (" you".into(), " as".into()));
     }
 
     fn arb_chip() -> impl Strategy<Value = String> {
@@ -669,6 +739,15 @@ mod tests {
     }
 
     proptest! {
+        /// Code review GT-16: any Unicode in the model's answer or the user's text never panics, and a partial
+        /// word is completed with whole characters.
+        #[test]
+        fn gap_chip_handles_any_unicode(raw in "\\PC{0,24}\\]?", before in "\\PC{0,12}", after in "\\PC{0,12}") {
+            if let Some((chip, _)) = gap_chip(&raw, &before, &after) {
+                prop_assert!(!chip.is_empty());
+            }
+            let _ = polish_capped(&raw, &before);
+        }
         /// GT-15 / P3: whatever the model says, a chip respects the caps, is never blank, and never
         /// crosses a line break.
         #[test]

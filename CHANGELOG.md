@@ -29,6 +29,10 @@ All notable changes to BOB. The format follows [Keep a Changelog](https://keepac
 - Redaction also finds keys glued to other text by punctuation (CSV, tables, code, quotes) and long lowercase
   tokens that mix letters and digits, such as UUIDs.
 ### Fixed
+- Ghost Text: a suggestion no longer ends in the middle of a word ("…of the repo") when it reaches six words
+  or the length limit; one very long word (a URL) is not suggested cut off.
+- Ghost Text: Tab on a suggestion inside a sentence keeps its space ("latest report", not "latestreport").
+- Ghost Text: a word with characters such as the Kelvin sign no longer stops the suggestion.
 - Ghost Text: a suggestion that was dismissed with `Esc` while it was still arriving no longer comes back.
 - Ghost Text: `⇧Tab` inserts what was on screen (finishing its last word), not words that arrived after the
   key press.

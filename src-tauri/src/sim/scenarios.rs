@@ -163,7 +163,6 @@ async fn h4_backspace_right_after_an_accept_is_seen() {
 
 /// H5 (GT-05): Tab on a suggestion inside a sentence drops the space the suggestion owns ("latestreport").
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-05: Tab drops the trailing space of a gap chip"]
 async fn h5_a_gap_suggestion_keeps_its_space() {
     let text = "Send me the report today.";
     let config = Config::new(1, TEXTEDIT, Model::Table(vec![("Send me the ", "latest]")]))
@@ -327,7 +326,6 @@ async fn gt10_moving_the_caret_back_does_not_revive_the_chip() {
 /// is only half streamed (models split long words into several tokens: " repo" + "rt"), so the chip ends in
 /// the middle of a word. The sixth word must be finished first.
 #[tokio::test(start_paused = true)]
-#[ignore = "GT-11: the six-word stop can end a chip in the middle of a word"]
 async fn gt11_the_word_cap_never_cuts_a_word() {
     let model = Model::Table(vec![(
         "Please review",

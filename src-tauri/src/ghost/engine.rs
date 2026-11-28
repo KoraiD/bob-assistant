@@ -392,13 +392,13 @@ pub async fn suggest_once(
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while let Ok(Some(item)) = tokio::time::timeout_at(deadline, stream.next()).await {
         raw.push_str(&item.map_err(|e| e.to_string())?);
-        let Some(polished) = chip::polish(&raw, &before) else {
+        let Some((polished, capped)) = chip::polish_capped(&raw, &before) else {
             continue;
         };
         let filtered = crate::context::languages::filter_chip(&polished, &before, &languages);
         let cut = filtered.as_deref() != Some(polished.as_str());
         best = filtered.clone();
-        if filtered.is_none() || cut || chip::is_final(&polished) {
+        if filtered.is_none() || cut || capped || chip::is_final(&polished) {
             break;
         }
     }
@@ -1109,8 +1109,9 @@ impl Engine {
                         None if raw.contains(']') => break,
                         None => continue,
                     },
-                    None => match chip::polish(&raw, &before) {
-                        Some(c) => (c, false),
+                    // A cap that cut text proves the last word is complete (code review GT-11).
+                    None => match chip::polish_capped(&raw, &before) {
+                        Some((c, capped)) => (c, capped),
                         None => {
                             log::trace!(
                                 "ghost: {} raw chars, nothing worth showing yet",

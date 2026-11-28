@@ -47,8 +47,9 @@ async fn textedit_type_pause_tab_and_shift_tab() {
     .await;
     print(&r, true);
     assert!(r.defects.is_empty(), "{:?}", r.defects);
-    // The chip stops at the six-word cap (`chip::MAX_WORDS`), before the model's final period.
-    assert_eq!(r.text, format!("{TYPED} you as soon as I can"));
+    // Six words and the sentence's period: the stream stops at the period, not as soon as the sixth word
+    // appears (code review GT-11).
+    assert_eq!(r.text, format!("{TYPED} you as soon as I can."));
     assert_eq!(r.stats.accepts, 2);
     // Typing at 180 ms per key cancels most requests before the quiet gate; the last one streams.
     assert!(
